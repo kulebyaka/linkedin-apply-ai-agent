@@ -1,0 +1,95 @@
+{
+  "contact": {
+    "full_name": "John Doe",
+    "email": "john.doe@example.com",
+    "phone": "+1-234-567-8900",
+    "location": "San Francisco, CA",
+    "linkedin_url": "https://linkedin.com/in/johndoe",
+    "github_url": "https://github.com/johndoe",
+    "portfolio_url": "https://johndoe.dev"
+  },
+  "summary": "Experienced software engineer with 10+ years of expertise in full-stack development, cloud architecture, and AI/ML systems. Proven track record of building scalable applications and leading engineering teams. Passionate about leveraging technology to solve complex business problems.",
+  "experiences": [
+    {
+      "company": "Tech Corp",
+      "position": "Senior Software Engineer",
+      "start_date": "2020-03-01",
+      "end_date": null,
+      "is_current": true,
+      "location": "San Francisco, CA (Remote)",
+      "description": "Lead engineer for cloud-native microservices platform serving 10M+ users. Architect and implement scalable backend systems using Python, Go, and AWS.",
+      "achievements": [
+        "Reduced API response time by 60% through optimization and caching strategies",
+        "Led migration from monolith to microservices, improving deployment frequency by 10x",
+        "Mentored 5 junior engineers and established code review best practices"
+      ],
+      "technologies": ["Python", "Go", "AWS", "Kubernetes", "PostgreSQL", "Redis", "Docker"]
+    },
+    {
+      "company": "StartupXYZ",
+      "position": "Full Stack Developer",
+      "start_date": "2017-06-01",
+      "end_date": "2020-02-28",
+      "is_current": false,
+      "location": "New York, NY",
+      "description": "Built and maintained web applications for e-commerce platform. Developed both frontend and backend features.",
+      "achievements": [
+        "Implemented real-time inventory system reducing overselling by 95%",
+        "Developed RESTful APIs serving 100K+ daily requests",
+        "Created responsive React frontend with 98% lighthouse score"
+      ],
+      "technologies": ["JavaScript", "React", "Node.js", "MongoDB", "Express", "AWS"]
+    }
+  ],
+  "education": [
+    {
+      "institution": "University of California, Berkeley",
+      "degree": "Bachelor of Science",
+      "field_of_study": "Computer Science",
+      "start_date": "2013-09-01",
+      "end_date": "2017-05-31",
+      "gpa": "3.8",
+      "achievements": [
+        "Dean's List all semesters",
+        "President of Computer Science Club",
+        "Winner of Annual Hackathon 2016"
+      ]
+    }
+  ],
+  "skills": [
+    {"name": "Python", "category": "Programming Languages", "proficiency": "Expert"},
+    {"name": "JavaScript/TypeScript", "category": "Programming Languages", "proficiency": "Expert"},
+    {"name": "Go", "category": "Programming Languages", "proficiency": "Intermediate"},
+    {"name": "React", "category": "Frameworks", "proficiency": "Expert"},
+    {"name": "Node.js", "category": "Frameworks", "proficiency": "Expert"},
+    {"name": "FastAPI", "category": "Frameworks", "proficiency": "Expert"},
+    {"name": "AWS", "category": "Cloud & DevOps", "proficiency": "Expert"},
+    {"name": "Docker", "category": "Cloud & DevOps", "proficiency": "Expert"},
+    {"name": "Kubernetes", "category": "Cloud & DevOps", "proficiency": "Intermediate"},
+    {"name": "PostgreSQL", "category": "Databases", "proficiency": "Expert"},
+    {"name": "MongoDB", "category": "Databases", "proficiency": "Intermediate"},
+    {"name": "Redis", "category": "Databases", "proficiency": "Intermediate"}
+  ],
+  "projects": [
+    {
+      "name": "Open Source ML Pipeline",
+      "description": "Built and maintain popular open-source ML pipeline framework with 5K+ GitHub stars",
+      "url": "https://github.com/johndoe/ml-pipeline",
+      "technologies": ["Python", "TensorFlow", "Docker", "Kubernetes"],
+      "achievements": [
+        "Used by 100+ companies in production",
+        "Featured in PyData Conference 2022",
+        "Active community of 50+ contributors"
+      ]
+    }
+  ],
+  "certifications": [
+    "AWS Certified Solutions Architect - Professional",
+    "Kubernetes Application Developer (CKAD)",
+    "MongoDB Certified Developer"
+  ],
+  "languages": [
+    {"language": "English", "level": "Native"},
+    {"language": "Spanish", "level": "Professional Working Proficiency"}
+  ]
+}

@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  linkedin-apply-ai-agent:
+    build: .
+    container_name: linkedin-apply-ai-agent
+    ports:
+      - "8000:8000"
+    environment:
+      - DEBUG=${DEBUG:-false}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    restart: unless-stopped
+    networks:
+      - linkedin-apply-ai-agent-network
+
+  # Optional: Frontend UI service (to be implemented)
+  # frontend:
+  #   build: ./src/ui
+  #   container_name: linkedin-apply-ai-agent-ui
+  #   ports:
+  #     - "3000:3000"
+  #   environment:
+  #     - REACT_APP_API_URL=http://localhost:8000
+  #   depends_on:
+  #     - linkedin-apply-ai-agent
+  #   networks:
+  #     - linkedin-apply-ai-agent-network
+
+networks:
+  linkedin-apply-ai-agent-network:
+    driver: bridge
+
+volumes:
+  data:
+  logs:

@@ -1,0 +1,60 @@
+[project]
+name = "linkedin-apply-ai-agent"
+version = "0.1.0"
+description = "Automated LinkedIn job application agent with LLM-powered CV tailoring and HITL approval"
+authors = [
+    {name = "kulebyaka", email = "kiril.elizarov@gmail.com"}
+]
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+
+dependencies = [
+    "python-dotenv>=1.0.0",
+    "pydantic>=2.5.3",
+    "pydantic-settings>=2.1.0",
+    "langgraph>=0.2.0",
+    "langchain>=0.1.0",
+    "openai>=1.10.0",
+    "anthropic>=0.18.0",
+    "fastapi>=0.109.0",
+    "uvicorn[standard]>=0.27.0",
+    "playwright>=1.41.0",
+    "weasyprint>=60.2",
+    "httpx>=0.26.0",
+    "sqlalchemy>=2.0.25",
+    "apscheduler>=3.10.4",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.1.0",
+    "black>=23.9.0",
+    "ruff>=0.1.0",
+    "mypy>=1.6.0",
+]
+
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.ruff]
+line-length = 100
+select = ["E", "F", "I", "N", "W", "B", "C4", "UP"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
