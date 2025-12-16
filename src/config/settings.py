@@ -22,21 +22,21 @@ class Settings(BaseSettings):
     primary_llm_provider: str = "openai"  # openai, deepseek, grok, anthropic
     fallback_llm_provider: Optional[str] = "deepseek"
 
-    # OpenAI
+    # OpenAI - Use gpt-4o or newer for strict JSON Schema support
     openai_api_key: Optional[str] = None
-    openai_model: str = "gpt-4"
+    openai_model: str = "gpt-4o"  # gpt-4o supports structured outputs with 100% schema adherence
 
-    # DeepSeek
+    # DeepSeek - Supports json_object mode only (not strict schemas)
     deepseek_api_key: Optional[str] = None
     deepseek_model: str = "deepseek-chat"
 
-    # Grok
+    # Grok - Use grok-2-1212 or newer for structured output support
     grok_api_key: Optional[str] = None
-    grok_model: str = "grok-beta"
+    grok_model: str = "grok-2-1212"  # First version with structured outputs
 
-    # Anthropic
+    # Anthropic - Use Claude Sonnet 4.5+ for structured output support
     anthropic_api_key: Optional[str] = None
-    anthropic_model: str = "claude-3-5-sonnet-20241022"
+    anthropic_model: str = "claude-sonnet-4.5"  # Supports structured outputs (beta)
 
     # Paths
     data_dir: str = "./data"
