@@ -68,6 +68,22 @@ class CV(BaseModel):
     languages: List[dict] = Field(default_factory=list)  # {"language": "English", "level": "Native"}
 
 
+class ExperienceRequirements(BaseModel):
+    """Experience requirements from job description"""
+    years: Optional[int] = None
+    level: Optional[str] = None  # "junior", "mid", "senior", "lead", "staff"
+
+
+class JobSummary(BaseModel):
+    """Structured summary of job requirements extracted from job description"""
+    technical_skills: List[str] = Field(default_factory=list)
+    soft_skills: List[str] = Field(default_factory=list)
+    education_reqs: List[str] = Field(default_factory=list)
+    experience_reqs: ExperienceRequirements = Field(default_factory=ExperienceRequirements)
+    responsibilities: List[str] = Field(default_factory=list)
+    nice_to_have: List[str] = Field(default_factory=list)
+
+
 class TailoredCV(BaseModel):
     """Tailored CV for a specific job"""
     job_id: str

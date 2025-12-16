@@ -1,0 +1,161 @@
+{
+  "contact": {
+    "full_name": "John Doe",
+    "email": "john.doe@example.com",
+    "phone": "+1-555-0100",
+    "location": "San Francisco, CA",
+    "linkedin_url": "https://linkedin.com/in/johndoe",
+    "github_url": "https://github.com/johndoe",
+    "portfolio_url": "https://johndoe.dev"
+  },
+  "summary": "Experienced software engineer with 8+ years in full-stack development, specializing in Python, JavaScript, and cloud technologies. Proven track record of delivering scalable solutions.",
+  "experiences": [
+    {
+      "company": "Tech Corp",
+      "position": "Senior Software Engineer",
+      "start_date": "2020-01-15",
+      "end_date": null,
+      "is_current": true,
+      "location": "San Francisco, CA",
+      "description": "Lead development of cloud-based microservices platform",
+      "achievements": [
+        "Architected and implemented microservices platform serving 1M+ users",
+        "Reduced infrastructure costs by 40% through optimization",
+        "Led team of 5 engineers in agile environment"
+      ],
+      "technologies": ["Python", "Django", "AWS", "Docker", "Kubernetes", "PostgreSQL", "Redis"]
+    },
+    {
+      "company": "Startup Inc",
+      "position": "Full Stack Developer",
+      "start_date": "2017-06-01",
+      "end_date": "2019-12-31",
+      "is_current": false,
+      "location": "San Francisco, CA",
+      "description": "Developed web applications using modern JavaScript frameworks",
+      "achievements": [
+        "Built real-time analytics dashboard processing 100K events/day",
+        "Implemented CI/CD pipeline reducing deployment time by 60%",
+        "Mentored 3 junior developers"
+      ],
+      "technologies": ["JavaScript", "React", "Node.js", "MongoDB", "GraphQL", "AWS Lambda"]
+    },
+    {
+      "company": "Enterprise Solutions",
+      "position": "Junior Developer",
+      "start_date": "2015-09-01",
+      "end_date": "2017-05-31",
+      "is_current": false,
+      "location": "San Jose, CA",
+      "description": "Maintained and enhanced legacy enterprise applications",
+      "achievements": [
+        "Migrated legacy Java application to modern Spring Boot",
+        "Improved application performance by 30%"
+      ],
+      "technologies": ["Java", "Spring Boot", "MySQL", "JavaScript", "jQuery"]
+    }
+  ],
+  "education": [
+    {
+      "institution": "Stanford University",
+      "degree": "Bachelor of Science",
+      "field_of_study": "Computer Science",
+      "start_date": "2011-09-01",
+      "end_date": "2015-06-15",
+      "gpa": "3.8",
+      "achievements": [
+        "Dean's List all semesters",
+        "President of CS Club",
+        "Graduated Magna Cum Laude"
+      ]
+    }
+  ],
+  "skills": [
+    {
+      "name": "Python",
+      "category": "Programming Languages",
+      "proficiency": "expert"
+    },
+    {
+      "name": "JavaScript",
+      "category": "Programming Languages",
+      "proficiency": "advanced"
+    },
+    {
+      "name": "Java",
+      "category": "Programming Languages",
+      "proficiency": "intermediate"
+    },
+    {
+      "name": "Django",
+      "category": "Frameworks",
+      "proficiency": "expert"
+    },
+    {
+      "name": "React",
+      "category": "Frameworks",
+      "proficiency": "advanced"
+    },
+    {
+      "name": "Node.js",
+      "category": "Frameworks",
+      "proficiency": "advanced"
+    },
+    {
+      "name": "AWS",
+      "category": "Cloud & DevOps",
+      "proficiency": "advanced"
+    },
+    {
+      "name": "Docker",
+      "category": "Cloud & DevOps",
+      "proficiency": "advanced"
+    },
+    {
+      "name": "Kubernetes",
+      "category": "Cloud & DevOps",
+      "proficiency": "intermediate"
+    },
+    {
+      "name": "PostgreSQL",
+      "category": "Databases",
+      "proficiency": "advanced"
+    },
+    {
+      "name": "MongoDB",
+      "category": "Databases",
+      "proficiency": "intermediate"
+    }
+  ],
+  "projects": [
+    {
+      "name": "OpenSource ML Library",
+      "description": "Developed machine learning library for time-series prediction",
+      "url": "https://github.com/johndoe/ml-lib",
+      "technologies": ["Python", "TensorFlow", "NumPy", "Pandas"],
+      "achievements": [
+        "1000+ GitHub stars",
+        "Used by 50+ companies"
+      ]
+    },
+    {
+      "name": "Real-time Chat Application",
+      "description": "Built scalable chat application with WebSocket support",
+      "url": null,
+      "technologies": ["Node.js", "Socket.io", "Redis", "React"],
+      "achievements": [
+        "Supports 10K concurrent connections",
+        "99.9% uptime"
+      ]
+    }
+  ],
+  "certifications": [
+    "AWS Certified Solutions Architect - Associate (2022)",
+    "MongoDB Certified Developer (2019)",
+    "Certified Kubernetes Administrator (2021)"
+  ],
+  "languages": [
+    {"language": "English", "level": "Native"},
+    {"language": "Spanish", "level": "Professional"}
+  ]
+}

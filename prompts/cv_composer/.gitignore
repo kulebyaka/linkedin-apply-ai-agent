@@ -1,0 +1,6 @@
+# Ignore user-customized prompts (don't commit personal tweaks)
+*.txt
+
+# Keep example prompts in version control
+!examples/
+!examples/*.txt

@@ -1,0 +1,25 @@
+# Test dependencies
+
+# Core testing framework
+pytest>=7.4.0
+pytest-cov>=4.1.0
+pytest-mock>=3.11.1
+pytest-asyncio>=0.21.0
+
+# Mocking and fixtures
+faker>=19.0.0
+
+# Code quality
+black>=23.7.0
+flake8>=6.1.0
+mypy>=1.5.0
+isort>=5.12.0
+
+# Coverage reporting
+coverage[toml]>=7.3.0
+
+# LLM Evaluation with DeepEval
+deepeval>=0.21.0
+openai>=1.0.0  # Required for Grok (OpenAI-compatible API)
+sentence-transformers>=2.2.0
+nltk>=3.8.0
