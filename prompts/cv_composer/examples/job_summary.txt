@@ -1,0 +1,27 @@
+You are an expert recruiter analyzing job descriptions. Extract key information from the following job description.
+
+Job Description:
+$job_description
+
+Extract and structure the following information:
+1. Technical Skills Required: List all programming languages, frameworks, tools, and technologies
+2. Soft Skills Required: List interpersonal skills, communication abilities, work style preferences
+3. Educational Requirements: Degrees, certifications, or educational background mentioned
+4. Experience Requirements: Years of experience, seniority level (junior/mid/senior)
+5. Key Responsibilities: Main duties and tasks of the role
+6. Nice-to-Have Skills: Optional/preferred qualifications that would be a plus
+
+Return your analysis as valid JSON with the following structure:
+{
+  "technical_skills": ["skill1", "skill2", ...],
+  "soft_skills": ["skill1", "skill2", ...],
+  "education_reqs": ["requirement1", "requirement2", ...],
+  "experience_reqs": {
+    "years": number or null,
+    "level": "junior|mid|senior|lead|staff" or null
+  },
+  "responsibilities": ["responsibility1", "responsibility2", ...],
+  "nice_to_have": ["skill1", "skill2", ...]
+}
+
+Be thorough and extract all relevant information. If any category has no information, use an empty array or null.

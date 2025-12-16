@@ -1,0 +1,89 @@
+{
+  "contact": {
+    "email": "junior.dev@example.com",
+    "phone": "555-0199",
+    "linkedin": "https://linkedin.com/in/juniordev",
+    "github": "https://github.com/juniordev",
+    "portfolio": null
+  },
+  "summary": "Recent computer science graduate with internship experience in Python development. Eager to learn and contribute to team projects.",
+  "experiences": [
+    {
+      "company": "Tech Startup Inc",
+      "position": "Software Engineering Intern",
+      "start_date": "2024-06-01",
+      "end_date": "2024-08-31",
+      "is_current": false,
+      "location": "Remote",
+      "description": "Summer internship working on backend services",
+      "achievements": [
+        "Built REST API endpoints using Flask",
+        "Wrote unit tests achieving 80% coverage",
+        "Fixed 15 bugs in the codebase"
+      ],
+      "technologies": ["Python", "Flask", "PostgreSQL", "Git", "Docker"]
+    }
+  ],
+  "education": [
+    {
+      "institution": "State University",
+      "degree": "Bachelor of Science",
+      "field_of_study": "Computer Science",
+      "start_date": "2020-09-01",
+      "end_date": "2024-05-15",
+      "gpa": 3.6,
+      "achievements": [
+        "Dean's List (2023, 2024)",
+        "Relevant coursework: Data Structures, Algorithms, Database Systems, Web Development"
+      ]
+    }
+  ],
+  "skills": [
+    {
+      "name": "Python",
+      "category": "Programming Languages",
+      "proficiency": "intermediate"
+    },
+    {
+      "name": "JavaScript",
+      "category": "Programming Languages",
+      "proficiency": "beginner"
+    },
+    {
+      "name": "Flask",
+      "category": "Frameworks",
+      "proficiency": "beginner"
+    },
+    {
+      "name": "PostgreSQL",
+      "category": "Databases",
+      "proficiency": "beginner"
+    },
+    {
+      "name": "Git",
+      "category": "Tools",
+      "proficiency": "intermediate"
+    }
+  ],
+  "projects": [
+    {
+      "name": "Personal Portfolio Website",
+      "description": "Built personal portfolio using Flask and deployed to Heroku",
+      "url": "https://github.com/juniordev/portfolio",
+      "start_date": "2024-01-01",
+      "end_date": "2024-03-01",
+      "technologies": ["Python", "Flask", "HTML", "CSS", "Heroku"],
+      "achievements": [
+        "Implemented responsive design",
+        "Integrated contact form with email notifications"
+      ]
+    }
+  ],
+  "certifications": [],
+  "languages": [
+    {
+      "language": "English",
+      "level": "Native"
+    }
+  ]
+}

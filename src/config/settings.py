@@ -44,11 +44,20 @@ class Settings(BaseSettings):
     jobs_dir: str = "./data/jobs"
     generated_cvs_dir: str = "./data/generated_cvs"
     master_cv_path: str = "./data/cv/master_cv.json"
+    prompts_dir: str = "./prompts/cv_composer"
 
     # Workflow
     job_fetch_interval_hours: int = 1
     max_concurrent_applications: int = 3
     browser_headless: bool = True
+
+    # CV Composer Settings
+    cv_composer_temperature_summary: float = 0.5  # Creative for professional summary
+    cv_composer_temperature_job_analysis: float = 0.3  # Precise for job analysis
+    cv_composer_temperature_sections: float = 0.4  # Balanced for CV sections
+    cv_composer_max_retries: int = 3  # Max retries for JSON generation
+    cv_composer_enable_hallucination_checks: bool = True  # Validate against master CV
+    cv_composer_model_override: Optional[str] = None  # Override LLM model for CV composition
 
     # Notifications
     webhook_url: Optional[str] = None

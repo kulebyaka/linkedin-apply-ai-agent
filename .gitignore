@@ -77,6 +77,11 @@ data/jobs/
 data/generated_cvs/
 !data/cv/master_cv.example.json
 
+# Prompts (ignore user customizations, keep examples)
+prompts/cv_composer/*.txt
+!prompts/cv_composer/examples/
+!prompts/cv_composer/examples/*.txt
+
 # Logs
 logs/
 *.log
@@ -92,3 +97,4 @@ test-results/
 
 # Agents
 .claude/
+Obsolete

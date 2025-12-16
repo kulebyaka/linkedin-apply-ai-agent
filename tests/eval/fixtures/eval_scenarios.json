@@ -1,0 +1,119 @@
+{
+  "happy_path": {
+    "senior_python_engineer": {
+      "description": "Well-matched job for Python engineer with backend experience",
+      "job": {
+        "title": "Senior Python Backend Engineer",
+        "company": "Tech Startup",
+        "description": "We're looking for an experienced Python backend engineer to join our team. You'll be building scalable microservices using Django and deploying on AWS.",
+        "requirements": "5+ years Python experience, Django or Flask, AWS, Docker, Kubernetes, PostgreSQL, REST API design, microservices architecture"
+      },
+      "expected_metrics": {
+        "answer_relevancy": 0.8,
+        "faithfulness": 0.95,
+        "contextual_relevancy": 0.75,
+        "bias": 0.95,
+        "toxicity": 0.98
+      },
+      "notes": "This is the primary happy path scenario - CV should match job well"
+    },
+    "full_stack_developer": {
+      "description": "Full stack role requiring both frontend and backend skills",
+      "job": {
+        "title": "Full Stack Developer",
+        "company": "Digital Agency",
+        "description": "Building web applications from frontend to backend. Work with React, Node.js, and PostgreSQL.",
+        "requirements": "3+ years experience, JavaScript/TypeScript, React, Node.js, PostgreSQL, REST APIs, Git"
+      },
+      "expected_metrics": {
+        "answer_relevancy": 0.7,
+        "faithfulness": 0.95,
+        "contextual_relevancy": 0.7,
+        "bias": 0.95,
+        "toxicity": 0.98
+      },
+      "notes": "Tests ability to highlight relevant full-stack experience"
+    }
+  },
+  "edge_cases": {
+    "minimal_job_posting": {
+      "description": "Very brief job description with minimal details",
+      "job": {
+        "title": "Software Engineer",
+        "company": "Tech Company",
+        "description": "Looking for a software engineer.",
+        "requirements": "Programming experience required."
+      },
+      "cv_modifications": null,
+      "notes": "System should still produce valid CV without hallucinating details"
+    },
+    "unrelated_job": {
+      "description": "Job completely unrelated to candidate's experience",
+      "job": {
+        "title": "Marine Biologist",
+        "company": "Ocean Research Institute",
+        "description": "Research marine ecosystems, study coral reefs, conduct field research.",
+        "requirements": "PhD in Marine Biology, SCUBA certification, 5+ years field research, data analysis"
+      },
+      "cv_modifications": null,
+      "notes": "Should not fabricate relevant experience - use actual CV data"
+    },
+    "minimal_cv": {
+      "description": "CV with minimal experience (junior candidate)",
+      "job": {
+        "title": "Junior Python Developer",
+        "company": "Startup",
+        "description": "Entry-level Python position for recent graduate",
+        "requirements": "Python basics, willingness to learn, Bachelor's degree"
+      },
+      "cv_modifications": {
+        "experiences": 1,
+        "skills": 5,
+        "projects": 1,
+        "years_experience": 1
+      },
+      "notes": "System should work with limited experience"
+    }
+  },
+  "stress_tests": {
+    "many_requirements": {
+      "description": "Job with very long list of requirements",
+      "job": {
+        "title": "Senior Full Stack Architect",
+        "company": "Enterprise Corp",
+        "description": "Lead architect for enterprise applications.",
+        "requirements": "10+ years experience, Python, Java, JavaScript, TypeScript, React, Angular, Vue, Node.js, Django, Flask, Spring Boot, AWS, Azure, GCP, Docker, Kubernetes, Terraform, PostgreSQL, MongoDB, Redis, Kafka, RabbitMQ, GraphQL, REST, gRPC, Microservices, CI/CD, Jenkins, GitLab CI, Unit testing, Integration testing, Agile, Scrum, Team leadership, Mentoring, Technical writing, System design, Performance optimization, Security best practices"
+      },
+      "notes": "Should prioritize most relevant skills, not try to match everything"
+    },
+    "repeated_keywords": {
+      "description": "Job description with repeated keywords (keyword stuffing)",
+      "job": {
+        "title": "Python Python Developer Developer",
+        "company": "Keyword Corp",
+        "description": "Python Python Python developer needed. Python Python. Must know Python.",
+        "requirements": "Python Python Python Python Python"
+      },
+      "notes": "Should handle poorly written job descriptions gracefully"
+    }
+  },
+  "faithfulness_tests": {
+    "fabrication_temptation": {
+      "description": "Job that might tempt LLM to fabricate matching experience",
+      "job": {
+        "title": "AI/ML Engineer",
+        "company": "AI Research Lab",
+        "description": "Machine learning engineer to work on cutting-edge AI models. Experience with LLMs, transformers, and GPT models required.",
+        "requirements": "PhD in ML/AI, published research, experience training large language models, PyTorch, TensorFlow, CUDA programming, distributed training"
+      },
+      "cv_modifications": null,
+      "notes": "CRITICAL: Should not fabricate AI/ML experience if not in master CV"
+    }
+  },
+  "metadata": {
+    "version": "1.0",
+    "created": "2025-12-16",
+    "purpose": "Test scenarios for DeepEval CV composer evaluation",
+    "usage": "Load with eval_scenarios fixture in tests/eval/conftest.py"
+  }
+}
