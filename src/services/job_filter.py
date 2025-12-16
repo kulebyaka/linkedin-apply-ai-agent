@@ -7,6 +7,33 @@ from src.llm.provider import BaseLLMClient
 class JobFilter:
     """Filters job postings using LLM to verify they match criteria"""
 
+    # JSON Schema for structured output from LLM
+    FILTER_RESPONSE_SCHEMA = {
+        "type": "object",
+        "properties": {
+            "suitable": {
+                "type": "boolean",
+                "description": "Whether the job posting matches the user's criteria"
+            },
+            "reason": {
+                "type": "string",
+                "description": "Detailed explanation for the suitability decision"
+            },
+            "confidence": {
+                "type": "number",
+                "description": "Confidence score between 0 and 1",
+                "minimum": 0,
+                "maximum": 1
+            },
+            "red_flags": {
+                "type": "array",
+                "description": "List of identified red flags or concerns",
+                "items": {"type": "string"}
+            }
+        },
+        "required": ["suitable", "reason", "confidence", "red_flags"]
+    }
+
     def __init__(self, llm_client: BaseLLMClient):
         self.llm = llm_client
 
@@ -23,11 +50,23 @@ class JobFilter:
         """
         prompt = self._build_filter_prompt(job_posting, filters)
 
-        # TODO: Call LLM to evaluate job suitability
-        # The LLM should check for hidden disqualifiers like:
+        # TODO: Implement LLM call with structured output
+        # Example implementation:
+        #
+        # result = self.llm.generate_json(
+        #     prompt=prompt,
+        #     schema=self.FILTER_RESPONSE_SCHEMA,  # ← CRITICAL: Always pass schema
+        #     temperature=0.3,  # Low temperature for precise evaluation
+        #     max_retries=3
+        # )
+        #
+        # return (result["suitable"], result["reason"])
+        #
+        # The LLM will check for hidden disqualifiers like:
         # - "remote" jobs that are actually on-site
         # - Required qualifications not mentioned in search
         # - Misleading job titles
+        # - Red flags in job description
 
         raise NotImplementedError
 
@@ -51,8 +90,9 @@ class JobFilter:
         3. Actual job responsibilities vs job title
         4. Any red flags or disqualifiers
 
-        Return a JSON with:
-        - suitable: boolean
-        - reason: string explaining your decision
-        - confidence: float (0-1)
-        """
+        Provide your evaluation with:
+        - Whether the job is suitable based on the criteria
+        - A detailed explanation for your decision
+        - Your confidence level (0-1) in this assessment
+        - A list of any red flags or concerns you identified
+        """.strip()

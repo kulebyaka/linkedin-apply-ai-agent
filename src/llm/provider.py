@@ -1,4 +1,40 @@
-"""LLM provider abstraction for multi-model support"""
+"""
+LLM provider abstraction for multi-model support
+
+This module implements native structured output support for multiple LLM providers,
+eliminating reliance on prompt-based JSON generation for improved reliability.
+
+Structured Output Capabilities by Provider:
+-------------------------------------------
+
+1. OpenAI (GPT-4, GPT-3.5-turbo, etc.)
+   - Supports: Strict JSON Schema enforcement via response_format
+   - Method: {"type": "json_schema", "json_schema": {...}} with "strict": True
+   - Reliability: 100% schema adherence (per OpenAI benchmarks)
+   - Models: GPT-4o and newer models
+
+2. Anthropic (Claude Sonnet 4.5, Opus 4.1, Haiku 4.5)
+   - Supports: Strict JSON Schema enforcement via output_format
+   - Method: output_format with "strict": True, requires beta header
+   - Beta Header: "anthropic-beta: structured-outputs-2025-11-13"
+   - Reliability: Guaranteed schema compliance using constrained decoding
+   - Released: December 4, 2025 (public beta)
+
+3. Grok (xAI - grok-2-1212 and newer)
+   - Supports: Strict JSON Schema enforcement via response_format
+   - Method: {"type": "json_schema", "json_schema": {...}} (OpenAI-compatible)
+   - Reliability: Schema-guaranteed outputs
+   - Models: All models after grok-2-1212
+
+4. DeepSeek (OpenAI-compatible API)
+   - Supports: json_object mode only (NOT strict JSON Schema)
+   - Method: {"type": "json_object"} with JSON keyword in prompt
+   - Reliability: Improved JSON generation but requires manual validation
+   - Limitation: Cannot enforce strict schema compliance natively
+
+All providers use native structured outputs when a schema is provided to reduce
+JSON parsing errors and improve reliability.
+"""
 
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
@@ -103,31 +139,36 @@ class OpenAIClient(BaseLLMClient):
         max_retries: int = 3,
         **kwargs
     ) -> Dict:
-        """Generate structured JSON output using OpenAI"""
-        # Add JSON instruction to prompt
-        json_prompt = f"{prompt}\n\nYou must respond with valid JSON only. Do not include any text before or after the JSON."
-
+        """Generate structured JSON output using OpenAI with native JSON Schema support"""
         for attempt in range(max_retries):
             try:
-                # Use JSON mode if available (GPT-4 and newer models)
-                response_format = {"type": "json_object"} if "gpt-4" in self.model or "gpt-3.5" in self.model else None
+                # Use strict JSON Schema mode for guaranteed valid output
+                if schema:
+                    response_format = {
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": "response",
+                            "strict": True,
+                            "schema": schema
+                        }
+                    }
+                    # No need for JSON instruction in prompt with strict mode
+                    user_prompt = prompt
+                else:
+                    # Fallback to json_object mode without schema
+                    response_format = {"type": "json_object"}
+                    user_prompt = f"{prompt}\n\nYou must respond with valid JSON only."
 
                 response = self.client.chat.completions.create(
                     model=self.model,
-                    messages=[{"role": "user", "content": json_prompt}],
+                    messages=[{"role": "user", "content": user_prompt}],
                     temperature=temperature,
                     response_format=response_format,
                     **kwargs
                 )
 
                 content = response.choices[0].message.content
-
-                # Parse JSON
                 result = json.loads(content)
-
-                # Basic schema validation if provided
-                if schema:
-                    self._validate_json_schema(result, schema)
 
                 logger.debug(f"Successfully generated JSON on attempt {attempt + 1}")
                 return result
@@ -200,20 +241,32 @@ class DeepSeekClient(BaseLLMClient):
         max_retries: int = 3,
         **kwargs
     ) -> Dict:
-        """Generate structured JSON output using DeepSeek"""
+        """
+        Generate structured JSON output using DeepSeek
+
+        Note: DeepSeek supports json_object mode but not strict JSON Schema enforcement.
+        Schema validation happens after generation if provided.
+        """
+        # DeepSeek requires "json" keyword in prompt when using json_object mode
         json_prompt = f"{prompt}\n\nYou must respond with valid JSON only. Do not include any text before or after the JSON."
 
         for attempt in range(max_retries):
             try:
+                # Use json_object mode for more reliable JSON generation
                 response = self.client.chat.completions.create(
                     model=self.model,
                     messages=[{"role": "user", "content": json_prompt}],
                     temperature=temperature,
+                    response_format={"type": "json_object"},
                     **kwargs
                 )
 
                 content = response.choices[0].message.content
                 result = json.loads(content)
+
+                # Manual schema validation if provided (DeepSeek doesn't support strict schemas)
+                if schema:
+                    self._validate_json_schema(result, schema)
 
                 logger.debug(f"Successfully generated JSON on attempt {attempt + 1}")
                 return result
@@ -226,6 +279,23 @@ class DeepSeekClient(BaseLLMClient):
             except Exception as e:
                 logger.error(f"DeepSeek JSON generation failed: {e}")
                 raise
+
+    def _validate_json_schema(self, data: Dict, schema: Dict):
+        """Basic JSON schema validation (same as OpenAI implementation)"""
+        schema_type = schema.get("type")
+
+        if schema_type == "object":
+            if not isinstance(data, dict):
+                raise ValueError(f"Expected object, got {type(data)}")
+
+            required = schema.get("required", [])
+            for field in required:
+                if field not in data:
+                    raise ValueError(f"Missing required field: {field}")
+
+        elif schema_type == "array":
+            if not isinstance(data, list):
+                raise ValueError(f"Expected array, got {type(data)}")
 
 
 class GrokClient(BaseLLMClient):
@@ -267,26 +337,36 @@ class GrokClient(BaseLLMClient):
         max_retries: int = 3,
         **kwargs
     ) -> Dict:
-        """Generate structured JSON output using Grok"""
-        json_prompt = f"{prompt}\n\nYou must respond with valid JSON only. Do not include any text before or after the JSON."
-
+        """Generate structured JSON output using Grok with native JSON Schema support"""
         for attempt in range(max_retries):
             try:
+                # Use strict JSON Schema mode for guaranteed valid output
+                if schema:
+                    response_format = {
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": "response",
+                            "strict": True,
+                            "schema": schema
+                        }
+                    }
+                    # No need for JSON instruction in prompt with strict mode
+                    user_prompt = prompt
+                else:
+                    # Fallback to json_object mode without schema
+                    response_format = {"type": "json_object"}
+                    user_prompt = f"{prompt}\n\nYou must respond with valid JSON only."
+
                 response = self.client.chat.completions.create(
                     model=self.model,
-                    messages=[{"role": "user", "content": json_prompt}],
+                    messages=[{"role": "user", "content": user_prompt}],
                     temperature=temperature,
+                    response_format=response_format,
                     **kwargs
                 )
 
                 content = response.choices[0].message.content
-
-                # Parse JSON
                 result = json.loads(content)
-
-                # Basic schema validation if provided
-                if schema:
-                    OpenAIClient._validate_json_schema(None, result, schema)
 
                 logger.debug(f"Successfully generated JSON on attempt {attempt + 1}")
                 return result
@@ -308,7 +388,11 @@ class AnthropicClient(BaseLLMClient):
         super().__init__(api_key, model, **kwargs)
         try:
             from anthropic import Anthropic
-            self.client = Anthropic(api_key=api_key)
+            # Enable structured outputs beta header
+            self.client = Anthropic(
+                api_key=api_key,
+                default_headers={"anthropic-beta": "structured-outputs-2025-11-13"}
+            )
         except ImportError:
             raise ImportError(
                 "Anthropic package not installed. Install with: pip install anthropic"
@@ -338,19 +422,38 @@ class AnthropicClient(BaseLLMClient):
         max_retries: int = 3,
         **kwargs
     ) -> Dict:
-        """Generate structured JSON output using Anthropic Claude"""
-        json_prompt = f"{prompt}\n\nYou must respond with valid JSON only. Do not include any text before or after the JSON."
-
+        """Generate structured JSON output using Anthropic Claude with native structured outputs"""
         for attempt in range(max_retries):
             try:
                 max_tokens = kwargs.pop("max_tokens", 4096)
-                response = self.client.messages.create(
-                    model=self.model,
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                    messages=[{"role": "user", "content": json_prompt}],
-                    **kwargs
-                )
+
+                # Use structured outputs with schema if provided
+                if schema:
+                    response = self.client.messages.create(
+                        model=self.model,
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                        messages=[{"role": "user", "content": prompt}],
+                        output_format={
+                            "type": "json_schema",
+                            "json_schema": {
+                                "name": "response",
+                                "strict": True,
+                                "schema": schema
+                            }
+                        },
+                        **kwargs
+                    )
+                else:
+                    # Fallback to prompt-based JSON without schema
+                    json_prompt = f"{prompt}\n\nYou must respond with valid JSON only."
+                    response = self.client.messages.create(
+                        model=self.model,
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                        messages=[{"role": "user", "content": json_prompt}],
+                        **kwargs
+                    )
 
                 content = response.content[0].text
                 result = json.loads(content)

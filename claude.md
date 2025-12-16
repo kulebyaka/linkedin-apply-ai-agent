@@ -77,6 +77,54 @@ data/
 - Easy JSON serialization
 - Settings management with `pydantic-settings`
 
+### 4. Structured Output for JSON Generation
+
+**CRITICAL**: Always use native structured outputs when expecting JSON responses from LLM providers.
+
+#### Why Structured Outputs?
+- **Eliminates JSON parsing errors**: Native schema enforcement guarantees valid JSON
+- **100% schema adherence**: Models cannot generate invalid structures
+- **No retry loops needed**: APIs handle validation internally
+- **Production-ready reliability**: Essential for CV composition and job filtering
+
+#### Provider Capabilities
+
+| Provider | Strict Schema Support | Implementation |
+|----------|----------------------|----------------|
+| **OpenAI** | ✅ Yes | `response_format={"type": "json_schema", "json_schema": {...}}` |
+| **Anthropic** | ✅ Yes | `output_format={"type": "json_schema", ...}` + beta header |
+| **Grok** | ✅ Yes | `response_format={"type": "json_schema", ...}` (OpenAI-compatible) |
+| **DeepSeek** | ⚠️ Partial | `response_format={"type": "json_object"}` (manual validation required) |
+
+#### Usage Pattern
+
+```python
+# ALWAYS provide a JSON schema when calling generate_json()
+schema = {
+    "type": "object",
+    "properties": {
+        "field1": {"type": "string"},
+        "field2": {"type": "number"}
+    },
+    "required": ["field1", "field2"]
+}
+
+result = llm_client.generate_json(
+    prompt="Extract data...",
+    schema=schema,  # ← ALWAYS include schema
+    temperature=0.4
+)
+# Result is guaranteed to match schema (except DeepSeek which validates post-generation)
+```
+
+#### Important Notes
+- **OpenAI**: Requires GPT-4o or newer models for strict schema support
+- **Anthropic**: Requires beta header `anthropic-beta: structured-outputs-2025-11-13` (already configured)
+- **Grok**: Works with all models after grok-2-1212
+- **DeepSeek**: Does NOT support strict schemas - validates after generation
+
+See `src/llm/provider.py` module documentation for detailed implementation.
+
 ## Important Implementation Details
 
 ### Workflow Nodes (src/agents/workflow.py)
@@ -114,6 +162,8 @@ data/
    - Add new provider class in `src/llm/provider.py`
    - Inherit from `BaseLLMClient`
    - Implement `generate()` and `generate_json()`
+   - **MUST implement native structured output support in `generate_json()`**
+   - Use provider's JSON Schema enforcement when available
    - Register in `LLMClientFactory`
 
 2. **Workflow Modifications**
@@ -159,10 +209,14 @@ All settings in `.env`:
 
 1. Create provider class in `src/llm/provider.py`
 2. Add to `LLMProvider` enum
-3. Implement API integration
+3. Implement API integration with native structured output support:
+   - Research if provider supports JSON Schema enforcement
+   - Implement strict schema mode in `generate_json()` if available
+   - Fall back to `json_object` mode + manual validation if not
 4. Register in factory
 5. Add config to `settings.py`
-6. Document in README
+6. Document structured output capabilities in provider.py docstring
+7. Document in README
 
 ### Modifying CV Tailoring Logic
 
@@ -221,7 +275,9 @@ This is a **skeleton implementation**. All core structure is in place, but servi
 2. **Implement LLM integration**
    - Start with one provider (e.g., OpenAI)
    - Test with simple prompts
-   - Add structured output for job filtering
+   - **CRITICAL**: Always use `generate_json()` with JSON Schema for structured data
+   - Test structured output for job filtering and CV composition
+   - Verify schema enforcement is working correctly
 
 3. **Job fetching**
    - Research LinkedIn API options
@@ -320,5 +376,6 @@ playwright codegen linkedin.com              # Record automation
 
 ---
 
-**Last Updated**: 2025-12-13
+**Last Updated**: 2025-12-16
 **Status**: Skeleton implementation complete, ready for feature development
+**Recent Changes**: Added native structured output support for all LLM providers
