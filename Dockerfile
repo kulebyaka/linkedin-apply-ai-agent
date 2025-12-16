@@ -11,17 +11,21 @@ RUN apt-get update && apt-get install -y \
     libgdk-pixbuf2.0-0 \
     libffi-dev \
     shared-mime-info \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements
-COPY requirements.txt .
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy project files (uv needs both pyproject.toml and uv.lock)
+COPY pyproject.toml uv.lock ./
+
+# Install Python dependencies with uv (much faster than pip!)
+RUN uv sync --frozen --no-dev
 
 # Install Playwright browsers
-RUN playwright install chromium
-RUN playwright install-deps chromium
+RUN uv run playwright install chromium
+RUN uv run playwright install-deps chromium
 
 # Copy application code
 COPY . .
@@ -33,4 +37,4 @@ RUN mkdir -p data/cv data/jobs data/generated_cvs
 EXPOSE 8000
 
 # Run the application
-CMD ["python", "-m", "uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uv", "run", "uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
