@@ -55,6 +55,7 @@ class CVComposer:
             "projects": self._compose_projects(master_cv, job_summary),
             "certifications": self._compose_certifications(master_cv, job_summary),
             "languages": master_cv.get("languages", []),  # Languages unchanged
+            "interests": master_cv.get("interests"),  # Interests unchanged (optional)
         }
 
         # Step 3: Validate output against master CV
@@ -232,6 +233,29 @@ Requirements:
                     "description": {"type": "string"},
                     "achievements": {"type": "array", "items": {"type": "string"}},
                     "technologies": {"type": "array", "items": {"type": "string"}},
+                    "projects": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {"type": "string"},
+                                "role": {"type": ["string", "null"]},
+                                "description": {"type": "string"},
+                                "achievements": {"type": "array", "items": {"type": "string"}},
+                                "technologies": {"type": "array", "items": {"type": "string"}},
+                                "duration": {"type": ["string", "null"]},
+                            },
+                            "required": ["name", "description"],
+                        },
+                    },
+                    "company_context": {
+                        "type": ["object", "null"],
+                        "properties": {
+                            "industry": {"type": ["string", "null"]},
+                            "size": {"type": ["string", "null"]},
+                            "notable_clients": {"type": "array", "items": {"type": "string"}},
+                        },
+                    },
                 },
                 "required": ["company", "position", "start_date", "description"],
             },
@@ -313,28 +337,19 @@ Requirements:
             "items": {
                 "type": "object",
                 "properties": {
+                    "name": {"type": "string"},
                     "category": {"type": "string"},
-                    "skills": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "name": {"type": "string"},
-                                "proficiency": {"type": ["string", "null"]},
-                            },
-                            "required": ["name"],
-                        },
-                    },
+                    "proficiency": {"type": ["string", "null"]},
+                    "years_of_experience": {"type": ["string", "null"]},
+                    "use_cases": {"type": "array", "items": {"type": "string"}},
                 },
-                "required": ["category", "skills"],
+                "required": ["name", "category"],
             },
         }
 
         # Generate tailored skills
         tailored_skills = self.llm.generate_json(prompt, schema=schema, temperature=0.3)
 
-        # Flatten back to simple skill list for compatibility
-        # (Keep original structure if needed, or convert based on CV model)
         return tailored_skills
 
     def _compose_projects(self, master_cv: dict, job_summary: dict) -> list[dict]:
@@ -357,7 +372,7 @@ Requirements:
         # Get prompt
         prompt = self.prompts.get_projects_prompt(projects=projects, job_summary=job_summary)
 
-        # Define expected schema
+        # Define expected schema (with status, last_updated, role, architecture, visibility)
         schema = {
             "type": "array",
             "items": {
@@ -365,12 +380,14 @@ Requirements:
                 "properties": {
                     "name": {"type": "string"},
                     "description": {"type": "string"},
-                    "role": {"type": ["string", "null"]},
-                    "start_date": {"type": ["string", "null"]},
-                    "end_date": {"type": ["string", "null"]},
+                    "url": {"type": ["string", "null"]},
                     "technologies": {"type": "array", "items": {"type": "string"}},
                     "achievements": {"type": "array", "items": {"type": "string"}},
-                    "url": {"type": ["string", "null"]},
+                    "status": {"type": ["string", "null"], "enum": ["active", "archived", "production", "completed", None]},
+                    "last_updated": {"type": ["string", "null"]},
+                    "role": {"type": ["string", "null"]},
+                    "architecture": {"type": "array", "items": {"type": "string"}},
+                    "visibility": {"type": ["string", "null"], "enum": ["public", "private", None]},
                 },
                 "required": ["name", "description"],
             },
@@ -381,7 +398,7 @@ Requirements:
 
         return tailored_projects
 
-    def _compose_certifications(self, master_cv: dict, job_summary: dict) -> list[str]:
+    def _compose_certifications(self, master_cv: dict, job_summary: dict) -> list[dict]:
         """
         Optimize certifications display
 
@@ -390,7 +407,7 @@ Requirements:
             job_summary: Structured job requirements
 
         Returns:
-            List of relevant certifications
+            List of relevant certification objects
         """
         logger.debug("Composing certifications section")
 
@@ -403,8 +420,21 @@ Requirements:
             certifications=certifications, job_summary=job_summary
         )
 
-        # Define expected schema (simple array of strings)
-        schema = {"type": "array", "items": {"type": "string"}}
+        # Define expected schema (objects with issuer, date, description, topics)
+        schema = {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "issuer": {"type": "string"},
+                    "date": {"type": ["string", "null"]},
+                    "description": {"type": ["string", "null"]},
+                    "topics": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["name", "issuer"],
+            },
+        }
 
         # Generate tailored certifications
         tailored_certifications = self.llm.generate_json(prompt, schema=schema, temperature=0.3)

@@ -23,7 +23,25 @@
         "Led migration from monolith to microservices, improving deployment frequency by 10x",
         "Mentored 5 junior engineers and established code review best practices"
       ],
-      "technologies": ["Python", "Go", "AWS", "Kubernetes", "PostgreSQL", "Redis", "Docker"]
+      "technologies": ["Python", "Go", "AWS", "Kubernetes", "PostgreSQL", "Redis", "Docker"],
+      "projects": [
+        {
+          "name": "Payment Gateway Integration",
+          "role": "Tech Lead",
+          "description": "Designed and implemented multi-provider payment gateway supporting Stripe, PayPal, and custom processors",
+          "achievements": [
+            "Processed $50M+ in transactions with 99.99% uptime",
+            "Reduced transaction failure rate by 40%"
+          ],
+          "technologies": ["Python", "FastAPI", "Celery", "Redis"],
+          "duration": "2022-2024"
+        }
+      ],
+      "company_context": {
+        "industry": "Cloud Software",
+        "size": "500-1000 employees",
+        "notable_clients": ["Fortune 500 companies", "Enterprise SaaS clients"]
+      }
     },
     {
       "company": "StartupXYZ",
@@ -38,7 +56,9 @@
         "Developed RESTful APIs serving 100K+ daily requests",
         "Created responsive React frontend with 98% lighthouse score"
       ],
-      "technologies": ["JavaScript", "React", "Node.js", "MongoDB", "Express", "AWS"]
+      "technologies": ["JavaScript", "React", "Node.js", "MongoDB", "Express", "AWS"],
+      "projects": [],
+      "company_context": null
     }
   ],
   "education": [
@@ -57,18 +77,18 @@
     }
   ],
   "skills": [
-    {"name": "Python", "category": "Programming Languages", "proficiency": "Expert"},
-    {"name": "JavaScript/TypeScript", "category": "Programming Languages", "proficiency": "Expert"},
-    {"name": "Go", "category": "Programming Languages", "proficiency": "Intermediate"},
-    {"name": "React", "category": "Frameworks", "proficiency": "Expert"},
-    {"name": "Node.js", "category": "Frameworks", "proficiency": "Expert"},
-    {"name": "FastAPI", "category": "Frameworks", "proficiency": "Expert"},
-    {"name": "AWS", "category": "Cloud & DevOps", "proficiency": "Expert"},
-    {"name": "Docker", "category": "Cloud & DevOps", "proficiency": "Expert"},
-    {"name": "Kubernetes", "category": "Cloud & DevOps", "proficiency": "Intermediate"},
-    {"name": "PostgreSQL", "category": "Databases", "proficiency": "Expert"},
-    {"name": "MongoDB", "category": "Databases", "proficiency": "Intermediate"},
-    {"name": "Redis", "category": "Databases", "proficiency": "Intermediate"}
+    {"name": "Python", "category": "Programming Languages", "proficiency": "Expert", "years_of_experience": "10+", "use_cases": ["Backend development", "Data processing", "AI/ML"]},
+    {"name": "JavaScript/TypeScript", "category": "Programming Languages", "proficiency": "Expert", "years_of_experience": "8+", "use_cases": ["Frontend development", "Node.js backend"]},
+    {"name": "Go", "category": "Programming Languages", "proficiency": "Intermediate", "years_of_experience": "3", "use_cases": ["Microservices", "Performance-critical systems"]},
+    {"name": "React", "category": "Frameworks", "proficiency": "Expert", "years_of_experience": "6+", "use_cases": []},
+    {"name": "Node.js", "category": "Frameworks", "proficiency": "Expert", "years_of_experience": "7+", "use_cases": []},
+    {"name": "FastAPI", "category": "Frameworks", "proficiency": "Expert", "years_of_experience": "4", "use_cases": []},
+    {"name": "AWS", "category": "Cloud & DevOps", "proficiency": "Expert", "years_of_experience": "8+", "use_cases": []},
+    {"name": "Docker", "category": "Cloud & DevOps", "proficiency": "Expert", "years_of_experience": "6+", "use_cases": []},
+    {"name": "Kubernetes", "category": "Cloud & DevOps", "proficiency": "Intermediate", "years_of_experience": "3", "use_cases": []},
+    {"name": "PostgreSQL", "category": "Databases", "proficiency": "Expert", "years_of_experience": "10+", "use_cases": []},
+    {"name": "MongoDB", "category": "Databases", "proficiency": "Intermediate", "years_of_experience": "5", "use_cases": []},
+    {"name": "Redis", "category": "Databases", "proficiency": "Intermediate", "years_of_experience": "5", "use_cases": []}
   ],
   "projects": [
     {
@@ -80,16 +100,44 @@
         "Used by 100+ companies in production",
         "Featured in PyData Conference 2022",
         "Active community of 50+ contributors"
-      ]
+      ],
+      "status": "active",
+      "last_updated": "2024-12-01",
+      "role": "Creator & Maintainer",
+      "architecture": ["Microservices", "Event-driven", "Plugin-based"],
+      "visibility": "public"
     }
   ],
   "certifications": [
-    "AWS Certified Solutions Architect - Professional",
-    "Kubernetes Application Developer (CKAD)",
-    "MongoDB Certified Developer"
+    {
+      "name": "AWS Certified Solutions Architect - Professional",
+      "issuer": "Amazon Web Services",
+      "date": "2022-06",
+      "description": "Advanced certification for designing distributed systems on AWS",
+      "topics": ["Cloud architecture", "High availability", "Security", "Cost optimization"]
+    },
+    {
+      "name": "Kubernetes Application Developer (CKAD)",
+      "issuer": "Cloud Native Computing Foundation",
+      "date": "2023-01",
+      "description": "Certification for building, deploying, and configuring cloud-native applications using Kubernetes",
+      "topics": ["Container orchestration", "Deployments", "Services", "ConfigMaps"]
+    },
+    {
+      "name": "MongoDB Certified Developer",
+      "issuer": "MongoDB Inc.",
+      "date": "2021-09",
+      "description": "Professional certification for MongoDB application development",
+      "topics": ["NoSQL database design", "Aggregation framework", "Indexing", "Performance tuning"]
+    }
   ],
   "languages": [
     {"language": "English", "level": "Native"},
     {"language": "Spanish", "level": "Professional Working Proficiency"}
-  ]
+  ],
+  "interests": {
+    "technical": ["Open source development", "Machine learning", "Cloud architecture", "Developer tools"],
+    "sports": ["Rock climbing", "Cycling", "Running"],
+    "other": ["Photography", "Tech blogging", "Mentoring"]
+  }
 }

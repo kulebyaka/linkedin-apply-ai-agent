@@ -1,6 +1,6 @@
 """CV data models"""
 
-from typing import List, Optional
+from typing import List, Optional, Literal
 from datetime import date
 from pydantic import BaseModel, Field, EmailStr
 
@@ -16,6 +16,23 @@ class ContactInfo(BaseModel):
     portfolio_url: Optional[str] = None
 
 
+class CompanyContext(BaseModel):
+    """Optional company context information"""
+    industry: Optional[str] = None
+    size: Optional[str] = None
+    notable_clients: List[str] = Field(default_factory=list)
+
+
+class ExperienceProject(BaseModel):
+    """Project within a work experience"""
+    name: str
+    role: Optional[str] = None
+    description: str
+    achievements: List[str] = Field(default_factory=list)
+    technologies: List[str] = Field(default_factory=list)
+    duration: Optional[str] = None  # e.g., "2021-2023" or "2+ years"
+
+
 class Experience(BaseModel):
     """Work experience entry"""
     company: str
@@ -27,6 +44,8 @@ class Experience(BaseModel):
     description: str
     achievements: List[str] = Field(default_factory=list)
     technologies: List[str] = Field(default_factory=list)
+    projects: List[ExperienceProject] = Field(default_factory=list)  # NEW
+    company_context: Optional[CompanyContext] = None  # NEW
 
 
 class Education(BaseModel):
@@ -47,6 +66,11 @@ class Project(BaseModel):
     url: Optional[str] = None
     technologies: List[str] = Field(default_factory=list)
     achievements: List[str] = Field(default_factory=list)
+    status: Optional[Literal["active", "archived", "production", "completed"]] = None  # NEW
+    last_updated: Optional[date] = None  # NEW
+    role: Optional[str] = None  # NEW: e.g., "Creator & Maintainer", "Contributor"
+    architecture: List[str] = Field(default_factory=list)  # NEW: e.g., ["Microservices", "Event-driven"]
+    visibility: Optional[Literal["public", "private"]] = None  # NEW
 
 
 class Skill(BaseModel):
@@ -54,6 +78,30 @@ class Skill(BaseModel):
     name: str
     category: str  # e.g., "Programming Languages", "Frameworks", "Tools"
     proficiency: Optional[str] = None  # e.g., "Expert", "Intermediate", "Beginner"
+    years_of_experience: Optional[str] = None  # NEW: e.g., "10+", "5-7", "3"
+    use_cases: List[str] = Field(default_factory=list)  # NEW: Optional usage examples
+
+
+class Certification(BaseModel):
+    """Certification entry"""
+    name: str
+    issuer: str  # NEW: e.g., "Amazon", "AlgoExpert"
+    date: Optional[str] = None  # NEW: e.g., "2020-06" or "2020"
+    description: Optional[str] = None  # NEW
+    topics: List[str] = Field(default_factory=list)  # NEW: Topics covered
+
+
+class Language(BaseModel):
+    """Language proficiency"""
+    language: str
+    level: str  # e.g., "Native", "Professional Working Proficiency", "B2"
+
+
+class Interests(BaseModel):
+    """Interests and hobbies"""
+    technical: List[str] = Field(default_factory=list)
+    sports: List[str] = Field(default_factory=list)
+    other: List[str] = Field(default_factory=list)
 
 
 class CV(BaseModel):
@@ -64,8 +112,9 @@ class CV(BaseModel):
     education: List[Education] = Field(default_factory=list)
     skills: List[Skill] = Field(default_factory=list)
     projects: List[Project] = Field(default_factory=list)
-    certifications: List[str] = Field(default_factory=list)
-    languages: List[dict] = Field(default_factory=list)  # {"language": "English", "level": "Native"}
+    certifications: List[Certification] = Field(default_factory=list)  # UPDATED: now objects
+    languages: List[Language] = Field(default_factory=list)  # UPDATED: now objects
+    interests: Optional[Interests] = None  # NEW
 
 
 class ExperienceRequirements(BaseModel):
