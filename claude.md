@@ -314,6 +314,45 @@ This is a **skeleton implementation**. All core structure is in place, but servi
    - Deploy to VPS
    - Set up monitoring and logs
 
+## Reference Implementations
+
+The `Obsolete/` directory contains **two production-ready projects** that serve as valuable reference implementations:
+
+### 1. **Auto_job_applier_linkedIn** (GodsScion)
+- **Status:** Production-ready, actively maintained
+- **Architecture:** Selenium-based web automation with AI integration
+- **Key Features:**
+  - Web scraping with undetected-chromedriver (stealth mode)
+  - Multi-LLM support (OpenAI, DeepSeek, Gemini)
+  - Intelligent form filling with AI-powered question answering
+  - Application history tracking (CSV + Flask web UI)
+  - Comprehensive configuration system (5 config files)
+  - Robust error handling and logging
+- **Useful Components:**
+  - `modules/clickers_and_finders.py` - Reusable Selenium utilities
+  - `modules/ai/` - Multi-provider AI integration patterns
+  - `modules/validator.py` - Configuration validation framework
+  - `app.py` - Flask-based application history viewer
+- **Documentation:** See `Obsolete/Auto_job_applier_linkedIn/ARCHITECTURE.md` for detailed analysis
+
+### 2. **Jobs_Applier_AI_Agent_AIHawk** (AIHawk)
+- **Status:** Production-ready, featured in major media (Business Insider, TechCrunch, The Verge, Wired)
+- **Architecture:** LangChain-based with FAISS vector search
+- **Key Features:**
+  - Semantic job parsing using vector embeddings
+  - LLM-powered resume tailoring (section-by-section generation)
+  - Professional PDF generation via Chrome DevTools Protocol
+  - Multi-LLM support (OpenAI, Claude, Gemini, HuggingFace, Ollama, Perplexity)
+  - Pydantic-based type-safe data models
+  - Customizable resume styling
+- **Useful Components:**
+  - `src/llm_manager.py` - Factory pattern for multi-LLM support
+  - `src/resume_facade.py` - Facade pattern for resume generation
+  - `src/llm_job_parser.py` - Semantic job description extraction
+  - `src/utils/chrome_utils.py` - CDP-based PDF generation
+  - `resume_schemas/` - Pydantic models for type safety
+- **Documentation:** See `Obsolete/Jobs_Applier_AI_Agent_AIHawk/ARCHITECTURE.md` for comprehensive analysis
+
 ## Useful Commands
 
 ```bash

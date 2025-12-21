@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     master_cv_path: str = "./data/cv/master_cv.json"
     prompts_dir: str = "./prompts/cv_composer"
 
+    # PDF Generation Settings
+    cv_template_dir: str = "src/templates/cv"
+    cv_template_name: str = "modern"  # Template theme: modern, classic, minimal
+
     # Workflow
     job_fetch_interval_hours: int = 1
     max_concurrent_applications: int = 3

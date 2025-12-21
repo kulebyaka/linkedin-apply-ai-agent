@@ -86,6 +86,9 @@ prompts/cv_composer/*.txt
 !prompts/cv_composer/examples/
 !prompts/cv_composer/examples/*.txt
 
+# Documentation (outdated)
+docs/outdated/
+
 # Logs
 logs/
 *.log
@@ -101,4 +104,9 @@ test-results/
 
 # Agents
 .claude/
+
+# Ref projects
 Obsolete
+
+# Garbage
+nul
