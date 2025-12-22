@@ -24,6 +24,25 @@ Every hour, based on a set of filters (in the future, filters will be built base
 | **Node 5: Human Review** | 🔴 Pending | Logic in workflow exists, but UI/API interaction needs implementation. |
 | **Node 6: Apply on LinkedIn** | 🔴 Pending | `src/services/browser_automation.py` is a skeleton. Needs Playwright implementation. |
 | **Node 7: Notification** | 🔴 Pending | `src/services/notification.py` is a skeleton. |
+| **MVP Workflow** | ✅ Complete | Separate on-demand flow (`src/agents/mvp_workflow.py` + `src/api/main.py`) for direct CV generation via API. |
+
+## MVP On-Demand CV Generation (Implemented)
+
+This verified implementation runs separately from the main scheduled workflow to allow immediate testing and usage of core CV features.
+
+**Features:**
+- **Trigger**: HTTP POST request to `/api/cv/generate`
+- **Output**: PDF file download via `/api/cv/download/{id}`
+- **Flow**: User Input -> Compose CV -> Generate PDF -> Download
+- **Status Tracking**: Async background processing with polling endpoint `/api/cv/status/{id}`
+- **Error Handling**: Preserves error messages from composition failures into the PDF node state for debugging.
+- **Strict Validation**: Uses OpenAI's `strict` structured outputs mode for 100% JSON schema adherence.
+
+**Files:**
+- `src/agents/mvp_workflow.py`: The LangGraph state machine definition.
+- `src/models/mvp.py`: API request/response Pydantic models.
+- `src/api/main.py`: FastAPI endpoints for control.
+
 
 ## Architecture: Job Application Automation Agent
 

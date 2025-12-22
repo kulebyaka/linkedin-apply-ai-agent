@@ -1,12 +1,14 @@
 """LangGraph workflow definition for job application automation"""
 
-from typing import TypedDict, Annotated, Literal
-from langgraph.graph import StateGraph, END
+from typing import Annotated, Literal, TypedDict
+
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.graph import END, StateGraph
 
 
 class WorkflowState(TypedDict):
     """State structure for the job application workflow"""
+
     job_posting: dict
     filters: dict
     master_cv: dict
@@ -49,12 +51,7 @@ def create_workflow() -> StateGraph:
 
     # Conditional edge: if suitable, continue; else end
     workflow.add_conditional_edges(
-        "filter_job",
-        route_after_filter,
-        {
-            "suitable": "compose_cv",
-            "not_suitable": END
-        }
+        "filter_job", route_after_filter, {"suitable": "compose_cv", "not_suitable": END}
     )
 
     workflow.add_edge("compose_cv", "generate_pdf")
@@ -64,20 +61,11 @@ def create_workflow() -> StateGraph:
     workflow.add_conditional_edges(
         "human_review",
         route_after_human_review,
-        {
-            "approved": "apply_linkedin",
-            "declined": END,
-            "retry": "compose_cv"
-        }
+        {"approved": "apply_linkedin", "declined": END, "retry": "compose_cv"},
     )
 
     workflow.add_conditional_edges(
-        "apply_linkedin",
-        route_after_application,
-        {
-            "success": END,
-            "failure": "send_notification"
-        }
+        "apply_linkedin", route_after_application, {"success": END, "failure": "send_notification"}
     )
 
     workflow.add_edge("send_notification", END)
@@ -105,9 +93,10 @@ def compose_cv_node(state: WorkflowState) -> WorkflowState:
 
 def generate_pdf_node(state: WorkflowState) -> WorkflowState:
     """Generate PDF from tailored CV JSON"""
-    from src.services.pdf_generator import PDFGenerator
-    from src.config.settings import get_settings
     from pathlib import Path
+
+    from src.config.settings import get_settings
+    from src.services.pdf_generator import PDFGenerator
 
     settings = get_settings()
     cv_json = state.get("tailored_cv_json")
@@ -127,8 +116,7 @@ def generate_pdf_node(state: WorkflowState) -> WorkflowState:
 
         # Initialize PDF generator
         generator = PDFGenerator(
-            template_dir=settings.cv_template_dir,
-            template_name=settings.cv_template_name
+            template_dir=settings.cv_template_dir, template_name=settings.cv_template_name
         )
 
         # Generate PDF

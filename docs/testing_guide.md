@@ -244,6 +244,62 @@ jobs:
         uses: codecov/codecov-action@v3
 ```
 
+## MVP End-to-End Testing
+  
+> **Note**: This is a manual integration test flow for the On-Demand CV Generation API.
+
+### 1. Start the API Server
+
+```bash
+python -m uvicorn src.api.main:app --reload
+```
+
+### 2. Submit a Job (PowerShell)
+
+```powershell
+$body = @{
+    title = "Senior Python Engineer"
+    company = "TechCorp"
+    description = "We need a Python expert with FastAPI and AWS experience."
+    requirements = "Python, FastAPI, Docker, AWS"
+} | ConvertTo-Json
+
+$response = Invoke-RestMethod -Uri "http://localhost:8000/api/cv/generate" -Method Post -Body $body -ContentType "application/json"
+$job_id = $response.job_id
+Write-Host "Job submitted. ID: $job_id"
+```
+
+### 3. Poll for Status
+
+Run this loop to check status until completion (~3-5 minutes):
+
+```powershell
+while ($true) {
+    $status = Invoke-RestMethod -Uri "http://localhost:8000/api/cv/status/$job_id"
+    Write-Host "Status: $($status.status) | Step: $($status.current_step)"
+    
+    if ($status.status -eq "completed") {
+        Write-Host "Job Completed! PDF Ready."
+        break
+    }
+    if ($status.status -eq "failed") {
+        Write-Host "Job Failed: $($status.error_message)"
+        break
+    }
+    Start-Sleep -Seconds 5
+}
+```
+
+### 4. Download PDF
+
+```powershell
+$downloadUrl = "http://localhost:8000/api/cv/download/$job_id"
+Invoke-RestMethod -Uri $downloadUrl -OutFile "tailored_cv.pdf"
+Write-Host "PDF downloaded to tailored_cv.pdf"
+```
+
+---
+
 ## Test Data
 
 ### Master CV
