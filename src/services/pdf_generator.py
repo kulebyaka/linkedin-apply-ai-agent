@@ -57,7 +57,18 @@ class PDFGenerator:
         # Register custom filters
         self.jinja_env.filters["format_date"] = self._format_date
 
+        # Cache CSS at initialization to avoid repeated file reads
+        self._cached_css: str | None = None
+        self._load_and_cache_css()
+
         logger.info(f"PDFGenerator initialized with template: {template_name}")
+
+    def _load_and_cache_css(self) -> None:
+        """Load and cache CSS file for current template"""
+        css_path = self.template_dir / self.template_name / "style.css"
+        with open(css_path, "r", encoding="utf-8") as f:
+            self._cached_css = f.read()
+        logger.debug(f"Cached CSS from {css_path}")
 
     def generate_pdf(
         self,
@@ -133,10 +144,10 @@ class PDFGenerator:
         return html
 
     def _load_css(self) -> str:
-        """Load CSS file for current template"""
-        css_path = self.template_dir / self.template_name / "style.css"
-        with open(css_path, "r", encoding="utf-8") as f:
-            return f.read()
+        """Return cached CSS for current template"""
+        if self._cached_css is None:
+            self._load_and_cache_css()
+        return self._cached_css
 
     def _build_metadata(
         self, cv_json: Dict, custom_metadata: Optional[Dict]

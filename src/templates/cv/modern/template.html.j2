@@ -142,11 +142,23 @@
     {% if cv.certifications %}
     <section class="certifications">
         <h2>Certifications</h2>
-        <ul>
-            {% for cert in cv.certifications %}
-            <li>{{ cert }}</li>
-            {% endfor %}
-        </ul>
+        {% for cert in cv.certifications %}
+        <div class="certification-entry">
+            <h3>{{ cert.name }}</h3>
+            <div class="cert-meta">
+                <span class="issuer">{{ cert.issuer }}</span>
+                {% if cert.date %}<span class="separator">•</span><span class="date">{{ cert.date|format_date }}</span>{% endif %}
+            </div>
+            {% if cert.description %}
+            <p class="description">{{ cert.description }}</p>
+            {% endif %}
+            {% if cert.topics %}
+            <div class="topics">
+                <strong>Topics:</strong> {{ cert.topics|join(', ') }}
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
     </section>
     {% endif %}
 

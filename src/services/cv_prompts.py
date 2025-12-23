@@ -200,3 +200,24 @@ class CVPromptManager:
             certifications=json.dumps(certifications, indent=2),
             job_summary=json.dumps(job_summary, indent=2)
         )
+
+    def get_full_cv_prompt(self, master_cv: Dict, job_summary: Dict) -> str:
+        """
+        Get prompt for generating complete tailored CV in a single LLM call.
+
+        This combines all section prompts into one unified prompt for better
+        performance (reduces 6 LLM calls to 1).
+
+        Args:
+            master_cv: Complete master CV data
+            job_summary: Structured job requirements from job analysis
+
+        Returns:
+            Formatted prompt for full CV generation
+        """
+        import json
+        return self.loader.get_template(
+            "full_cv",
+            master_cv=json.dumps(master_cv, indent=2),
+            job_summary=json.dumps(job_summary, indent=2)
+        )
