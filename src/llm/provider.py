@@ -142,33 +142,47 @@ class OpenAIClient(BaseLLMClient):
         """Generate structured JSON output using OpenAI with native JSON Schema support"""
         for attempt in range(max_retries):
             try:
+                # Track if we wrapped an array schema
+                was_array_schema = schema and schema.get("type") == "array"
+
                 # Use strict JSON Schema mode for guaranteed valid output
                 if schema:
+                    # OpenAI strict mode requires additionalProperties: false for all objects
+                    strict_schema = self._make_schema_strict(schema)
+
                     response_format = {
                         "type": "json_schema",
                         "json_schema": {
                             "name": "response",
                             "strict": True,
-                            "schema": schema
+                            "schema": strict_schema
                         }
                     }
                     # No need for JSON instruction in prompt with strict mode
                     user_prompt = prompt
+                    # NOTE: OpenAI strict JSON schema mode does NOT support custom temperature
+                    # It only allows the default temperature (1.0)
+                    # See: https://platform.openai.com/docs/guides/structured-outputs
+                    api_kwargs = kwargs.copy()  # Don't pass temperature with strict mode
                 else:
                     # Fallback to json_object mode without schema
                     response_format = {"type": "json_object"}
                     user_prompt = f"{prompt}\n\nYou must respond with valid JSON only."
+                    api_kwargs = {"temperature": temperature, **kwargs}
 
                 response = self.client.chat.completions.create(
                     model=self.model,
                     messages=[{"role": "user", "content": user_prompt}],
-                    temperature=temperature,
                     response_format=response_format,
-                    **kwargs
+                    **api_kwargs
                 )
 
                 content = response.choices[0].message.content
                 result = json.loads(content)
+
+                # If we wrapped an array schema, unwrap the response
+                if was_array_schema and isinstance(result, dict) and "items" in result:
+                    result = result["items"]
 
                 logger.debug(f"Successfully generated JSON on attempt {attempt + 1}")
                 return result
@@ -181,6 +195,62 @@ class OpenAIClient(BaseLLMClient):
             except Exception as e:
                 logger.error(f"OpenAI JSON generation failed: {e}")
                 raise
+
+    def _make_schema_strict(self, schema: Dict) -> Dict:
+        """
+        Make JSON schema compatible with OpenAI strict mode
+        - Wraps top-level arrays in an object (OpenAI requires root to be object)
+        - Adds additionalProperties: false to all object schemas
+        - Ensures all properties are in the required array
+        """
+        import copy
+        schema = copy.deepcopy(schema)
+
+        # OpenAI strict mode requires root schema to be type: object
+        # If schema is an array, wrap it in an object
+        if schema.get("type") == "array":
+            schema = {
+                "type": "object",
+                "properties": {
+                    "items": schema
+                },
+                "required": ["items"],
+                "additionalProperties": False
+            }
+
+        def make_strict_recursive(obj):
+            if isinstance(obj, dict):
+                # If this is an object type schema
+                type_val = obj.get("type")
+                is_object = type_val == "object" or (isinstance(type_val, list) and "object" in type_val)
+                
+                if is_object:
+                    # Add additionalProperties: false
+                    if "additionalProperties" not in obj:
+                        obj["additionalProperties"] = False
+
+                    # OpenAI strict mode requires ALL properties to be in required array
+                    if "properties" in obj:
+                        all_props = list(obj["properties"].keys())
+                        obj["required"] = all_props
+
+                # Recursively process properties
+                if "properties" in obj:
+                    for prop_schema in obj["properties"].values():
+                        make_strict_recursive(prop_schema)
+
+                # Recursively process items (for arrays)
+                if "items" in obj:
+                    make_strict_recursive(obj["items"])
+
+                # Recursively process nested schemas
+                for key in ["anyOf", "oneOf", "allOf"]:
+                    if key in obj:
+                        for sub_schema in obj[key]:
+                            make_strict_recursive(sub_schema)
+
+        make_strict_recursive(schema)
+        return schema
 
     def _validate_json_schema(self, data: Dict, schema: Dict):
         """Basic JSON schema validation"""
@@ -340,33 +410,46 @@ class GrokClient(BaseLLMClient):
         """Generate structured JSON output using Grok with native JSON Schema support"""
         for attempt in range(max_retries):
             try:
+                # Track if we wrapped an array schema
+                was_array_schema = schema and schema.get("type") == "array"
+
                 # Use strict JSON Schema mode for guaranteed valid output
                 if schema:
+                    # Grok strict mode requires additionalProperties: false for all objects (like OpenAI)
+                    strict_schema = self._make_schema_strict(schema)
+
                     response_format = {
                         "type": "json_schema",
                         "json_schema": {
                             "name": "response",
                             "strict": True,
-                            "schema": schema
+                            "schema": strict_schema
                         }
                     }
                     # No need for JSON instruction in prompt with strict mode
                     user_prompt = prompt
+                    # NOTE: Grok (like OpenAI) strict JSON schema mode does NOT support custom temperature
+                    # It only allows the default temperature (1.0)
+                    api_kwargs = kwargs.copy()  # Don't pass temperature with strict mode
                 else:
                     # Fallback to json_object mode without schema
                     response_format = {"type": "json_object"}
                     user_prompt = f"{prompt}\n\nYou must respond with valid JSON only."
+                    api_kwargs = {"temperature": temperature, **kwargs}
 
                 response = self.client.chat.completions.create(
                     model=self.model,
                     messages=[{"role": "user", "content": user_prompt}],
-                    temperature=temperature,
                     response_format=response_format,
-                    **kwargs
+                    **api_kwargs
                 )
 
                 content = response.choices[0].message.content
                 result = json.loads(content)
+
+                # If we wrapped an array schema, unwrap the response
+                if was_array_schema and isinstance(result, dict) and "items" in result:
+                    result = result["items"]
 
                 logger.debug(f"Successfully generated JSON on attempt {attempt + 1}")
                 return result
@@ -379,6 +462,59 @@ class GrokClient(BaseLLMClient):
             except Exception as e:
                 logger.error(f"Grok JSON generation failed: {e}")
                 raise
+
+    def _make_schema_strict(self, schema: Dict) -> Dict:
+        """
+        Make JSON schema compatible with Grok strict mode (same as OpenAI)
+        - Wraps top-level arrays in an object (Grok requires root to be object)
+        - Adds additionalProperties: false to all object schemas
+        - Ensures all properties are in the required array
+        """
+        import copy
+        schema = copy.deepcopy(schema)
+
+        # Grok strict mode requires root schema to be type: object (like OpenAI)
+        # If schema is an array, wrap it in an object
+        if schema.get("type") == "array":
+            schema = {
+                "type": "object",
+                "properties": {
+                    "items": schema
+                },
+                "required": ["items"],
+                "additionalProperties": False
+            }
+
+        def make_strict_recursive(obj):
+            if isinstance(obj, dict):
+                # If this is an object type schema
+                if obj.get("type") == "object":
+                    # Add additionalProperties: false
+                    if "additionalProperties" not in obj:
+                        obj["additionalProperties"] = False
+
+                    # Grok strict mode requires ALL properties to be in required array (like OpenAI)
+                    if "properties" in obj:
+                        all_props = list(obj["properties"].keys())
+                        obj["required"] = all_props
+
+                # Recursively process properties
+                if "properties" in obj:
+                    for prop_schema in obj["properties"].values():
+                        make_strict_recursive(prop_schema)
+
+                # Recursively process items (for arrays)
+                if "items" in obj:
+                    make_strict_recursive(obj["items"])
+
+                # Recursively process nested schemas
+                for key in ["anyOf", "oneOf", "allOf"]:
+                    if key in obj:
+                        for sub_schema in obj[key]:
+                            make_strict_recursive(sub_schema)
+
+        make_strict_recursive(schema)
+        return schema
 
 
 class AnthropicClient(BaseLLMClient):
