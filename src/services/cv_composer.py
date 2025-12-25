@@ -1,132 +1,42 @@
 """Service for composing tailored CV using LLM"""
 
+from __future__ import annotations
+
 import logging
+from typing import Any
 
 from src.llm.provider import BaseLLMClient
-from src.models.cv import CV, JobSummary
+from src.models.cv import (
+    CV,
+    ContactInfo,
+    CVLLMOutput,
+    Interests,
+    JobSummary,
+    Language,
+)
 from src.services.cv_prompts import CVPromptManager
 
 logger = logging.getLogger(__name__)
 
-# Unified schema for generating complete tailored CV in a single LLM call
-# This replaces 6 separate LLM calls with one, reducing latency by ~3.5x
-FULL_CV_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "summary": {"type": "string"},
-        "experiences": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "company": {"type": "string"},
-                    "position": {"type": "string"},
-                    "start_date": {"type": "string"},
-                    "end_date": {"type": ["string", "null"]},
-                    "is_current": {"type": "boolean"},
-                    "location": {"type": ["string", "null"]},
-                    "description": {"type": "string"},
-                    "achievements": {"type": "array", "items": {"type": "string"}},
-                    "technologies": {"type": "array", "items": {"type": "string"}},
-                    "projects": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "name": {"type": "string"},
-                                "role": {"type": ["string", "null"]},
-                                "description": {"type": "string"},
-                                "achievements": {"type": "array", "items": {"type": "string"}},
-                                "technologies": {"type": "array", "items": {"type": "string"}},
-                                "duration": {"type": ["string", "null"]},
-                            },
-                            "required": ["name", "description"],
-                        },
-                    },
-                    "company_context": {
-                        "type": ["object", "null"],
-                        "properties": {
-                            "industry": {"type": ["string", "null"]},
-                            "size": {"type": ["string", "null"]},
-                            "notable_clients": {"type": "array", "items": {"type": "string"}},
-                        },
-                    },
-                },
-                "required": ["company", "position", "start_date", "description"],
-            },
-        },
-        "education": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "institution": {"type": "string"},
-                    "degree": {"type": "string"},
-                    "field_of_study": {"type": "string"},
-                    "start_date": {"type": "string"},
-                    "end_date": {"type": ["string", "null"]},
-                    "is_current": {"type": "boolean"},
-                    "location": {"type": ["string", "null"]},
-                    "grade": {"type": ["string", "null"]},
-                    "achievements": {"type": "array", "items": {"type": "string"}},
-                },
-                "required": ["institution", "degree", "field_of_study", "start_date"],
-            },
-        },
-        "skills": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string"},
-                    "category": {"type": "string"},
-                    "proficiency": {"type": ["string", "null"]},
-                    "years_of_experience": {"type": ["string", "null"]},
-                    "use_cases": {"type": "array", "items": {"type": "string"}},
-                },
-                "required": ["name", "category"],
-            },
-        },
-        "projects": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string"},
-                    "description": {"type": "string"},
-                    "url": {"type": ["string", "null"]},
-                    "technologies": {"type": "array", "items": {"type": "string"}},
-                    "achievements": {"type": "array", "items": {"type": "string"}},
-                    "status": {"type": ["string", "null"]},
-                    "last_updated": {"type": ["string", "null"]},
-                    "role": {"type": ["string", "null"]},
-                    "architecture": {"type": "array", "items": {"type": "string"}},
-                    "visibility": {"type": ["string", "null"]},
-                },
-                "required": ["name", "description"],
-            },
-        },
-        "certifications": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string"},
-                    "issuer": {"type": "string"},
-                    "date": {"type": ["string", "null"]},
-                    "description": {"type": ["string", "null"]},
-                    "topics": {"type": "array", "items": {"type": "string"}},
-                },
-                "required": ["name", "issuer"],
-            },
-        },
-    },
-    "required": ["summary", "experiences", "education", "skills", "projects", "certifications"],
-}
+
+class CVCompositionError(Exception):
+    """Raised when CV composition fails"""
+
+    pass
+
+
+# Schemas derived from Pydantic models for LLM structured output
+FULL_CV_SCHEMA = CVLLMOutput.model_json_schema()
+JOB_SUMMARY_SCHEMA = JobSummary.model_json_schema()
 
 
 class CVComposer:
     """Composes tailored CV based on job description using LLM"""
+
+    # Temperature settings for LLM generation
+    # Lower = more deterministic, higher = more creative
+    TEMPERATURE_ANALYSIS = 0.3  # For job analysis - prefer consistency
+    TEMPERATURE_GENERATION = 0.4  # For CV generation - allow some creativity
 
     def __init__(self, llm_client: BaseLLMClient, prompts_dir: str | None = None):
         """
@@ -140,18 +50,24 @@ class CVComposer:
         self.prompts = CVPromptManager(prompts_dir)
 
     def compose_cv(
-        self, master_cv: dict, job_posting: dict, user_feedback: str | None = None
-    ) -> dict:
+        self,
+        master_cv: dict[str, Any],
+        job_posting: dict[str, Any],
+        user_feedback: str | None = None,
+    ) -> CV:
         """
         Generate a tailored CV for a specific job posting
 
         Args:
             master_cv: Complete CV data in JSON format
             job_posting: Job posting information with keys: title, company, description, requirements
-            user_feedback: Optional feedback from user for retry
+            user_feedback: Optional feedback from user for retry/refinement
 
         Returns:
-            Tailored CV as JSON
+            Tailored CV as validated Pydantic model
+
+        Raises:
+            CVCompositionError: If LLM generation or validation fails
         """
         logger.info(
             f"Composing CV for job: {job_posting.get('title')} at {job_posting.get('company')}"
@@ -159,32 +75,37 @@ class CVComposer:
 
         # Step 1: Analyze job description to extract requirements
         job_summary = self._summarize_job(job_posting)
-        logger.debug(f"Job summary: {job_summary}")
+        logger.debug("Job analysis completed")
 
         # Step 2: Generate all CV sections in a single LLM call (optimized)
         # This replaces 6 separate LLM calls with 1, reducing latency by ~3.5x
-        generated_sections = self._compose_all_sections(master_cv, job_summary)
+        generated_sections = self._compose_all_sections(master_cv, job_summary, user_feedback)
 
-        # Step 3: Build complete tailored CV
+        # Step 3: Validate and build pass-through fields from master CV
+        contact = self._validate_contact(master_cv.get("contact", {}))
+        languages = self._validate_languages(master_cv.get("languages", []))
+        interests = self._validate_interests(master_cv.get("interests"))
+
+        # Step 4: Build complete tailored CV
         tailored_cv = {
-            "contact": master_cv.get("contact", {}),  # Contact info unchanged
+            "contact": contact,
             "summary": generated_sections.get("summary", ""),
             "experiences": generated_sections.get("experiences", []),
             "education": generated_sections.get("education", []),
             "skills": generated_sections.get("skills", []),
             "projects": generated_sections.get("projects", []),
             "certifications": generated_sections.get("certifications", []),
-            "languages": master_cv.get("languages", []),  # Languages unchanged
-            "interests": master_cv.get("interests"),  # Interests unchanged (optional)
+            "languages": languages,
+            "interests": interests,
         }
 
-        # Step 4: Validate output against master CV
+        # Step 5: Validate output against master CV
         validated_cv = self._validate_output(tailored_cv, master_cv)
 
         logger.info("CV composition completed successfully")
         return validated_cv
 
-    def _summarize_job(self, job_posting: dict) -> dict:
+    def _summarize_job(self, job_posting: dict[str, Any]) -> dict[str, Any]:
         """
         Analyze job description and extract key requirements
 
@@ -201,6 +122,9 @@ class CVComposer:
                 "responsibilities": [...],
                 "nice_to_have": [...]
             }
+
+        Raises:
+            CVCompositionError: If job analysis fails
         """
         logger.debug("Summarizing job description")
 
@@ -219,52 +143,40 @@ Requirements:
         # Get prompt from external file
         prompt = self.prompts.get_job_summary_prompt(job_description=job_description)
 
-        # Define expected schema for job summary
-        schema = {
-            "type": "object",
-            "properties": {
-                "technical_skills": {"type": "array", "items": {"type": "string"}},
-                "soft_skills": {"type": "array", "items": {"type": "string"}},
-                "education_reqs": {"type": "array", "items": {"type": "string"}},
-                "experience_reqs": {
-                    "type": "object",
-                    "properties": {
-                        "years": {"type": ["integer", "null"]},
-                        "level": {"type": ["string", "null"]},
-                    },
-                },
-                "responsibilities": {"type": "array", "items": {"type": "string"}},
-                "nice_to_have": {"type": "array", "items": {"type": "string"}},
-            },
-            "required": [
-                "technical_skills",
-                "soft_skills",
-                "education_reqs",
-                "experience_reqs",
-                "responsibilities",
-                "nice_to_have",
-            ],
-        }
-
         # Generate structured summary using LLM
-        summary = self.llm.generate_json(prompt, schema=schema, temperature=0.3)
+        try:
+            summary = self.llm.generate_json(
+                prompt, schema=JOB_SUMMARY_SCHEMA, temperature=self.TEMPERATURE_ANALYSIS
+            )
+        except Exception as e:
+            logger.error(f"Failed to analyze job description: {e}")
+            raise CVCompositionError(f"Job analysis failed: {e}") from e
 
         # Validate with Pydantic model
-        job_summary = JobSummary(**summary)
+        try:
+            job_summary = JobSummary(**summary)
+        except Exception as e:
+            logger.error(f"Job summary validation failed: {e}")
+            raise CVCompositionError(f"Invalid job summary structure: {e}") from e
 
         return job_summary.model_dump()
 
-    def _compose_all_sections(self, master_cv: dict, job_summary: dict) -> dict:
+    def _compose_all_sections(
+        self,
+        master_cv: dict[str, Any],
+        job_summary: dict[str, Any],
+        user_feedback: str | None = None,
+    ) -> dict[str, Any]:
         """
         Generate complete tailored CV in a single LLM call.
 
-        This method replaces 6 separate LLM calls (_compose_summary, _compose_experiences,
-        _compose_education, _compose_skills, _compose_projects, _compose_certifications)
-        with a single unified call, reducing latency by approximately 3.5x.
+        This method replaces 6 separate LLM calls with a single unified call,
+        reducing latency by approximately 3.5x.
 
         Args:
             master_cv: Complete master CV data
             job_summary: Structured job requirements from _summarize_job()
+            user_feedback: Optional user feedback for retry/refinement
 
         Returns:
             Dictionary containing all tailored CV sections:
@@ -274,333 +186,97 @@ Requirements:
             - skills: list[dict]
             - projects: list[dict]
             - certifications: list[dict]
+
+        Raises:
+            CVCompositionError: If CV generation fails
         """
         logger.debug("Composing all CV sections in single LLM call")
 
-        # Get unified prompt
+        # Get unified prompt (includes user feedback if provided)
         prompt = self.prompts.get_full_cv_prompt(
             master_cv=master_cv,
-            job_summary=job_summary
+            job_summary=job_summary,
+            user_feedback=user_feedback,
         )
 
         # Generate complete tailored CV using unified schema
-        result = self.llm.generate_json(
-            prompt,
-            schema=FULL_CV_SCHEMA,
-            temperature=0.4
-        )
+        try:
+            result = self.llm.generate_json(
+                prompt,
+                schema=FULL_CV_SCHEMA,
+                temperature=self.TEMPERATURE_GENERATION,
+            )
+        except Exception as e:
+            logger.error(f"Failed to generate CV sections: {e}")
+            raise CVCompositionError(f"CV generation failed: {e}") from e
 
         logger.debug("Successfully generated all CV sections")
         return result
 
-    def _compose_summary(self, master_cv: dict, job_summary: dict) -> str:
+    def _validate_contact(self, contact_data: dict[str, Any]) -> dict[str, Any]:
         """
-        Generate tailored professional summary
+        Validate contact information from master CV.
 
         Args:
-            master_cv: Master CV data
-            job_summary: Structured job requirements
+            contact_data: Raw contact data from master CV
 
         Returns:
-            Tailored professional summary string
+            Validated contact data as dict
+
+        Raises:
+            CVCompositionError: If contact data is invalid
         """
-        logger.debug("Composing professional summary")
+        try:
+            contact = ContactInfo(**contact_data)
+            return contact.model_dump()
+        except Exception as e:
+            logger.error(f"Invalid contact information in master CV: {e}")
+            raise CVCompositionError(f"Invalid contact data: {e}") from e
 
-        # Extract relevant info from master CV
-        current_role = "Professional"
-        years_experience = 0
-        key_skills = []
-        achievements = []
-
-        # Try to determine current role and experience
-        experiences = master_cv.get("experiences", [])
-        if experiences:
-            # Assume first experience is most recent/current
-            current_exp = experiences[0]
-            current_role = current_exp.get("position", "Professional")
-
-            # Calculate years of experience (simplified)
-            years_experience = len(experiences) * 2  # Rough estimate
-
-            # Collect achievements from recent experiences
-            for exp in experiences[:3]:  # Top 3 experiences
-                achievements.extend(exp.get("achievements", [])[:2])  # 2 achievements each
-
-        # Collect key skills
-        skills = master_cv.get("skills", [])
-        for skill in skills[:10]:  # Top 10 skills
-            if isinstance(skill, dict):
-                key_skills.append(skill.get("name", ""))
-            else:
-                key_skills.append(str(skill))
-
-        # Get prompt
-        prompt = self.prompts.get_summary_prompt(
-            current_role=current_role,
-            years_experience=years_experience,
-            key_skills=key_skills,
-            achievements=achievements[:5],  # Top 5 achievements
-            job_summary=job_summary,
-        )
-
-        # Define schema for summary output
-        schema = {
-            "type": "object",
-            "properties": {"summary": {"type": "string"}},
-            "required": ["summary"],
-        }
-
-        # Generate summary
-        result = self.llm.generate_json(prompt, schema=schema, temperature=0.5)
-
-        return result.get("summary", master_cv.get("summary", ""))
-
-    def _compose_experiences(self, master_cv: dict, job_summary: dict) -> list[dict]:
+    def _validate_languages(self, languages_data: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """
-        Tailor work experience section
+        Validate languages from master CV.
 
         Args:
-            master_cv: Master CV data
-            job_summary: Structured job requirements
+            languages_data: Raw languages list from master CV
 
         Returns:
-            List of tailored experience entries
+            Validated languages as list of dicts
+
+        Raises:
+            CVCompositionError: If languages data is invalid
         """
-        logger.debug("Composing work experiences")
+        try:
+            languages = [Language(**lang) for lang in languages_data]
+            return [lang.model_dump() for lang in languages]
+        except Exception as e:
+            logger.error(f"Invalid languages in master CV: {e}")
+            raise CVCompositionError(f"Invalid languages data: {e}") from e
 
-        experiences = master_cv.get("experiences", [])
-        if not experiences:
-            return []
-
-        # Get prompt
-        prompt = self.prompts.get_experience_prompt(
-            experiences=experiences, job_summary=job_summary
-        )
-
-        # Define expected schema
-        schema = {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "company": {"type": "string"},
-                    "position": {"type": "string"},
-                    "start_date": {"type": "string"},
-                    "end_date": {"type": ["string", "null"]},
-                    "is_current": {"type": "boolean"},
-                    "location": {"type": ["string", "null"]},
-                    "description": {"type": "string"},
-                    "achievements": {"type": "array", "items": {"type": "string"}},
-                    "technologies": {"type": "array", "items": {"type": "string"}},
-                    "projects": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "name": {"type": "string"},
-                                "role": {"type": ["string", "null"]},
-                                "description": {"type": "string"},
-                                "achievements": {"type": "array", "items": {"type": "string"}},
-                                "technologies": {"type": "array", "items": {"type": "string"}},
-                                "duration": {"type": ["string", "null"]},
-                            },
-                            "required": ["name", "description"],
-                        },
-                    },
-                    "company_context": {
-                        "type": ["object", "null"],
-                        "properties": {
-                            "industry": {"type": ["string", "null"]},
-                            "size": {"type": ["string", "null"]},
-                            "notable_clients": {"type": "array", "items": {"type": "string"}},
-                        },
-                    },
-                },
-                "required": ["company", "position", "start_date", "description"],
-            },
-        }
-
-        # Generate tailored experiences
-        tailored_experiences = self.llm.generate_json(prompt, schema=schema, temperature=0.4)
-
-        return tailored_experiences
-
-    def _compose_education(self, master_cv: dict, job_summary: dict) -> list[dict]:
+    def _validate_interests(self, interests_data: dict[str, Any] | None) -> dict[str, Any] | None:
         """
-        Tailor education section
+        Validate interests from master CV.
 
         Args:
-            master_cv: Master CV data
-            job_summary: Structured job requirements
+            interests_data: Raw interests data from master CV (optional)
 
         Returns:
-            List of tailored education entries
+            Validated interests as dict, or None if not provided
+
+        Raises:
+            CVCompositionError: If interests data is invalid
         """
-        logger.debug("Composing education section")
+        if interests_data is None:
+            return None
 
-        education = master_cv.get("education", [])
-        if not education:
-            return []
+        try:
+            interests = Interests(**interests_data)
+            return interests.model_dump()
+        except Exception as e:
+            logger.error(f"Invalid interests in master CV: {e}")
+            raise CVCompositionError(f"Invalid interests data: {e}") from e
 
-        # Get prompt
-        prompt = self.prompts.get_education_prompt(education=education, job_summary=job_summary)
-
-        # Define expected schema
-        schema = {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "institution": {"type": "string"},
-                    "degree": {"type": "string"},
-                    "field_of_study": {"type": "string"},
-                    "start_date": {"type": "string"},
-                    "end_date": {"type": ["string", "null"]},
-                    "is_current": {"type": "boolean"},
-                    "location": {"type": ["string", "null"]},
-                    "grade": {"type": ["string", "null"]},
-                    "achievements": {"type": "array", "items": {"type": "string"}},
-                },
-                "required": ["institution", "degree", "field_of_study", "start_date"],
-            },
-        }
-
-        # Generate tailored education
-        tailored_education = self.llm.generate_json(prompt, schema=schema, temperature=0.3)
-
-        return tailored_education
-
-    def _compose_skills(self, master_cv: dict, job_summary: dict) -> list[dict]:
-        """
-        Optimize skills section for job relevance
-
-        Args:
-            master_cv: Master CV data
-            job_summary: Structured job requirements
-
-        Returns:
-            List of skill category objects
-        """
-        logger.debug("Composing skills section")
-
-        skills = master_cv.get("skills", [])
-        if not skills:
-            return []
-
-        # Get prompt
-        prompt = self.prompts.get_skills_prompt(skills=skills, job_summary=job_summary)
-
-        # Define expected schema
-        schema = {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string"},
-                    "category": {"type": "string"},
-                    "proficiency": {"type": ["string", "null"]},
-                    "years_of_experience": {"type": ["string", "null"]},
-                    "use_cases": {"type": "array", "items": {"type": "string"}},
-                },
-                "required": ["name", "category"],
-            },
-        }
-
-        # Generate tailored skills
-        tailored_skills = self.llm.generate_json(prompt, schema=schema, temperature=0.3)
-
-        return tailored_skills
-
-    def _compose_projects(self, master_cv: dict, job_summary: dict) -> list[dict]:
-        """
-        Highlight relevant projects
-
-        Args:
-            master_cv: Master CV data
-            job_summary: Structured job requirements
-
-        Returns:
-            List of tailored project entries
-        """
-        logger.debug("Composing projects section")
-
-        projects = master_cv.get("projects", [])
-        if not projects:
-            return []
-
-        # Get prompt
-        prompt = self.prompts.get_projects_prompt(projects=projects, job_summary=job_summary)
-
-        # Define expected schema (with status, last_updated, role, architecture, visibility)
-        schema = {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string"},
-                    "description": {"type": "string"},
-                    "url": {"type": ["string", "null"]},
-                    "technologies": {"type": "array", "items": {"type": "string"}},
-                    "achievements": {"type": "array", "items": {"type": "string"}},
-                    "status": {"type": ["string", "null"], "enum": ["active", "archived", "production", "completed", None]},
-                    "last_updated": {"type": ["string", "null"]},
-                    "role": {"type": ["string", "null"]},
-                    "architecture": {"type": "array", "items": {"type": "string"}},
-                    "visibility": {"type": ["string", "null"], "enum": ["public", "private", None]},
-                },
-                "required": ["name", "description"],
-            },
-        }
-
-        # Generate tailored projects
-        tailored_projects = self.llm.generate_json(prompt, schema=schema, temperature=0.4)
-
-        return tailored_projects
-
-    def _compose_certifications(self, master_cv: dict, job_summary: dict) -> list[dict]:
-        """
-        Optimize certifications display
-
-        Args:
-            master_cv: Master CV data
-            job_summary: Structured job requirements
-
-        Returns:
-            List of relevant certification objects
-        """
-        logger.debug("Composing certifications section")
-
-        certifications = master_cv.get("certifications", [])
-        if not certifications:
-            return []
-
-        # Get prompt
-        prompt = self.prompts.get_certifications_prompt(
-            certifications=certifications, job_summary=job_summary
-        )
-
-        # Define expected schema (objects with issuer, date, description, topics)
-        schema = {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string"},
-                    "issuer": {"type": "string"},
-                    "date": {"type": ["string", "null"]},
-                    "description": {"type": ["string", "null"]},
-                    "topics": {"type": "array", "items": {"type": "string"}},
-                },
-                "required": ["name", "issuer"],
-            },
-        }
-
-        # Generate tailored certifications
-        tailored_certifications = self.llm.generate_json(prompt, schema=schema, temperature=0.3)
-
-        return tailored_certifications
-
-    def _validate_output(self, tailored_cv: dict, master_cv: dict) -> dict:
+    def _validate_output(self, tailored_cv: dict[str, Any], master_cv: dict[str, Any]) -> CV:
         """
         Validate tailored CV against master CV to prevent hallucinations
 
@@ -615,10 +291,10 @@ Requirements:
             master_cv: Original master CV
 
         Returns:
-            Validated CV dictionary
+            Validated CV as Pydantic model
 
         Raises:
-            ValueError: If validation fails
+            CVCompositionError: If validation fails
         """
         logger.debug("Validating tailored CV output")
 
@@ -627,7 +303,7 @@ Requirements:
             validated = CV(**tailored_cv)
         except Exception as e:
             logger.error(f"Schema validation failed: {e}")
-            raise ValueError(f"Tailored CV does not match expected schema: {e}")
+            raise CVCompositionError(f"Tailored CV does not match expected schema: {e}") from e
 
         # Hallucination check: Companies
         master_companies = {
@@ -639,9 +315,10 @@ Requirements:
 
         if not tailored_companies.issubset(master_companies):
             invalid_companies = tailored_companies - master_companies
+            # TODO: Make hallucination check configurable (strict mode raises error)
+            # In strict mode, this should raise:
+            # raise CVCompositionError(f"CV contains fabricated companies: {invalid_companies}")
             logger.warning(f"Tailored CV contains new companies: {invalid_companies}")
-            # Note: In production, you might want to raise an error here
-            # For now, we'll just log a warning
 
         # Hallucination check: Institutions
         master_institutions = {
@@ -653,12 +330,15 @@ Requirements:
 
         if not tailored_institutions.issubset(master_institutions):
             invalid_institutions = tailored_institutions - master_institutions
+            # TODO: Make hallucination check configurable (strict mode raises error)
             logger.warning(f"Tailored CV contains new institutions: {invalid_institutions}")
 
-        # Hallucination check: Skills (with some flexibility for reorganization)
-        # We'll allow the LLM to reorganize and categorize skills differently
-        # but check that core skill names are preserved
+        # TODO: Implement retry logic for validation failures
+        # When validation fails (especially for hallucinations), we could:
+        # 1. Retry with lower temperature
+        # 2. Add explicit anti-hallucination instructions to the prompt
+        # 3. Use a configurable max_retries parameter
 
         logger.info("Validation completed successfully")
 
-        return validated.model_dump()
+        return validated

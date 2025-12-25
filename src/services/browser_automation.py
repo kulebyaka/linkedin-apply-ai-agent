@@ -1,13 +1,12 @@
 """Service for browser automation using Playwright"""
 
-from typing import Dict
-from playwright.async_api import async_playwright, Browser, Page
+from playwright.async_api import Browser, Page
 
 
 class LinkedInAutomation:
     """Automates LinkedIn job applications using Playwright"""
 
-    def __init__(self, credentials: Dict):
+    def __init__(self, credentials: dict):
         self.email = credentials.get("email")
         self.password = credentials.get("password")
         self.browser: Browser | None = None
@@ -24,7 +23,7 @@ class LinkedInAutomation:
         # Handle 2FA if needed (might need HITL)
         raise NotImplementedError
 
-    async def apply_to_job(self, job_url: str, cv_path: str) -> Dict:
+    async def apply_to_job(self, job_url: str, cv_path: str) -> dict:
         """
         Apply to a job on LinkedIn
 

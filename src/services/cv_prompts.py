@@ -201,7 +201,12 @@ class CVPromptManager:
             job_summary=json.dumps(job_summary, indent=2)
         )
 
-    def get_full_cv_prompt(self, master_cv: Dict, job_summary: Dict) -> str:
+    def get_full_cv_prompt(
+        self,
+        master_cv: Dict,
+        job_summary: Dict,
+        user_feedback: Optional[str] = None
+    ) -> str:
         """
         Get prompt for generating complete tailored CV in a single LLM call.
 
@@ -211,13 +216,24 @@ class CVPromptManager:
         Args:
             master_cv: Complete master CV data
             job_summary: Structured job requirements from job analysis
+            user_feedback: Optional user feedback for retry/refinement
 
         Returns:
             Formatted prompt for full CV generation
         """
         import json
+
+        # Build user feedback section if provided
+        user_feedback_section = ""
+        if user_feedback:
+            user_feedback_section = f"""## User Feedback (IMPORTANT - Address these points):
+{user_feedback}
+
+Please regenerate the CV addressing the feedback above while maintaining all other requirements."""
+
         return self.loader.get_template(
             "full_cv",
             master_cv=json.dumps(master_cv, indent=2),
-            job_summary=json.dumps(job_summary, indent=2)
+            job_summary=json.dumps(job_summary, indent=2),
+            user_feedback_section=user_feedback_section
         )

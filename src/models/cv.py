@@ -117,6 +117,76 @@ class CV(BaseModel):
     interests: Optional[Interests] = None  # NEW
 
 
+# =============================================================================
+# LLM Output Models
+# =============================================================================
+# These models represent LLM-generated output with string dates.
+# LLMs return date strings (e.g., "2020-01-15") which the main CV model
+# will parse into Python date objects during final validation.
+
+
+class ExperienceLLM(BaseModel):
+    """Experience entry as returned by LLM (string dates)"""
+    company: str
+    position: str
+    start_date: str  # LLM returns string, CV model parses to date
+    end_date: Optional[str] = None
+    is_current: bool = False
+    location: Optional[str] = None
+    description: str
+    achievements: List[str] = Field(default_factory=list)
+    technologies: List[str] = Field(default_factory=list)
+    projects: List[ExperienceProject] = Field(default_factory=list)
+    company_context: Optional[CompanyContext] = None
+
+
+class EducationLLM(BaseModel):
+    """Education entry as returned by LLM (string dates)"""
+    institution: str
+    degree: str
+    field_of_study: str
+    start_date: str
+    end_date: Optional[str] = None
+    is_current: bool = False
+    location: Optional[str] = None
+    gpa: Optional[str] = None
+    achievements: List[str] = Field(default_factory=list)
+
+
+class ProjectLLM(BaseModel):
+    """Project entry as returned by LLM (string dates)"""
+    name: str
+    description: str
+    url: Optional[str] = None
+    technologies: List[str] = Field(default_factory=list)
+    achievements: List[str] = Field(default_factory=list)
+    status: Optional[str] = None  # Relaxed from Literal for LLM flexibility
+    last_updated: Optional[str] = None
+    role: Optional[str] = None
+    architecture: List[str] = Field(default_factory=list)
+    visibility: Optional[str] = None
+
+
+class CVLLMOutput(BaseModel):
+    """
+    Schema for LLM-generated CV sections.
+
+    This model represents the structure expected from the LLM when generating
+    a tailored CV. Uses string types for dates since LLMs output date strings
+    that the main CV model will parse.
+
+    Usage:
+        schema = CVLLMOutput.model_json_schema()
+        result = llm.generate_json(prompt, schema=schema)
+    """
+    summary: str
+    experiences: List[ExperienceLLM] = Field(default_factory=list)
+    education: List[EducationLLM] = Field(default_factory=list)
+    skills: List[Skill] = Field(default_factory=list)  # No date fields, reuse
+    projects: List[ProjectLLM] = Field(default_factory=list)
+    certifications: List[Certification] = Field(default_factory=list)  # No date fields
+
+
 class ExperienceRequirements(BaseModel):
     """Experience requirements from job description"""
     years: Optional[int] = None
