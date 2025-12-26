@@ -15,33 +15,128 @@ Every hour, based on a set of filters (in the future, filters will be built base
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| **Architecture / Workflow** | 🟡 Partial | LangGraph skeleton defined in `src/agents/workflow.py`. |
+| **Two-Workflow Architecture** | ✅ Complete | Preparation + Application workflows with HITL boundary. |
 | **LLM Provider Layer** | ✅ Complete | Implemented in `src/llm/provider.py`. |
-| **Node 1: Fetch Jobs** | 🔴 Pending | `src/services/job_fetcher.py` is a skeleton. Needs LinkedIn scraping/API logic. |
-| **Node 2: Filter Job** | 🔴 Pending | `src/services/job_filter.py` skeleton exists. Prompts defined but LLM call generic. |
-| **Node 3: Compose Tailored CV**| ✅ Complete | `src/services/cv_composer.py` fully implemented with logic to tailor all sections. |
-| **Node 4: Generate PDF** | ✅ Complete | `src/services/pdf_generator.py` fully implemented & tested. Uses WeasyPrint + Jinja2. |
-| **Node 5: Human Review** | 🔴 Pending | Logic in workflow exists, but UI/API interaction needs implementation. |
-| **Node 6: Apply on LinkedIn** | 🔴 Pending | `src/services/browser_automation.py` is a skeleton. Needs Playwright implementation. |
-| **MVP Workflow** | ✅ Complete | Separate on-demand flow (`src/agents/mvp_workflow.py` + `src/api/main.py`) for direct CV generation via API. |
+| **Job Source Adapters** | 🟡 Interface | `src/services/job_source.py` - interface only, no implementation. |
+| **Data Access Layer (DAL)** | 🟡 Stubs | `src/services/job_repository.py` - stubs only, no persistence. |
+| **Preparation Workflow** | ✅ Complete | `src/agents/preparation_workflow.py` - extract → filter → compose → PDF → save. |
+| **Retry Workflow** | ✅ Complete | `src/agents/retry_workflow.py` - regenerate CV with user feedback. |
+| **Application Workflow** | 🟡 Stubs | `src/agents/application_workflow.py` - stubs only, deep agent not implemented. |
+| **Compose Tailored CV** | ✅ Complete | `src/services/cv_composer.py` fully implemented. |
+| **Generate PDF** | ✅ Complete | `src/services/pdf_generator.py` fully implemented. Uses WeasyPrint + Jinja2. |
+| **HITL API Endpoints** | ✅ Complete | `src/api/main.py` - batch review, approve/decline/retry endpoints. |
+| **Unified Data Models** | ✅ Complete | `src/models/unified.py` - Pydantic models for new architecture. |
+| **Job Filter (LLM)** | 🔴 Pending | `src/services/job_filter.py` skeleton exists. |
+| **Browser Automation** | 🔴 Pending | `src/services/browser_automation.py` is a skeleton. |
 
-## MVP On-Demand CV Generation (Implemented)
+## Two-Workflow Pipeline Architecture
 
-This verified implementation runs separately from the main scheduled workflow to allow immediate testing and usage of core CV features.
+The system uses a **two-workflow pipeline** split at the HITL boundary, enabling batch review of generated CVs.
 
-**Features:**
-- **Trigger**: HTTP POST request to `/api/cv/generate`
-- **Output**: PDF file download via `/api/cv/download/{id}`
-- **Flow**: User Input -> Compose CV -> Generate PDF -> Download
-- **Status Tracking**: Async background processing with polling endpoint `/api/cv/status/{id}`
-- **Error Handling**: Preserves error messages from composition failures into the PDF node state for debugging.
-- **Strict Validation**: Uses OpenAI's `strict` structured outputs mode for 100% JSON schema adherence.
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         PREPARATION WORKFLOW                                 │
+│  (runs continuously, processes jobs, saves to DB for batch review)          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   Job Source ──► Extract ──► Filter ──► Compose CV ──► Generate PDF ──► DB │
+│   (URL/Manual)                                                    (pending) │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+                        ┌───────────────────────┐
+                        │    HITL BOUNDARY      │
+                        │  (Tinder-like batch   │
+                        │   review UI)          │
+                        │                       │
+                        │  ✓ Approve            │
+                        │  ✗ Decline            │
+                        │  ↻ Retry + feedback   │
+                        └───────────────────────┘
+                                    │
+              ┌─────────────────────┼─────────────────────┐
+              ▼                     ▼                     ▼
+┌─────────────────────┐  ┌─────────────────┐  ┌─────────────────────┐
+│ APPLICATION WORKFLOW│  │  RETRY WORKFLOW │  │      DECLINED       │
+│ (triggered on       │  │  (regenerate CV │  │   (no action)       │
+│  approve)           │  │   with feedback)│  │                     │
+├─────────────────────┤  ├─────────────────┤  └─────────────────────┘
+│ Load ──► Apply ──►  │  │ Load ──► Compose│
+│          Update DB  │  │   ──► PDF ──►   │
+│                     │  │      Update DB  │
+│ (stubs only -       │  │                 │
+│  deep agent future) │  │ (loops back to  │
+│                     │  │  HITL pending)  │
+└─────────────────────┘  └─────────────────┘
+```
 
-**Files:**
-- `src/agents/mvp_workflow.py`: The LangGraph state machine definition.
-- `src/models/mvp.py`: API request/response Pydantic models.
-- `src/api/main.py`: FastAPI endpoints for control.
+### Workflow Files
 
+| Workflow | File | Description |
+|----------|------|-------------|
+| Preparation | `src/agents/preparation_workflow.py` | Main pipeline: job input → CV PDF → DB |
+| Retry | `src/agents/retry_workflow.py` | Re-compose CV with user feedback |
+| Application | `src/agents/application_workflow.py` | Apply to job (stubs only) |
+
+### Workflow Modes
+
+- **MVP Mode** (`mode="mvp"`): Generate PDF only, skip HITL, status = `completed`
+- **Full Mode** (`mode="full"`): Generate PDF, save to DB with status = `pending` for HITL review
+
+### Job Sources
+
+Defined in `src/services/job_source.py` (interface only):
+
+| Source | Description | Status |
+|--------|-------------|--------|
+| `url` | Extract job from external URL (lever.co, greenhouse.io, etc.) | Interface only |
+| `manual` | User provides job description directly | Interface only |
+| `linkedin` | LinkedIn API/scraping (future) | Not implemented |
+
+## API Endpoints
+
+### Unified Endpoints (New)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/jobs/submit` | Submit job for CV generation (URL or manual input) |
+| GET | `/api/jobs/{job_id}/status` | Get job status and details |
+| GET | `/api/jobs/{job_id}/pdf` | Download generated CV PDF |
+| GET | `/api/hitl/pending` | Get all jobs pending HITL review |
+| POST | `/api/hitl/{job_id}/decide` | Submit HITL decision (approve/decline/retry) |
+| GET | `/api/hitl/history` | Get application history |
+
+### Legacy Endpoints (Backward Compatible)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/cv/generate` | Submit CV generation (uses preparation_workflow with MVP mode) |
+| GET | `/api/cv/status/{job_id}` | Get CV generation status |
+| GET | `/api/cv/download/{job_id}` | Download generated CV PDF |
+
+## Data Models
+
+Defined in `src/models/unified.py`:
+
+- `JobSubmitRequest` - Input for job submission (source, mode, url/job_description)
+- `JobSubmitResponse` - Response with job_id and status
+- `HITLDecision` - User decision (approved/declined/retry + feedback)
+- `HITLDecisionResponse` - Response after decision processed
+- `PendingApproval` - Job details for HITL review UI
+- `JobStatusResponse` - Full job status with CV and PDF info
+- `JobRecord` - Database record for job persistence
+- `ApplicationHistoryItem` - History entry for completed jobs
+
+## Deleted Files
+
+The following files were removed as part of the two-workflow architecture refactoring:
+
+| File | Reason |
+|------|--------|
+| `src/agents/mvp_workflow.py` | Superseded by `preparation_workflow.py` with `mode="mvp"` |
+| `src/agents/workflow.py` | Superseded by new two-workflow architecture |
+| `src/services/cv_generation_service.py` | Functionality moved to workflows |
 
 ## Architecture: Job Application Automation Agent
 
@@ -49,41 +144,59 @@ Orchestrated Workflow with LangGraph (Modular Pipeline)
 
 Overview: This option keeps a Python-centric solution but introduces a structured workflow/orchestration framework – specifically LangGraph (a 2025 successor to LangChain that uses explicit graph/state machine definitions for LLM-driven tasks). Instead of one big script, we define the pipeline as a directed graph of tasks: nodes for each step (job search, filtering, CV crafting, application, etc.) and edges to control flow (including conditional branches and human approval loops). All components can still run on one VPS (perhaps as separate threads or async tasks), but logically they are modular. This design provides more control and observability than a basic script, and it naturally integrates the HITL steps and multi-model support through the LangGraph framework features.
 
-Design & Components:
+### Design Principles
 
-Workflow Definition: Using LangGraph, we model each stage as a node in an agent workflow graph
+1. **Two-Workflow Split**: Separating at HITL boundary allows batch processing of pending approvals
+2. **Mode Parameter**: Single workflow handles both MVP (immediate) and Full (HITL) modes
+3. **Job Source Adapters**: Abstract interface for URL extraction, manual input, LinkedIn API
+4. **Repository Pattern**: DAL abstraction for future database persistence (currently in-memory stubs)
 
-For example:
+### Node Descriptions
 
-Node 1: Fetch Jobs [PENDING] – an extraction node that gets job postings. It uses a "Clean & Extract" strategy:
-    1. Fetch raw HTML of the job posting (via Playwright or HTTP request).
-    2. Convert HTML to clean Markdown (stripping boilerplate, keeping structure).
-    3. Send the full Markdown to a cost-effective High-Context LLM (e.g., GPT-4o-mini or DeepSeek) to directly extract structured data (Role, Company, Description, Requirements) using a strict JSON schema.
-    This modern approach avoids the complexity of vector databases (RAG) and is more robust than CSS selectors alongside being cost-effective with current models.
+**Preparation Workflow Nodes:**
 
-Node 2: Filter Job (LLM) [PENDING] – an LLM task node that takes the structured job description and user filter criteria, and returns a boolean or score. If the LLM (e.g., GPT-4o-mini or DeepSeek model) says the job is unsuitable, a branch directs the flow to skip applying for that job.
+1. **extract_job_node** - Extracts structured job data from raw input (URL or manual)
+2. **filter_job_node** - LLM evaluates job suitability (currently passthrough)
+3. **compose_cv_node** - LLM tailors CV to job description
+4. **generate_pdf_node** - Creates PDF from tailored CV JSON
+5. **save_to_db_node** - Persists job record (MVP: completed, Full: pending)
 
-Node 3: Compose Tailored CV [COMPLETED] – an LLM node that takes the user’s master CV data and the job description, and outputs structured data (JSON) for a tailored resume. LangGraph supports maintaining long-term memory or context, but here we mainly need a single-step prompt. The output can be validated by a Python function sub-node (to ensure JSON format).
-    - *Implementation Status:* Fully implemented in `src/services/cv_composer.py`. Handles summarization, experience tailoring, and strict schema validation.
+**Retry Workflow Nodes:**
 
-Node 4: Generate PDF [COMPLETED] – a tool node that converts the JSON to PDF (calls a Python function using a library like WeasyPrint).
-    - *Implementation Status:* Fully implemented in `src/services/pdf_generator.py`. Includes unit tests and modern Jinja2 templates.
+1. **load_from_db_node** - Loads job record for retry
+2. **compose_cv_node** - Re-composes CV with user feedback
+3. **generate_pdf_node** - Regenerates PDF
+4. **update_db_node** - Updates record, returns to pending status
 
-Node 5: Human Review [PENDING] – this is a special Human-in-the-Loop node where execution pauses until a human approves. One of LangGraph’s features is the ability to insert moderation or approval steps so that an agent’s action can require external confirmation
-We can configure this node to present the job info and PDF to the user. In practice, LangGraph might expose a UI or at least an API where our front-end can fetch pending approvals. We’d likely implement a small web frontend that reads from a LangGraph monitoring API or database to show the pending application and has buttons to respond (approve/decline/retry with note). The user’s decision can be fed back into the workflow (LangGraph might treat it as an input message that triggers the next path).
+**Application Workflow Nodes (Stubs):**
 
-- If approved, flow continues.
+1. **load_from_db_node** - Loads approved job
+2. **apply_deep_agent_node** - Browser automation via Playwright MCP (not implemented)
+3. **apply_linkedin_node** - LinkedIn Easy Apply automation (not implemented)
+4. **apply_manual_node** - Marks job for manual application
+5. **update_db_node** - Records application result
 
-- If declined, flow ends for that job (and maybe logs the reason).
+### Multi-LLM Support
 
-- If retry with changes, we could loop back to Node 3 (CV composition) with the user’s feedback appended to the prompt (this is where LangGraph’s dynamic graph capabilities shine – we can loop or adjust and call the LLM again).
+LangGraph is model-agnostic; we can configure different LLM nodes to use different providers. For example, perhaps use a cheaper model (like DeepSeek or Grok) for the filtering step and a more powerful one (GPT-4) for generating the tailored CV content. Each LLM node can be configured with an API key and model name, and switching providers is as easy as changing that configuration.
 
-Node 6: Apply on LinkedIn [PENDING] – a final action node that uses an automation tool to submit the application. This could be implemented via a tool integration (LangGraph can likely call Python functions or shell commands; we’d have a function for the browser automation to log in and apply).
+### HITL Integration
 
-Execution: The LangGraph workflow can be triggered on a schedule. We might still use an external scheduler (cron) to start it hourly, or use LangGraph’s own scheduling capabilities if it has any. Each run processes available new jobs. Because the workflow is defined at a high level, LangGraph can potentially run multiple jobs in parallel (for example, multiple instances of the graph for different postings). However, caution is needed with concurrency if using the same browser session – likely we process jobs sequentially or with limited concurrency.
+The two-workflow architecture enables true batch HITL:
 
-Multi-LLM Support: LangGraph is model-agnostic; we can configure different LLM nodes to use different providers. For example, perhaps use a cheaper model (like DeepSeek or Grok) for the filtering step and a more powerful one (GPT-4) for generating the tailored CV content. LangGraph’s Strategic LLM Selection guide 
-docs.crewai.com
- suggests it supports choosing models per task. Each LLM node can be configured with an API key and model name, and switching providers is as easy as changing that configuration (no code changes to the workflow logic). This satisfies the requirement to support at least three providers – we just plug their APIs into the LangGraph LLM interface. (If needed, fallback logic can be included: e.g., if one call fails or returns insufficient info, try another model. This can be done via conditional branches or error handlers in the graph.)
+1. **Preparation Workflow** runs continuously, generating CVs and saving them with `status=pending`
+2. **HITL UI** (Tinder-like) queries `/api/hitl/pending` to show batch of pending jobs
+3. **User reviews** each job+CV, swipes right (approve), left (decline), or down (retry with feedback)
+4. **Decisions** submitted via `/api/hitl/{job_id}/decide` trigger appropriate workflow:
+   - Approve → Application Workflow (stubs)
+   - Decline → Mark as declined, no action
+   - Retry → Retry Workflow with feedback
 
-HITL Integration: As mentioned, one big advantage of LangGraph is first-class support for human approvals. It allows the agent to pause and wait for a human decision mid-flow. Implementing the UI for this might require using LangChain’s or LangGraph’s UI modules or building a custom small app. Since this is self-hosted, we can run a minimal web server (Flask/FastAPI) that the user can connect to. LangGraph might store pending actions in a memory or database which our UI can query. Once the user clicks approve/decline, the UI calls a LangGraph API to resume the workflow along the chosen path. This mechanism ensures no application is submitted without approval. It also allows incorporating user feedback (notes on why declined or what to change for retry). Those can be fed back into the LLM prompt for a second iteration.
+## Next Steps
+
+1. **Implement Job Source Adapters** - URL extraction using HTTP + LLM, manual input processing
+2. **Implement DAL** - SQLite or PostgreSQL persistence for job records
+3. **Build HITL Frontend** - Tinder-like React/Vue UI for batch review
+4. **Implement Application Workflow** - Deep agent with Playwright MCP for browser automation
+5. **Add Job Filter Logic** - LLM-based job suitability evaluation
+6. **LinkedIn Integration** - Job fetching and Easy Apply automation
