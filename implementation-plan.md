@@ -23,7 +23,6 @@ Every hour, based on a set of filters (in the future, filters will be built base
 | **Node 4: Generate PDF** | ✅ Complete | `src/services/pdf_generator.py` fully implemented & tested. Uses WeasyPrint + Jinja2. |
 | **Node 5: Human Review** | 🔴 Pending | Logic in workflow exists, but UI/API interaction needs implementation. |
 | **Node 6: Apply on LinkedIn** | 🔴 Pending | `src/services/browser_automation.py` is a skeleton. Needs Playwright implementation. |
-| **Node 7: Notification** | 🔴 Pending | `src/services/notification.py` is a skeleton. |
 | **MVP Workflow** | ✅ Complete | Separate on-demand flow (`src/agents/mvp_workflow.py` + `src/api/main.py`) for direct CV generation via API. |
 
 ## MVP On-Demand CV Generation (Implemented)
@@ -80,8 +79,6 @@ We can configure this node to present the job info and PDF to the user. In pract
 - If retry with changes, we could loop back to Node 3 (CV composition) with the user’s feedback appended to the prompt (this is where LangGraph’s dynamic graph capabilities shine – we can loop or adjust and call the LLM again).
 
 Node 6: Apply on LinkedIn [PENDING] – a final action node that uses an automation tool to submit the application. This could be implemented via a tool integration (LangGraph can likely call Python functions or shell commands; we’d have a function for the browser automation to log in and apply).
-
-Node 7: Notification [PENDING] – an error-handling path that sends a notification if any previous node failed. LangGraph allows adding handlers for exceptions or timeouts; these can trigger a function to send a webhook or email alert to the user.
 
 Execution: The LangGraph workflow can be triggered on a schedule. We might still use an external scheduler (cron) to start it hourly, or use LangGraph’s own scheduling capabilities if it has any. Each run processes available new jobs. Because the workflow is defined at a high level, LangGraph can potentially run multiple jobs in parallel (for example, multiple instances of the graph for different postings). However, caution is needed with concurrency if using the same browser session – likely we process jobs sequentially or with limited concurrency.
 
