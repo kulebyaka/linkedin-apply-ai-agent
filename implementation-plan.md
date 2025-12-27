@@ -137,6 +137,8 @@ The following files were removed as part of the two-workflow architecture refact
 | `src/agents/mvp_workflow.py` | Superseded by `preparation_workflow.py` with `mode="mvp"` |
 | `src/agents/workflow.py` | Superseded by new two-workflow architecture |
 | `src/services/cv_generation_service.py` | Functionality moved to workflows |
+| `src/services/job_fetcher.py` | Superseded by `job_source.py` adapters |
+| `src/models/application.py` | Superseded by `unified.py` models (`HITLDecision`, etc.) |
 
 ## Architecture: Job Application Automation Agent
 

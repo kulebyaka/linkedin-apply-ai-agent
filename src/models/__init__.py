@@ -12,8 +12,7 @@ from .unified import (
     ApplicationHistoryItem,
 )
 from .mvp import JobDescriptionInput, CVGenerationResponse, CVGenerationStatus
-from .job import JobPosting, JobFilter, JobEvaluation
-from .application import ApplicationStatus, UserApproval, ApplicationResult
+from .job import JobPosting
 from .cv import CV, ContactInfo, Experience, Education, Skill, Project
 
 __all__ = [
@@ -33,12 +32,6 @@ __all__ = [
     "CVGenerationStatus",
     # Job models
     "JobPosting",
-    "JobFilter",
-    "JobEvaluation",
-    # Application models
-    "ApplicationStatus",
-    "UserApproval",
-    "ApplicationResult",
     # CV models
     "CV",
     "ContactInfo",

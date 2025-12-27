@@ -10,22 +10,22 @@ This workflow handles the first half of the two-workflow pipeline:
 The workflow ends at the HITL boundary. Application is handled by a separate workflow.
 """
 
-import logging
 import json
-from typing import TypedDict, Literal, Any
-from pathlib import Path
+import logging
 from datetime import datetime
+from pathlib import Path
+from typing import Literal, TypedDict
 
-from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.graph import END, StateGraph
 
-from ..services.cv_composer import CVComposer
-from ..services.pdf_generator import PDFGenerator
-from ..services.job_source import JobSourceFactory, JobExtractionError
-from ..services.job_repository import JobRepository, InMemoryJobRepository
-from ..llm.provider import LLMClientFactory, LLMProvider
 from ..config.settings import get_settings
+from ..llm.provider import LLMClientFactory, LLMProvider
 from ..models.unified import JobRecord
+from ..services.cv_composer import CVComposer
+from ..services.job_repository import InMemoryJobRepository, JobRepository
+from ..services.job_source import JobExtractionError, JobSourceFactory
+from ..services.pdf_generator import PDFGenerator
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -110,11 +110,7 @@ def create_preparation_workflow() -> StateGraph:
     workflow.add_conditional_edges(
         "extract_job",
         route_after_extract,
-        {
-            "filter": "filter_job",
-            "compose": "compose_cv",
-            "error": END
-        }
+        {"filter": "filter_job", "compose": "compose_cv", "error": END},
     )
 
     workflow.add_edge("filter_job", "compose_cv")
@@ -144,6 +140,7 @@ def route_after_extract(state: PreparationWorkflowState) -> str:
 # =============================================================================
 # Workflow Nodes
 # =============================================================================
+
 
 def extract_job_node(state: PreparationWorkflowState) -> PreparationWorkflowState:
     """Extract job data from source using appropriate adapter.
@@ -192,10 +189,11 @@ def extract_job_node(state: PreparationWorkflowState) -> PreparationWorkflowStat
             # For now, we catch the NotImplementedError and provide a stub response
             try:
                 import asyncio
+
                 job_posting = asyncio.run(adapter.extract(raw_input))
                 state["job_posting"] = job_posting
                 state["current_step"] = "job_extracted"
-            except NotImplementedError as e:
+            except NotImplementedError:
                 # Stub: For URL source, try to use raw_input directly if it has required fields
                 if source == "url" and "url" in raw_input:
                     logger.warning(f"URL extraction not implemented, using stub for {job_id}")
@@ -210,7 +208,9 @@ def extract_job_node(state: PreparationWorkflowState) -> PreparationWorkflowStat
                         "is_remote": True,
                     }
                     state["current_step"] = "job_extracted"
-                    state["error_message"] = f"Note: URL extraction pending implementation. Using provided data."
+                    state["error_message"] = (
+                        "Note: URL extraction pending implementation. Using provided data."
+                    )
                 else:
                     raise
 
@@ -273,10 +273,7 @@ def compose_cv_node(state: PreparationWorkflowState) -> PreparationWorkflowState
         llm_client = _init_llm_client()
 
         # Initialize CV composer
-        cv_composer = CVComposer(
-            llm_client=llm_client,
-            prompts_dir=settings.prompts_dir
-        )
+        cv_composer = CVComposer(llm_client=llm_client, prompts_dir=settings.prompts_dir)
 
         # Get master CV and job posting from state
         master_cv = state.get("master_cv")
@@ -293,9 +290,7 @@ def compose_cv_node(state: PreparationWorkflowState) -> PreparationWorkflowState
             f"{job_posting.get('title')} at {job_posting.get('company')}"
         )
         tailored_cv = cv_composer.compose_cv(
-            master_cv=master_cv,
-            job_posting=job_posting,
-            user_feedback=user_feedback
+            master_cv=master_cv, job_posting=job_posting, user_feedback=user_feedback
         )
 
         # Update state
@@ -349,17 +344,13 @@ def generate_pdf_node(state: PreparationWorkflowState) -> PreparationWorkflowSta
         company = job_posting.get("company", "unknown")
 
         # Generate safe filename
-        safe_company = "".join(
-            c for c in company if c.isalnum() or c in (' ', '-', '_')
-        ).strip()
-        safe_title = "".join(
-            c for c in job_title if c.isalnum() or c in (' ', '-', '_')
-        ).strip()
+        safe_company = "".join(c for c in company if c.isalnum() or c in (" ", "-", "_")).strip()
+        safe_title = "".join(c for c in job_title if c.isalnum() or c in (" ", "-", "_")).strip()
 
         # Get candidate name from CV
         candidate_name = cv_json.get("contact", {}).get("full_name", "Unknown")
         safe_name = "".join(
-            c for c in candidate_name if c.isalnum() or c in (' ', '-', '_')
+            c for c in candidate_name if c.isalnum() or c in (" ", "-", "_")
         ).strip()
 
         # Create filename
@@ -370,8 +361,7 @@ def generate_pdf_node(state: PreparationWorkflowState) -> PreparationWorkflowSta
 
         # Initialize PDF generator
         generator = PDFGenerator(
-            template_dir=settings.cv_template_dir,
-            template_name=settings.cv_template_name
+            template_dir=settings.cv_template_dir, template_name=settings.cv_template_name
         )
 
         # Generate PDF
@@ -381,8 +371,8 @@ def generate_pdf_node(state: PreparationWorkflowState) -> PreparationWorkflowSta
             output_path=str(output_path),
             metadata={
                 "subject": f"Resume for {job_title} at {company}",
-                "keywords": f"{company}, {job_title}"
-            }
+                "keywords": f"{company}, {job_title}",
+            },
         )
 
         # Update state
@@ -448,6 +438,7 @@ def save_to_db_node(state: PreparationWorkflowState) -> PreparationWorkflowState
         repo = get_repository()
         try:
             import asyncio
+
             asyncio.run(repo.create(job_record))
             logger.info(f"Job {job_id} saved to repository with status: {final_status}")
         except NotImplementedError:
@@ -469,6 +460,7 @@ def save_to_db_node(state: PreparationWorkflowState) -> PreparationWorkflowState
 # =============================================================================
 # Helper Functions
 # =============================================================================
+
 
 def _init_llm_client():
     """Initialize LLM client based on settings."""
@@ -503,5 +495,5 @@ def load_master_cv() -> dict:
     if not cv_path.exists():
         raise FileNotFoundError(f"Master CV not found at {cv_path}")
 
-    with open(cv_path, 'r', encoding='utf-8') as f:
+    with open(cv_path, encoding="utf-8") as f:
         return json.load(f)

@@ -5,41 +5,38 @@ Provides two sets of endpoints:
 2. Unified endpoints (/api/jobs/*, /api/hitl/*) - new two-workflow pipeline
 """
 
-import uuid
 import logging
+import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Optional
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
 
-from src.config.settings import get_settings
-from src.models.application import UserApproval, ApplicationStatus
-from src.models.job import JobPosting
-from src.models.cv import TailoredCV
-from src.models.mvp import JobDescriptionInput, CVGenerationResponse, CVGenerationStatus
-from src.models.unified import (
-    JobSubmitRequest,
-    JobSubmitResponse,
-    HITLDecision,
-    HITLDecisionResponse,
-    PendingApproval,
-    JobStatusResponse,
-    ApplicationHistoryItem,
-)
 from src.agents.preparation_workflow import (
     create_preparation_workflow,
-    PreparationWorkflowState,
     load_master_cv,
+)
+from src.agents.preparation_workflow import (
     set_repository as set_prep_repository,
 )
 from src.agents.retry_workflow import (
     create_retry_workflow,
-    RetryWorkflowState,
+)
+from src.agents.retry_workflow import (
     set_repository as set_retry_repository,
+)
+from src.config.settings import get_settings
+from src.models.mvp import CVGenerationResponse, CVGenerationStatus, JobDescriptionInput
+from src.models.unified import (
+    ApplicationHistoryItem,
+    HITLDecision,
+    HITLDecisionResponse,
+    JobStatusResponse,
+    JobSubmitRequest,
+    JobSubmitResponse,
+    PendingApproval,
 )
 from src.services.job_repository import InMemoryJobRepository
 
@@ -58,16 +55,16 @@ set_retry_repository(job_repository)
 
 # In-memory thread tracking (maps job_id -> thread_id)
 # For MVP - would use Redis/PostgreSQL in production
-workflow_threads: Dict[str, str] = {}
-workflow_created_at: Dict[str, datetime] = {}  # Track creation time
+workflow_threads: dict[str, str] = {}
+workflow_created_at: dict[str, datetime] = {}  # Track creation time
 
 # Unified workflow thread tracking
-unified_threads: Dict[str, Dict] = {}  # job_id -> {thread_id, workflow_type, created_at}
+unified_threads: dict[str, dict] = {}  # job_id -> {thread_id, workflow_type, created_at}
 
 app = FastAPI(
     title="LinkedIn Job Application Agent API",
     description="API for Human-in-the-Loop job application review",
-    version="0.1.0"
+    version="0.1.0",
 )
 
 # CORS middleware
@@ -101,69 +98,12 @@ async def root():
     return {"status": "running", "message": "LinkedIn Job Application Agent API"}
 
 
-@app.get("/api/pending-approvals", response_model=List[dict])
-async def get_pending_approvals():
-    """
-    Get list of job applications pending user approval
-
-    Returns list of jobs with their tailored CVs awaiting review
-    """
-    # TODO: Implement fetching pending approvals from workflow state
-    raise HTTPException(status_code=501, detail="Not implemented")
-
-
-@app.get("/api/jobs/{job_id}")
-async def get_job_details(job_id: str):
-    """Get detailed information about a specific job"""
-    # TODO: Implement job details retrieval
-    raise HTTPException(status_code=501, detail="Not implemented")
-
-
-@app.get("/api/cv/{job_id}")
-async def get_tailored_cv(job_id: str):
-    """Get the tailored CV for a specific job"""
-    # TODO: Implement CV retrieval
-    raise HTTPException(status_code=501, detail="Not implemented")
-
-
-@app.post("/api/approve/{job_id}")
-async def approve_application(job_id: str, approval: UserApproval):
-    """
-    Submit user approval decision for a job application
-
-    Supports: approved, declined, retry
-    """
-    # TODO: Implement approval submission to workflow
-    # This should resume the paused LangGraph workflow
-    raise HTTPException(status_code=501, detail="Not implemented")
-
-
-@app.get("/api/applications/history")
-async def get_application_history():
-    """Get history of all job applications"""
-    # TODO: Implement application history retrieval
-    raise HTTPException(status_code=501, detail="Not implemented")
-
-
-@app.get("/api/stats")
-async def get_statistics():
-    """Get application statistics"""
-    # TODO: Implement statistics
-    # - Total jobs fetched
-    # - Filtered out
-    # - Pending approval
-    # - Approved
-    # - Declined
-    # - Successfully submitted
-    raise HTTPException(status_code=501, detail="Not implemented")
-
-
 # MVP CV Generation Endpoints
+
 
 @app.post("/api/cv/generate", response_model=CVGenerationResponse)
 async def generate_cv(
-    job_input: JobDescriptionInput,
-    background_tasks: BackgroundTasks
+    job_input: JobDescriptionInput, background_tasks: BackgroundTasks
 ) -> CVGenerationResponse:
     """
     Submit CV generation request
@@ -212,18 +152,13 @@ async def generate_cv(
 
         # Run workflow in background
         background_tasks.add_task(
-            run_workflow_async,
-            job_id=job_id,
-            thread_id=thread_id,
-            initial_state=initial_state
+            run_workflow_async, job_id=job_id, thread_id=thread_id, initial_state=initial_state
         )
 
         logger.info(f"Job {job_id} submitted: {job_input.title} at {job_input.company}")
 
         return CVGenerationResponse(
-            job_id=job_id,
-            status="queued",
-            message="CV generation job submitted successfully"
+            job_id=job_id, status="queued", message="CV generation job submitted successfully"
         )
 
     except Exception as e:
@@ -259,9 +194,11 @@ async def get_cv_status(job_id: str) -> CVGenerationStatus:
             job_id=job_id,
             status=state_values.get("current_step", "queued"),
             created_at=workflow_created_at.get(job_id, datetime.now()),
-            completed_at=datetime.now() if state_values.get("current_step") in ["completed", "failed"] else None,
+            completed_at=datetime.now()
+            if state_values.get("current_step") in ["completed", "failed"]
+            else None,
             error_message=state_values.get("error_message"),
-            pdf_path=state_values.get("tailored_cv_pdf_path")
+            pdf_path=state_values.get("tailored_cv_pdf_path"),
         )
 
     except HTTPException:
@@ -303,9 +240,7 @@ async def download_cv(job_id: str):
             path=str(pdf_path),
             media_type="application/pdf",
             filename=pdf_path.name,
-            headers={
-                "Content-Disposition": f'attachment; filename="{pdf_path.name}"'
-            }
+            headers={"Content-Disposition": f'attachment; filename="{pdf_path.name}"'},
         )
 
     except HTTPException:
@@ -325,7 +260,9 @@ def run_preparation_workflow_async(job_id: str, thread_id: str, initial_state: d
     try:
         config = {"configurable": {"thread_id": thread_id}}
         result = preparation_workflow.invoke(initial_state, config)
-        logger.info(f"Preparation workflow for job {job_id} completed: {result.get('current_step')}")
+        logger.info(
+            f"Preparation workflow for job {job_id} completed: {result.get('current_step')}"
+        )
     except Exception as e:
         logger.error(f"Preparation workflow for job {job_id} failed: {e}", exc_info=True)
 
@@ -342,8 +279,7 @@ def run_retry_workflow_async(job_id: str, thread_id: str, initial_state: dict):
 
 @app.post("/api/jobs/submit", response_model=JobSubmitResponse)
 async def submit_job(
-    request: JobSubmitRequest,
-    background_tasks: BackgroundTasks
+    request: JobSubmitRequest, background_tasks: BackgroundTasks
 ) -> JobSubmitResponse:
     """
     Submit a job for CV generation.
@@ -372,12 +308,14 @@ async def submit_job(
             raw_input = {"url": request.url}
             # If job_description provided, use it as fallback data
             if request.job_description:
-                raw_input.update({
-                    "title": request.job_description.title,
-                    "company": request.job_description.company,
-                    "description": request.job_description.description,
-                    "requirements": request.job_description.requirements,
-                })
+                raw_input.update(
+                    {
+                        "title": request.job_description.title,
+                        "company": request.job_description.company,
+                        "description": request.job_description.description,
+                        "requirements": request.job_description.requirements,
+                    }
+                )
         else:  # manual
             raw_input = {
                 "title": request.job_description.title,
@@ -388,6 +326,7 @@ async def submit_job(
 
         # Load master CV
         from src.agents.preparation_workflow import load_master_cv
+
         master_cv = load_master_cv()
 
         # Build initial state
@@ -415,7 +354,7 @@ async def submit_job(
             run_preparation_workflow_async,
             job_id=job_id,
             thread_id=thread_id,
-            initial_state=initial_state
+            initial_state=initial_state,
         )
 
         logger.info(f"Job {job_id} submitted: source={request.source}, mode={request.mode}")
@@ -423,7 +362,7 @@ async def submit_job(
         return JobSubmitResponse(
             job_id=job_id,
             status="queued",
-            message=f"Job submitted successfully. Mode: {request.mode}"
+            message=f"Job submitted successfully. Mode: {request.mode}",
         )
 
     except HTTPException:
@@ -534,9 +473,7 @@ async def download_job_pdf(job_id: str):
             path=str(pdf_path),
             media_type="application/pdf",
             filename=pdf_path.name,
-            headers={
-                "Content-Disposition": f'attachment; filename="{pdf_path.name}"'
-            }
+            headers={"Content-Disposition": f'attachment; filename="{pdf_path.name}"'},
         )
 
     except HTTPException:
@@ -551,8 +488,8 @@ async def download_job_pdf(job_id: str):
 # =============================================================================
 
 
-@app.get("/api/hitl/pending", response_model=List[PendingApproval])
-async def get_hitl_pending() -> List[PendingApproval]:
+@app.get("/api/hitl/pending", response_model=list[PendingApproval])
+async def get_hitl_pending() -> list[PendingApproval]:
     """
     Get all jobs pending HITL review.
 
@@ -592,14 +529,16 @@ async def get_hitl_pending() -> List[PendingApproval]:
                 state_values = state_snapshot.values
 
                 if state_values.get("current_step") == "pending":
-                    pending.append(PendingApproval(
-                        job_id=job_id,
-                        job_posting=state_values.get("job_posting", {}),
-                        cv_json=state_values.get("tailored_cv_json", {}),
-                        pdf_path=state_values.get("tailored_cv_pdf_path"),
-                        retry_count=state_values.get("retry_count", 0),
-                        created_at=thread_info["created_at"],
-                    ))
+                    pending.append(
+                        PendingApproval(
+                            job_id=job_id,
+                            job_posting=state_values.get("job_posting", {}),
+                            cv_json=state_values.get("tailored_cv_json", {}),
+                            pdf_path=state_values.get("tailored_cv_pdf_path"),
+                            retry_count=state_values.get("retry_count", 0),
+                            created_at=thread_info["created_at"],
+                        )
+                    )
             except Exception as e:
                 logger.warning(f"Failed to get state for job {job_id}: {e}")
 
@@ -612,9 +551,7 @@ async def get_hitl_pending() -> List[PendingApproval]:
 
 @app.post("/api/hitl/{job_id}/decide", response_model=HITLDecisionResponse)
 async def submit_hitl_decision(
-    job_id: str,
-    decision: HITLDecision,
-    background_tasks: BackgroundTasks
+    job_id: str, decision: HITLDecision, background_tasks: BackgroundTasks
 ) -> HITLDecisionResponse:
     """
     Submit HITL decision for a pending job.
@@ -646,7 +583,7 @@ async def submit_hitl_decision(
         if state_values.get("current_step") != "pending":
             raise HTTPException(
                 400,
-                f"Job {job_id} is not pending review (status: {state_values.get('current_step')})"
+                f"Job {job_id} is not pending review (status: {state_values.get('current_step')})",
             )
 
         if decision.decision == "approved":
@@ -660,7 +597,7 @@ async def submit_hitl_decision(
             return HITLDecisionResponse(
                 job_id=job_id,
                 status="approved",
-                message="Job approved. Application workflow not yet implemented."
+                message="Job approved. Application workflow not yet implemented.",
             )
 
         elif decision.decision == "declined":
@@ -675,7 +612,7 @@ async def submit_hitl_decision(
             return HITLDecisionResponse(
                 job_id=job_id,
                 status="declined",
-                message="Job declined. No further action will be taken."
+                message="Job declined. No further action will be taken.",
             )
 
         elif decision.decision == "retry":
@@ -707,13 +644,13 @@ async def submit_hitl_decision(
                 run_retry_workflow_async,
                 job_id=job_id,
                 thread_id=retry_thread_id,
-                initial_state=retry_state
+                initial_state=retry_state,
             )
 
             return HITLDecisionResponse(
                 job_id=job_id,
                 status="retrying",
-                message="CV regeneration started with your feedback."
+                message="CV regeneration started with your feedback.",
             )
 
         else:
@@ -726,11 +663,10 @@ async def submit_hitl_decision(
         raise HTTPException(500, f"Failed to process decision: {str(e)}")
 
 
-@app.get("/api/hitl/history", response_model=List[ApplicationHistoryItem])
+@app.get("/api/hitl/history", response_model=list[ApplicationHistoryItem])
 async def get_application_history(
-    limit: int = 50,
-    status: Optional[str] = None
-) -> List[ApplicationHistoryItem]:
+    limit: int = 50, status: str | None = None
+) -> list[ApplicationHistoryItem]:
     """
     Get application history.
 
@@ -763,4 +699,5 @@ async def get_application_history(
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host=settings.api_host, port=settings.api_port)
