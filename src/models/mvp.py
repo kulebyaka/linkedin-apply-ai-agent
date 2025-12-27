@@ -23,7 +23,18 @@ class CVGenerationResponse(BaseModel):
 class CVGenerationStatus(BaseModel):
     """Status response for polling"""
     job_id: str
-    status: Literal["queued", "composing_cv", "generating_pdf", "completed", "failed"]
+    status: Literal[
+        "queued",
+        "extracting",
+        "job_extracted",
+        "composing_cv",
+        "cv_composed",
+        "generating_pdf",
+        "pdf_generated",
+        "saving",
+        "completed",
+        "failed",
+    ]
     created_at: datetime
     completed_at: Optional[datetime] = None
     error_message: Optional[str] = None

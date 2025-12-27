@@ -158,9 +158,8 @@ class InMemoryJobRepository(JobRepository):
         Returns:
             The job_id.
         """
-        raise NotImplementedError(
-            "InMemoryJobRepository.create() not yet implemented"
-        )
+        self._jobs[job.job_id] = job
+        return job.job_id
 
     async def get(self, job_id: str) -> Optional[JobRecord]:
         """Get a job record by ID.
@@ -171,9 +170,7 @@ class InMemoryJobRepository(JobRepository):
         Returns:
             JobRecord if found, None otherwise.
         """
-        raise NotImplementedError(
-            "InMemoryJobRepository.get() not yet implemented"
-        )
+        return self._jobs.get(job_id)
 
     async def update(self, job_id: str, updates: dict) -> None:
         """Update a job record.
@@ -182,9 +179,10 @@ class InMemoryJobRepository(JobRepository):
             job_id: Unique job identifier.
             updates: Fields to update.
         """
-        raise NotImplementedError(
-            "InMemoryJobRepository.update() not yet implemented"
-        )
+        if job_id not in self._jobs:
+            raise RepositoryError(f"Job not found: {job_id}", job_id)
+        updates["updated_at"] = datetime.now()
+        self._jobs[job_id] = self._jobs[job_id].model_copy(update=updates)
 
     async def delete(self, job_id: str) -> bool:
         """Delete a job record.
@@ -193,11 +191,12 @@ class InMemoryJobRepository(JobRepository):
             job_id: Unique job identifier.
 
         Returns:
-            True if deleted.
+            True if deleted, False if not found.
         """
-        raise NotImplementedError(
-            "InMemoryJobRepository.delete() not yet implemented"
-        )
+        if job_id in self._jobs:
+            del self._jobs[job_id]
+            return True
+        return False
 
     async def get_pending(self) -> list[JobRecord]:
         """Get all pending jobs.
@@ -205,9 +204,7 @@ class InMemoryJobRepository(JobRepository):
         Returns:
             List of jobs with status='pending'.
         """
-        raise NotImplementedError(
-            "InMemoryJobRepository.get_pending() not yet implemented"
-        )
+        return [j for j in self._jobs.values() if j.status == "pending"]
 
     async def get_by_status(self, status: str) -> list[JobRecord]:
         """Get jobs by status.
@@ -218,9 +215,7 @@ class InMemoryJobRepository(JobRepository):
         Returns:
             List of matching jobs.
         """
-        raise NotImplementedError(
-            "InMemoryJobRepository.get_by_status() not yet implemented"
-        )
+        return [j for j in self._jobs.values() if j.status == status]
 
     async def get_all(self, limit: int = 100, offset: int = 0) -> list[JobRecord]:
         """Get all jobs with pagination.
@@ -230,11 +225,10 @@ class InMemoryJobRepository(JobRepository):
             offset: Records to skip.
 
         Returns:
-            List of jobs.
+            List of jobs sorted by created_at desc.
         """
-        raise NotImplementedError(
-            "InMemoryJobRepository.get_all() not yet implemented"
-        )
+        jobs = sorted(self._jobs.values(), key=lambda j: j.created_at, reverse=True)
+        return jobs[offset:offset + limit]
 
     async def get_history(
         self,
@@ -248,11 +242,13 @@ class InMemoryJobRepository(JobRepository):
             statuses: Optional status filter.
 
         Returns:
-            List of jobs.
+            List of jobs sorted by updated_at desc.
         """
-        raise NotImplementedError(
-            "InMemoryJobRepository.get_history() not yet implemented"
-        )
+        jobs = list(self._jobs.values())
+        if statuses:
+            jobs = [j for j in jobs if j.status in statuses]
+        jobs.sort(key=lambda j: j.updated_at, reverse=True)
+        return jobs[:limit]
 
 
 class SQLiteJobRepository(JobRepository):

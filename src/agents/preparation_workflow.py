@@ -293,8 +293,8 @@ def compose_cv_node(state: PreparationWorkflowState) -> PreparationWorkflowState
             master_cv=master_cv, job_posting=job_posting, user_feedback=user_feedback
         )
 
-        # Update state
-        state["tailored_cv_json"] = tailored_cv
+        # Update state - convert Pydantic model to dict
+        state["tailored_cv_json"] = tailored_cv.model_dump()
         state["current_step"] = "cv_composed"
         state["error_message"] = None  # Clear any previous errors
         logger.info(f"CV composition completed successfully for job {job_id}")

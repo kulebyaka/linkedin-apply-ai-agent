@@ -249,6 +249,11 @@ class OpenAIClient(BaseLLMClient):
                         for sub_schema in obj[key]:
                             make_strict_recursive(sub_schema)
 
+                # Process $defs (definitions referenced by $ref)
+                if "$defs" in obj:
+                    for def_schema in obj["$defs"].values():
+                        make_strict_recursive(def_schema)
+
         make_strict_recursive(schema)
         return schema
 
@@ -512,6 +517,11 @@ class GrokClient(BaseLLMClient):
                     if key in obj:
                         for sub_schema in obj[key]:
                             make_strict_recursive(sub_schema)
+
+                # Process $defs (definitions referenced by $ref)
+                if "$defs" in obj:
+                    for def_schema in obj["$defs"].values():
+                        make_strict_recursive(def_schema)
 
         make_strict_recursive(schema)
         return schema

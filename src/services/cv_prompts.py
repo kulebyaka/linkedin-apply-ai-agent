@@ -1,9 +1,8 @@
 """Prompt management for CV composition"""
 
-from pathlib import Path
-from typing import Dict, Optional
-from string import Template
 import logging
+from pathlib import Path
+from string import Template
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +18,7 @@ class PromptLoader:
             prompts_dir: Directory containing prompt files
         """
         self.prompts_dir = Path(prompts_dir)
-        self._cache: Dict[str, str] = {}
+        self._cache: dict[str, str] = {}
         self._ensure_prompts_exist()
 
     def _ensure_prompts_exist(self):
@@ -58,8 +57,7 @@ class PromptLoader:
 
         if not prompt_file.exists():
             raise FileNotFoundError(
-                f"Prompt file not found: {prompt_file}\n"
-                f"Available prompts: {self.list_available()}"
+                f"Prompt file not found: {prompt_file}\nAvailable prompts: {self.list_available()}"
             )
 
         prompt_content = prompt_file.read_text(encoding="utf-8")
@@ -68,7 +66,7 @@ class PromptLoader:
         logger.debug(f"Loaded prompt: {prompt_name}")
         return prompt_content
 
-    def reload(self, prompt_name: Optional[str] = None):
+    def reload(self, prompt_name: str | None = None):
         """
         Reload prompts from disk (useful for hot-reload during development)
 
@@ -84,10 +82,7 @@ class PromptLoader:
 
     def list_available(self) -> list[str]:
         """List all available prompt names"""
-        return [
-            f.stem for f in self.prompts_dir.glob("*.txt")
-            if f.is_file()
-        ]
+        return [f.stem for f in self.prompts_dir.glob("*.txt") if f.is_file()]
 
     def get_template(self, prompt_name: str, **kwargs) -> str:
         """
@@ -113,7 +108,7 @@ class PromptLoader:
 class CVPromptManager:
     """High-level prompt management for CV composition"""
 
-    def __init__(self, prompts_dir: Optional[str | Path] = None):
+    def __init__(self, prompts_dir: str | Path | None = None):
         """
         Initialize CV prompt manager
 
@@ -124,10 +119,7 @@ class CVPromptManager:
 
     def get_job_summary_prompt(self, job_description: str) -> str:
         """Get prompt for job description summarization"""
-        return self.loader.get_template(
-            "job_summary",
-            job_description=job_description
-        )
+        return self.loader.get_template("job_summary", job_description=job_description)
 
     def get_summary_prompt(
         self,
@@ -135,77 +127,72 @@ class CVPromptManager:
         years_experience: int,
         key_skills: list[str],
         achievements: list[str],
-        job_summary: Dict
+        job_summary: dict,
     ) -> str:
         """Get prompt for professional summary generation"""
         import json
+
         return self.loader.get_template(
             "summary",
             current_role=current_role,
             years_experience=years_experience,
             key_skills=", ".join(key_skills),
             achievements="\n".join(f"- {a}" for a in achievements),
-            job_summary=json.dumps(job_summary, indent=2)
+            job_summary=json.dumps(job_summary, indent=2),
         )
 
-    def get_experience_prompt(
-        self,
-        experiences: list[Dict],
-        job_summary: Dict
-    ) -> str:
+    def get_experience_prompt(self, experiences: list[dict], job_summary: dict) -> str:
         """Get prompt for experience section tailoring"""
         import json
+
         return self.loader.get_template(
             "experience",
             experiences=json.dumps(experiences, indent=2),
-            job_summary=json.dumps(job_summary, indent=2)
+            job_summary=json.dumps(job_summary, indent=2),
         )
 
-    def get_education_prompt(self, education: list[Dict], job_summary: Dict) -> str:
+    def get_education_prompt(self, education: list[dict], job_summary: dict) -> str:
         """Get prompt for education section"""
         import json
+
         return self.loader.get_template(
             "education",
             education=json.dumps(education, indent=2),
-            job_summary=json.dumps(job_summary, indent=2)
+            job_summary=json.dumps(job_summary, indent=2),
         )
 
-    def get_skills_prompt(self, skills: list[Dict], job_summary: Dict) -> str:
+    def get_skills_prompt(self, skills: list[dict], job_summary: dict) -> str:
         """Get prompt for skills optimization"""
         import json
+
         return self.loader.get_template(
             "skills",
             skills=json.dumps(skills, indent=2),
-            job_summary=json.dumps(job_summary, indent=2)
+            job_summary=json.dumps(job_summary, indent=2),
         )
 
-    def get_projects_prompt(self, projects: list[Dict], job_summary: Dict) -> str:
+    def get_projects_prompt(self, projects: list[dict], job_summary: dict) -> str:
         """Get prompt for projects highlighting"""
         import json
+
         return self.loader.get_template(
             "projects",
             projects=json.dumps(projects, indent=2),
-            job_summary=json.dumps(job_summary, indent=2)
+            job_summary=json.dumps(job_summary, indent=2),
         )
 
-    def get_certifications_prompt(
-        self,
-        certifications: list[str],
-        job_summary: Dict
-    ) -> str:
+    def get_certifications_prompt(self, certifications: list[str], job_summary: dict) -> str:
         """Get prompt for certifications display"""
         import json
+
         return self.loader.get_template(
             "certifications",
             certifications=json.dumps(certifications, indent=2),
-            job_summary=json.dumps(job_summary, indent=2)
+            job_summary=json.dumps(job_summary, indent=2),
         )
 
     def get_full_cv_prompt(
-        self,
-        master_cv: Dict,
-        job_summary: Dict,
-        user_feedback: Optional[str] = None
+        self, master_cv: dict, job_summary: dict, user_feedback: str | None = None
     ) -> str:
         """
         Get prompt for generating complete tailored CV in a single LLM call.
@@ -235,5 +222,5 @@ Please regenerate the CV addressing the feedback above while maintaining all oth
             "full_cv",
             master_cv=json.dumps(master_cv, indent=2),
             job_summary=json.dumps(job_summary, indent=2),
-            user_feedback_section=user_feedback_section
+            user_feedback_section=user_feedback_section,
         )

@@ -208,8 +208,8 @@ def compose_cv_node(state: RetryWorkflowState) -> RetryWorkflowState:
             user_feedback=user_feedback
         )
 
-        # Update state
-        state["tailored_cv_json"] = tailored_cv
+        # Update state - convert Pydantic model to dict
+        state["tailored_cv_json"] = tailored_cv.model_dump()
         state["current_step"] = "cv_composed"
         state["error_message"] = None
         logger.info(f"CV retry composition completed for job {job_id}")

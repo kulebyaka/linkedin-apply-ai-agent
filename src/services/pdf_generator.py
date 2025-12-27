@@ -1,12 +1,11 @@
 """Service for generating PDF from CV JSON using WeasyPrint and Jinja2"""
 
-from typing import Dict, Optional
-from pathlib import Path
-from datetime import date
 import logging
+from datetime import date
+from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
-from weasyprint import HTML, CSS
+from weasyprint import CSS, HTML
 from weasyprint.text.fonts import FontConfiguration
 
 logger = logging.getLogger(__name__)
@@ -22,7 +21,7 @@ class PDFGenerator:
         self,
         template_dir: str | Path = "src/templates/cv",
         template_name: str = DEFAULT_TEMPLATE,
-        font_config: Optional[FontConfiguration] = None,
+        font_config: FontConfiguration | None = None,
     ):
         """
         Initialize PDF Generator with template configuration
@@ -42,9 +41,7 @@ class PDFGenerator:
         # Validate template exists
         template_path = self.template_dir / template_name
         if not template_path.exists():
-            raise ValueError(
-                f"Template '{template_name}' not found at {template_path}"
-            )
+            raise ValueError(f"Template '{template_name}' not found at {template_path}")
 
         # Setup Jinja2 environment
         self.jinja_env = Environment(
@@ -66,15 +63,15 @@ class PDFGenerator:
     def _load_and_cache_css(self) -> None:
         """Load and cache CSS file for current template"""
         css_path = self.template_dir / self.template_name / "style.css"
-        with open(css_path, "r", encoding="utf-8") as f:
+        with open(css_path, encoding="utf-8") as f:
             self._cached_css = f.read()
         logger.debug(f"Cached CSS from {css_path}")
 
     def generate_pdf(
         self,
-        cv_json: Dict,
+        cv_json: dict,
         output_path: str | Path,
-        metadata: Optional[Dict] = None,
+        metadata: dict | None = None,
     ) -> str:
         """
         Generate PDF from CV JSON data
@@ -127,9 +124,9 @@ class PDFGenerator:
 
         except Exception as e:
             logger.error(f"PDF generation failed: {e}", exc_info=True)
-            raise IOError(f"Failed to generate PDF: {e}") from e
+            raise OSError(f"Failed to generate PDF: {e}") from e
 
-    def _cv_to_html(self, cv_json: Dict) -> str:
+    def _cv_to_html(self, cv_json: dict) -> str:
         """
         Convert CV JSON to HTML using Jinja2 template
 
@@ -149,9 +146,7 @@ class PDFGenerator:
             self._load_and_cache_css()
         return self._cached_css
 
-    def _build_metadata(
-        self, cv_json: Dict, custom_metadata: Optional[Dict]
-    ) -> Dict:
+    def _build_metadata(self, cv_json: dict, custom_metadata: dict | None) -> dict:
         """Build PDF metadata dictionary"""
         full_name = cv_json.get("contact", {}).get("full_name", "Unknown")
         metadata = {
