@@ -22,103 +22,127 @@ This document provides context for Claude Code (or any AI assistant) to effectiv
 - **Backend Framework**: FastAPI (for HITL UI API)
 - **Browser Automation**: Playwright
 - **Data Validation**: Pydantic v2
-- **PDF Generation**: WeasyPrint
+- **PDF Generation**: WeasyPrint + Jinja2
 - **LLM Integration**: Multi-provider support (OpenAI, Anthropic, DeepSeek, Grok)
 
 ### Directory Structure
 
 ```
 src/
-├── agents/              # LangGraph workflow definitions
-│   └── workflow.py      # Main workflow state machine
-├── llm/                 # LLM provider integrations
-│   └── provider.py      # Abstract base + provider implementations
-├── services/            # Business logic services
-│   ├── job_fetcher.py   # LinkedIn job fetching
-│   ├── job_filter.py    # LLM-based job filtering
-│   ├── cv_composer.py   # LLM-powered CV tailoring
-│   ├── pdf_generator.py # PDF generation from JSON
-│   ├── browser_automation.py  # Playwright LinkedIn automation
-│   └── notification.py  # Webhook/email notifications
-├── models/              # Pydantic data models
-│   ├── job.py          # Job posting models
-│   ├── cv.py           # CV data models
-│   └── application.py  # Application status models
-├── api/                 # FastAPI endpoints
-│   └── main.py         # REST API for HITL UI
-├── config/              # Configuration
-│   └── settings.py     # Pydantic settings with env vars
-└── utils/              # Utilities
-    └── logger.py       # Logging setup
+├── agents/                     # LangGraph workflow definitions
+│   ├── preparation_workflow.py # Main pipeline: job → CV → PDF → DB
+│   ├── application_workflow.py # Apply to jobs after HITL approval (stubs)
+│   └── retry_workflow.py       # Re-compose CV with user feedback
+├── llm/                        # LLM provider integrations
+│   └── provider.py             # Abstract base + provider implementations
+├── services/                   # Business logic services
+│   ├── job_source.py           # Job source adapters (URL, manual, LinkedIn)
+│   ├── job_filter.py           # LLM-based job filtering (skeleton)
+│   ├── job_repository.py       # Data access layer (in-memory implementation)
+│   ├── cv_composer.py          # LLM-powered CV tailoring
+│   ├── cv_prompts.py           # CV composition prompts
+│   ├── pdf_generator.py        # PDF generation from JSON (WeasyPrint)
+│   ├── browser_automation.py   # Playwright LinkedIn automation (skeleton)
+│   └── notification.py         # Webhook/email notifications (skeleton)
+├── models/                     # Pydantic data models
+│   ├── job.py                  # Job posting models
+│   ├── cv.py                   # CV data models
+│   ├── unified.py              # Unified models for two-workflow architecture
+│   └── mvp.py                  # MVP-specific models
+├── api/                        # FastAPI endpoints
+│   └── main.py                 # REST API for HITL UI
+├── config/                     # Configuration
+│   └── settings.py             # Pydantic settings with env vars
+└── utils/                      # Utilities
+    └── logger.py               # Logging setup
 
 data/
-├── cv/                 # Master CV in JSON
-├── jobs/               # Fetched job data
-└── generated_cvs/      # Tailored CV PDFs
+├── cv/                         # Master CV in JSON
+├── jobs/                       # Fetched job data
+└── generated_cvs/              # Tailored CV PDFs
 ```
+
+## Two-Workflow Pipeline Architecture
+
+The system uses a **two-workflow pipeline** split at the HITL boundary, enabling batch review of generated CVs.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         PREPARATION WORKFLOW                                 │
+│  (runs continuously, processes jobs, saves to DB for batch review)          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   Job Source ──► Extract ──► Filter ──► Compose CV ──► Generate PDF ──► DB │
+│   (URL/Manual)                                                    (pending) │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+                        ┌───────────────────────┐
+                        │    HITL BOUNDARY      │
+                        │  (Tinder-like batch   │
+                        │   review UI)          │
+                        │                       │
+                        │  ✓ Approve            │
+                        │  ✗ Decline            │
+                        │  ↻ Retry + feedback   │
+                        └───────────────────────┘
+                                    │
+              ┌─────────────────────┼─────────────────────┐
+              ▼                     ▼                     ▼
+┌─────────────────────┐  ┌─────────────────────┐  ┌─────────────────────┐
+│ APPLICATION WORKFLOW│  │  RETRY WORKFLOW     │  │      DECLINED       │
+│ (triggered on       │  │  (regenerate CV     │  │   (no action)       │
+│  approve)           │  │   with feedback)    │  │                     │
+├─────────────────────┤  ├─────────────────────┤  └─────────────────────┘
+│ Load ──► Apply ──►  │  │ Load ──► Compose    │
+│          Update DB  │  │   ──► PDF ──►       │
+│                     │  │      Update DB      │
+│ (stubs only -       │  │                     │
+│  deep agent future) │  │ (loops back to      │
+│                     │  │  HITL pending)      │
+└─────────────────────┘  └─────────────────────┘
+```
+
+### Workflow Modes
+
+- **MVP Mode** (`mode="mvp"`): Generate PDF only, skip HITL, status = `completed`
+- **Full Mode** (`mode="full"`): Generate PDF, save to DB with status = `pending` for HITL review
+
+### Workflow Files
+
+| Workflow | File | Description |
+|----------|------|-------------|
+| Preparation | `src/agents/preparation_workflow.py` | Main pipeline: job input → CV PDF → DB |
+| Retry | `src/agents/retry_workflow.py` | Re-compose CV with user feedback |
+| Application | `src/agents/application_workflow.py` | Apply to job (stubs only) |
 
 ## Key Design Patterns
 
-### 1. LangGraph Workflow
-- Defined as directed graph with nodes for each step
+### 1. LangGraph Workflows
+- Defined as directed graphs with nodes for each step
 - Supports conditional routing based on state
-- Built-in HITL pause/resume mechanism
-- State management with `WorkflowState` TypedDict
+- Built-in checkpointing with MemorySaver
+- State management with TypedDict classes
 
 ### 2. Multi-LLM Support
-- Factory pattern for provider instantiation
+- Factory pattern for provider instantiation (`LLMClientFactory`)
 - Abstract `BaseLLMClient` interface
 - Easy switching via environment variables
 - Fallback support for reliability
 
-### 3. Data Models
-- Pydantic models for all data structures
-- Type safety and validation
-- Easy JSON serialization
-- Settings management with `pydantic-settings`
+### 3. Repository Pattern
+- `JobRepository` abstract interface for data persistence
+- `InMemoryJobRepository` implementation for development
+- Future: SQLite/PostgreSQL persistence
 
-### 4. Structured Output for JSON Generation
+### 4. Job Source Adapters
+- Abstract interface in `src/services/job_source.py`
+- Adapters for URL extraction, manual input, LinkedIn API
+- Factory pattern: `JobSourceFactory.get_adapter(source)`
 
-**CRITICAL**: Always use native structured outputs when expecting JSON responses from LLM providers.
-
-#### Why Structured Outputs?
-- **Eliminates JSON parsing errors**: Native schema enforcement guarantees valid JSON
-- **100% schema adherence**: Models cannot generate invalid structures
-- **No retry loops needed**: APIs handle validation internally
-- **Production-ready reliability**: Essential for CV composition and job filtering
-
-#### Provider Capabilities
-
-| Provider | Strict Schema Support | Implementation |
-|----------|----------------------|----------------|
-| **OpenAI** | ✅ Yes | `response_format={"type": "json_schema", "json_schema": {...}}` |
-| **Anthropic** | ✅ Yes | `output_format={"type": "json_schema", ...}` + beta header |
-| **Grok** | ✅ Yes | `response_format={"type": "json_schema", ...}` (OpenAI-compatible) |
-| **DeepSeek** | ⚠️ Partial | `response_format={"type": "json_object"}` (manual validation required) |
-
-#### Usage Pattern
-
-```python
-# ALWAYS provide a JSON schema when calling generate_json()
-schema = {
-    "type": "object",
-    "properties": {
-        "field1": {"type": "string"},
-        "field2": {"type": "number"}
-    },
-    "required": ["field1", "field2"]
-}
-
-result = llm_client.generate_json(
-    prompt="Extract data...",
-    schema=schema,  # ← ALWAYS include schema
-    temperature=0.4
-)
-# Result is guaranteed to match schema (except DeepSeek which validates post-generation)
-```
-
-#### Important Notes
-- **OpenAI**: Requires GPT-4o or newer models for strict schema support
+#### Important Notes about strict schema support
+- **OpenAI**: Requires GPT-4 or newer models for strict schema support
 - **Anthropic**: Requires beta header `anthropic-beta: structured-outputs-2025-11-13` (already configured)
 - **Grok**: Works with all models after grok-2-1212
 - **DeepSeek**: Does NOT support strict schemas - validates after generation
@@ -127,19 +151,25 @@ See `src/llm/provider.py` module documentation for detailed implementation.
 
 ## Important Implementation Details
 
-### Workflow Nodes (src/agents/workflow.py)
-1. **fetch_jobs_node**: Queries LinkedIn API/scrapes jobs
-2. **filter_job_node**: LLM evaluates job suitability
-3. **compose_cv_node**: LLM tailors CV to job
-4. **generate_pdf_node**: Creates PDF from JSON
-5. **human_review_node**: Pauses for user approval
-6. **apply_linkedin_node**: Automates application
-7. **send_notification_node**: Alerts on errors
+### Preparation Workflow Nodes
+1. **extract_job_node**: Extracts structured job data from source (URL/manual/LinkedIn)
+2. **filter_job_node**: LLM evaluates job suitability (LinkedIn only, currently passthrough)
+3. **compose_cv_node**: LLM tailors CV to job description
+4. **generate_pdf_node**: Creates PDF from tailored CV JSON
+5. **save_to_db_node**: Persists job record (MVP: completed, Full: pending)
 
-### Conditional Routing
-- After filtering: suitable → compose_cv | not_suitable → END
-- After HITL: approved → apply | declined → END | retry → compose_cv
-- After apply: success → END | failure → notification
+### Retry Workflow Nodes
+1. **load_from_db_node**: Loads job record for retry
+2. **compose_cv_node**: Re-composes CV with user feedback
+3. **generate_pdf_node**: Regenerates PDF
+4. **update_db_node**: Updates record, returns to pending status
+
+### Application Workflow Nodes (Stubs)
+1. **load_from_db_node**: Loads approved job
+2. **apply_deep_agent_node**: Browser automation via Playwright (not implemented)
+3. **apply_linkedin_node**: LinkedIn Easy Apply automation (not implemented)
+4. **apply_manual_node**: Marks job for manual application
+5. **update_db_node**: Records application result
 
 ### Master CV Format
 - Stored as JSON in `data/cv/master_cv.json`
@@ -147,42 +177,61 @@ See `src/llm/provider.py` module documentation for detailed implementation.
 - Contains comprehensive work history, skills, projects
 - LLM recomposes relevant portions for each job
 
-### Browser Automation
-- Playwright for headless Chrome
-- Handles LinkedIn login (potentially with 2FA via HITL)
-- Navigates application forms
-- Uploads tailored CV PDF
-- Can pause for HITL if uncertain
+## API Endpoints
+
+### Unified Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/jobs/submit` | Submit job for CV generation (URL or manual input) |
+| GET | `/api/jobs/{job_id}/status` | Get job status and details |
+| GET | `/api/jobs/{job_id}/pdf` | Download generated CV PDF |
+| GET | `/api/hitl/pending` | Get all jobs pending HITL review |
+| POST | `/api/hitl/{job_id}/decide` | Submit HITL decision (approve/decline/retry) |
+| GET | `/api/hitl/history` | Get application history |
+
+### Legacy Endpoints (Backward Compatible)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/cv/generate` | Submit CV generation (MVP mode) |
+| GET | `/api/cv/status/{job_id}` | Get CV generation status |
+| GET | `/api/cv/download/{job_id}` | Download generated CV PDF |
+
+## Data Models
+
+Defined in `src/models/unified.py`:
+
+- `JobSubmitRequest` - Input for job submission (source, mode, url/job_description)
+- `JobSubmitResponse` - Response with job_id and status
+- `HITLDecision` - User decision (approved/declined/retry + feedback)
+- `HITLDecisionResponse` - Response after decision processed
+- `PendingApproval` - Job details for HITL review UI
+- `JobStatusResponse` - Full job status with CV and PDF info
+- `JobRecord` - Database record for job persistence
+- `ApplicationHistoryItem` - History entry for completed jobs
+
+## Implementation Status
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| **Two-Workflow Architecture** | ✅ Complete | Preparation + Application workflows with HITL boundary |
+| **LLM Provider Layer** | ✅ Complete | `src/llm/provider.py` |
+| **Preparation Workflow** | ✅ Complete | `src/agents/preparation_workflow.py` |
+| **Retry Workflow** | ✅ Complete | `src/agents/retry_workflow.py` |
+| **Compose Tailored CV** | ✅ Complete | `src/services/cv_composer.py` |
+| **Generate PDF** | ✅ Complete | `src/services/pdf_generator.py` (WeasyPrint + Jinja2) |
+| **HITL API Endpoints** | ✅ Complete | `src/api/main.py` |
+| **Unified Data Models** | ✅ Complete | `src/models/unified.py` |
+| **Job Repository (DAL)** | ✅ Complete | `src/services/job_repository.py` (in-memory) |
+| **Job Source Adapters** | 🟡 Interface | `src/services/job_source.py` - interface only |
+| **Application Workflow** | 🟡 Stubs | `src/agents/application_workflow.py` - stubs only |
+| **Job Filter (LLM)** | 🔴 Pending | `src/services/job_filter.py` skeleton |
+| **Browser Automation** | 🔴 Pending | `src/services/browser_automation.py` skeleton |
+| **HITL Frontend UI** | 🔴 Pending | Tinder-like React/Vue interface |
+| **LinkedIn Integration** | 🔴 Pending | Job fetching and Easy Apply |
 
 ## Development Guidelines
-
-### When Adding Features
-
-1. **LLM Integration**
-   - Add new provider class in `src/llm/provider.py`
-   - Inherit from `BaseLLMClient`
-   - Implement `generate()` and `generate_json()`
-   - **MUST implement native structured output support in `generate_json()`**
-   - Use provider's JSON Schema enforcement when available
-   - Register in `LLMClientFactory`
-
-2. **Workflow Modifications**
-   - Update `WorkflowState` TypedDict
-   - Add/modify nodes in `create_workflow()`
-   - Update routing functions for new paths
-   - Test state transitions thoroughly
-
-3. **API Endpoints**
-   - Add routes in `src/api/main.py`
-   - Use Pydantic models for request/response
-   - Document with FastAPI auto-docs
-   - Consider CORS for frontend access
-
-4. **Data Models**
-   - Define in appropriate `models/*.py` file
-   - Use type hints and Pydantic validation
-   - Add docstrings for complex fields
-   - Consider backward compatibility
 
 ### Testing Strategy
 
@@ -220,14 +269,14 @@ All settings in `.env`:
 
 ### Modifying CV Tailoring Logic
 
-1. Update prompt in `src/services/cv_composer.py`
-2. Adjust `_build_cv_prompt()` method
+1. Update prompts in `src/services/cv_prompts.py`
+2. Adjust `CVComposer` methods in `src/services/cv_composer.py`
 3. Test with various job descriptions
 4. Consider adding user feedback loop
 
 ### Adding New Workflow Step
 
-1. Define node function in `src/agents/workflow.py`
+1. Define node function in appropriate workflow file
 2. Add node to workflow graph
 3. Update state TypedDict if needed
 4. Add routing logic
@@ -240,79 +289,14 @@ All settings in `.env`:
 3. Use LangGraph visualization tools
 4. Test nodes individually before integration
 
-## Current Status
+## Next Steps
 
-This is a **skeleton implementation**. All core structure is in place, but services are not yet implemented:
-
-### ✅ Complete
-- Project structure
-- Data models (Pydantic)
-- Configuration system
-- LLM provider abstractions
-- API endpoint stubs
-- Docker setup
-- Documentation
-
-### 🚧 To Implement
-- LinkedIn job fetching (API or scraping)
-- LLM integration (actual API calls)
-- LangGraph workflow execution
-- PDF generation
-- Playwright browser automation
-- HITL approval mechanism
-- Frontend UI (Tinder-like interface)
-- Notification system
-- State persistence (database)
-- Scheduling (APScheduler)
-
-## Next Steps for Implementation
-
-1. **Set up environment**
-   - Copy `.env.example` to `.env`
-   - Add API keys for at least one LLM provider
-   - Create master CV JSON
-
-2. **Implement LLM integration**
-   - Start with one provider (e.g., OpenAI)
-   - Test with simple prompts
-   - **CRITICAL**: Always use `generate_json()` with JSON Schema for structured data
-   - Test structured output for job filtering and CV composition
-   - Verify schema enforcement is working correctly
-
-3. **Job fetching**
-   - Research LinkedIn API options
-   - Implement fallback to scraping if needed
-   - Test with real job searches
-
-4. **CV tailoring**
-   - Create prompts for CV composition
-   - Test with sample jobs
-   - Validate JSON output schema
-
-5. **PDF generation**
-   - Create CV template (HTML/CSS)
-   - Implement WeasyPrint conversion
-   - Test with various CV formats
-
-6. **Browser automation**
-   - LinkedIn login flow
-   - Easy Apply automation
-   - Error handling and recovery
-
-7. **HITL interface**
-   - Build simple React/Vue frontend
-   - Implement approval endpoints
-   - Create Tinder-like review UI
-
-8. **Integration**
-   - Connect all services in LangGraph
-   - Test end-to-end workflow
-   - Add error handling and notifications
-
-9. **Deployment**
-   - Test Docker setup
-   - Deploy to VPS
-   - Set up monitoring and logs
+1. **Implement Job Source Adapters** - URL extraction using HTTP + LLM, manual input processing
+2. **Build HITL Frontend** - Tinder-like React/Vue UI for batch review
+3. **Implement Application Workflow** - Deep agent with Playwright MCP for browser automation
+4. **Add Job Filter Logic** - LLM-based job suitability evaluation
+5. **LinkedIn Integration** - Job fetching and Easy Apply automation
+6. **Database Persistence** - SQLite or PostgreSQL for job records
 
 ## Reference Implementations
 
@@ -367,10 +351,6 @@ mypy src/                                    # Type check
 docker-compose up -d                         # Start services
 docker-compose logs -f                       # View logs
 docker-compose down                          # Stop services
-
-# Playwright
-playwright install chromium                  # Install browser
-playwright codegen linkedin.com              # Record automation
 ```
 
 ## Troubleshooting
@@ -387,34 +367,16 @@ playwright codegen linkedin.com              # Record automation
 - Verify quota/billing on provider
 - Test with simple API call first
 
-**Browser automation fails**
-- Run `playwright install` for browsers
-- Check headless setting for debugging
-- Verify LinkedIn isn't blocking automation
-
-**PDF generation issues**
-- Install system dependencies for WeasyPrint
-- Check template HTML is valid
-- Verify font paths if using custom fonts
-
 ## Security Notes
 
 - **Never commit** `.env` or actual CV data
 - **Secure storage** for LinkedIn credentials
 - **Rate limiting** for API calls
-- **Respect** LinkedIn's terms of service
 - **User data** stays on self-hosted VPS
 
 ## Resources
 
 - [LangGraph Documentation](https://python.langchain.com/docs/langgraph)
 - [FastAPI Documentation](https://fastapi.tiangolo.com/)
-- [Playwright Python](https://playwright.dev/python/)
 - [Pydantic Documentation](https://docs.pydantic.dev/)
 - [WeasyPrint Documentation](https://doc.courtbouillon.org/weasyprint/)
-
----
-
-**Last Updated**: 2025-12-16
-**Status**: Skeleton implementation complete, ready for feature development
-**Recent Changes**: Added native structured output support for all LLM providers
