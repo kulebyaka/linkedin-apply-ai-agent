@@ -63,6 +63,14 @@ class Settings(BaseSettings):
     cv_composer_enable_hallucination_checks: bool = True  # Validate against master CV
     cv_composer_model_override: Optional[str] = None  # Override LLM model for CV composition
 
+    # CV Length Limits (for 2-page target)
+    cv_max_experiences: int = 4  # Maximum work experiences to include
+    cv_max_achievements_per_experience: int = 4  # Maximum bullets per experience
+    cv_max_skills: int = 15  # Maximum skills to include
+    cv_max_projects: int = 2  # Maximum projects to include
+    cv_max_certifications: int = 4  # Maximum certifications to include
+    cv_target_pages: int = 2  # Target page count for generated CV
+
     # Notifications
     webhook_url: Optional[str] = None
     notification_email: Optional[str] = None

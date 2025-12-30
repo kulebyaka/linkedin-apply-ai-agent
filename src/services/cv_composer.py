@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import Any
 
+from src.config.settings import Settings
 from src.llm.provider import BaseLLMClient
 from src.models.cv import (
     CV,
@@ -30,6 +32,19 @@ FULL_CV_SCHEMA = CVLLMOutput.model_json_schema()
 JOB_SUMMARY_SCHEMA = JobSummary.model_json_schema()
 
 
+@dataclass(frozen=True)
+class CVComposerSettings:
+    """Settings used by CVComposer that do not require secrets."""
+
+    cv_max_experiences: int = Settings.model_fields["cv_max_experiences"].default
+    cv_max_achievements_per_experience: int = Settings.model_fields[
+        "cv_max_achievements_per_experience"
+    ].default
+    cv_max_skills: int = Settings.model_fields["cv_max_skills"].default
+    cv_max_projects: int = Settings.model_fields["cv_max_projects"].default
+    cv_max_certifications: int = Settings.model_fields["cv_max_certifications"].default
+
+
 class CVComposer:
     """Composes tailored CV based on job description using LLM"""
 
@@ -38,16 +53,23 @@ class CVComposer:
     TEMPERATURE_ANALYSIS = 0.3  # For job analysis - prefer consistency
     TEMPERATURE_GENERATION = 0.4  # For CV generation - allow some creativity
 
-    def __init__(self, llm_client: BaseLLMClient, prompts_dir: str | None = None):
+    def __init__(
+        self,
+        llm_client: BaseLLMClient,
+        prompts_dir: str | None = None,
+        settings: Settings | CVComposerSettings | None = None,
+    ):
         """
         Initialize CV Composer
 
         Args:
             llm_client: LLM client for generation
             prompts_dir: Optional custom prompts directory
+            settings: Optional settings instance (defaults to CVComposerSettings)
         """
         self.llm = llm_client
         self.prompts = CVPromptManager(prompts_dir)
+        self.settings = settings or CVComposerSettings()
 
     def compose_cv(
         self,
@@ -80,6 +102,9 @@ class CVComposer:
         # Step 2: Generate all CV sections in a single LLM call (optimized)
         # This replaces 6 separate LLM calls with 1, reducing latency by ~3.5x
         generated_sections = self._compose_all_sections(master_cv, job_summary, user_feedback)
+
+        # Step 2.5: Apply length limits to ensure 2-page target
+        generated_sections = self._apply_length_limits(generated_sections)
 
         # Step 3: Validate and build pass-through fields from master CV
         contact = self._validate_contact(master_cv.get("contact", {}))
@@ -212,6 +237,80 @@ Requirements:
 
         logger.debug("Successfully generated all CV sections")
         return result
+
+    def _apply_length_limits(self, generated_sections: dict[str, Any]) -> dict[str, Any]:
+        """
+        Apply configured length limits to CV sections.
+
+        This acts as a safety net after LLM generation to ensure CV stays within
+        target page count. Truncates sections to maximum configured lengths.
+
+        Args:
+            generated_sections: CV sections from LLM generation
+
+        Returns:
+            Sections with length limits enforced
+        """
+        logger.debug("Applying length limits to CV sections")
+
+        truncated = False
+
+        # Limit experiences
+        if len(generated_sections.get("experiences", [])) > self.settings.cv_max_experiences:
+            original_count = len(generated_sections["experiences"])
+            generated_sections["experiences"] = generated_sections["experiences"][
+                : self.settings.cv_max_experiences
+            ]
+            logger.info(
+                f"Truncated experiences: {original_count} → {self.settings.cv_max_experiences}"
+            )
+            truncated = True
+
+        # Limit achievements per experience
+        for i, exp in enumerate(generated_sections.get("experiences", [])):
+            if len(exp.get("achievements", [])) > self.settings.cv_max_achievements_per_experience:
+                original_count = len(exp["achievements"])
+                exp["achievements"] = exp["achievements"][
+                    : self.settings.cv_max_achievements_per_experience
+                ]
+                logger.debug(
+                    f"Truncated achievements for experience {i}: {original_count} → {self.settings.cv_max_achievements_per_experience}"
+                )
+                truncated = True
+
+        # Limit skills
+        if len(generated_sections.get("skills", [])) > self.settings.cv_max_skills:
+            original_count = len(generated_sections["skills"])
+            generated_sections["skills"] = generated_sections["skills"][
+                : self.settings.cv_max_skills
+            ]
+            logger.info(f"Truncated skills: {original_count} → {self.settings.cv_max_skills}")
+            truncated = True
+
+        # Limit projects
+        if len(generated_sections.get("projects", [])) > self.settings.cv_max_projects:
+            original_count = len(generated_sections["projects"])
+            generated_sections["projects"] = generated_sections["projects"][
+                : self.settings.cv_max_projects
+            ]
+            logger.info(f"Truncated projects: {original_count} → {self.settings.cv_max_projects}")
+            truncated = True
+
+        # Limit certifications
+        if len(generated_sections.get("certifications", [])) > self.settings.cv_max_certifications:
+            original_count = len(generated_sections["certifications"])
+            generated_sections["certifications"] = generated_sections["certifications"][
+                : self.settings.cv_max_certifications
+            ]
+            logger.info(
+                f"Truncated certifications: {original_count} → {self.settings.cv_max_certifications}"
+            )
+            truncated = True
+
+        if not truncated:
+            logger.debug("No truncation needed - CV within length limits")
+
+        return generated_sections
 
     def _validate_contact(self, contact_data: dict[str, Any]) -> dict[str, Any]:
         """
