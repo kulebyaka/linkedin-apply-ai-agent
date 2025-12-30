@@ -1,0 +1,361 @@
+/* Profile Card Resume Template */
+/* Adapted from: https://gist.github.com/kulebyaka/9c4a969ae2111cbfcfff062744e423d1 */
+/* Original design: Kirill Elizarov (CodePen: kulebyaka-the-bold) */
+
+/* Import Google Fonts with fallbacks */
+@import url('https://fonts.googleapis.com/css?family=Nunito|Cutive+Mono|Open+Sans&display=swap');
+
+/* Page settings for PDF */
+@page {
+    size: A4;
+    margin: 0.75in;
+}
+
+/* Base styles */
+html {
+    font-family: 'Open Sans', Arial, sans-serif;
+    background: white;
+}
+
+body {
+    font-family: 'Open Sans', Arial, sans-serif;
+    font-size: 11pt;
+    line-height: 1.6;
+    color: #333;
+    margin: 0;
+    padding: 0;
+}
+
+a {
+    text-decoration: none;
+    color: #097bbf;
+}
+
+hr {
+    background: #ccc;
+    border: none;
+    height: 1px;
+    margin: 1em 0;
+}
+
+/* Container - converted from flex to float */
+#container {
+    position: relative;
+    overflow: hidden; /* Clearfix */
+}
+
+/* Left Profile Sidebar - 25% width */
+#profile {
+    float: left;
+    width: 25%;
+    padding-right: 2%;
+    box-sizing: border-box;
+}
+
+/* Right Content Area - 70% width */
+#info-cards {
+    float: left;
+    width: 70%;
+    box-sizing: border-box;
+}
+
+/* Profile Image Placeholder (initials) */
+#image-placeholder {
+    position: relative;
+    width: 80px;
+    height: 80px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 1em;
+}
+
+#profile-initials {
+    font-size: 32px;
+    font-weight: bold;
+    color: white;
+    text-align: center;
+}
+
+/* Name styling */
+#name {
+    font-size: 20px;
+    line-height: 1.3;
+    font-weight: bold;
+    font-family: 'Open Sans', Arial, sans-serif;
+    margin: 0.5em 0;
+}
+
+#email {
+    font-size: 13px;
+    font-weight: 600;
+    font-family: 'Cutive Mono', 'Courier New', monospace;
+    color: #555;
+    display: block;
+    margin-top: 0.3em;
+}
+
+/* Designation and organization */
+#designation {
+    font-size: 14px;
+    line-height: 1.4;
+    margin: 0.5em 0;
+}
+
+#college {
+    color: #555;
+    font-size: 12px;
+    display: block;
+    margin-top: 0.3em;
+}
+
+/* Social links */
+#social-links {
+    margin: 1em 0;
+}
+
+#social-links a {
+    margin-right: 0.8em;
+    font-size: 18px;
+}
+
+#social-links .icon {
+    font-style: normal;
+}
+
+/* About section */
+#about {
+    font-size: 16px;
+    font-weight: bold;
+    margin: 1em 0 0.5em 0;
+}
+
+#about p {
+    margin: 0;
+}
+
+#about-text {
+    font-size: 13px;
+    color: #444;
+    line-height: 1.5;
+    margin: 0.5em 0 1em 0;
+}
+
+/* Sidebar info fields */
+#year-graduation,
+#education-snapshot,
+#telephone,
+#location-info {
+    font-size: 13px;
+    color: #555;
+    margin: 0.8em 0;
+    line-height: 1.4;
+}
+
+#year-graduation strong,
+#education-snapshot strong,
+#telephone strong,
+#location-info strong {
+    color: #000;
+    font-size: 14px;
+    display: block;
+    margin-top: 0.2em;
+}
+
+/* Content Cards */
+.card {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    margin-bottom: 1.5em;
+    padding: 1.2em 1.5em;
+    background-color: #fff;
+    border-radius: 4px;
+    page-break-inside: avoid;
+}
+
+.card > p:first-child {
+    color: #0e141e;
+    font-weight: bold;
+    font-size: 16px;
+    line-height: 1.5;
+    margin: 0 0 1em 0;
+    page-break-after: avoid;
+}
+
+.card > p:first-child .icon {
+    font-style: normal;
+    font-size: 16px;
+}
+
+/* Card lists */
+.card > ul {
+    list-style-type: none;
+    padding: 0;
+    margin: 0;
+}
+
+.card > ul > li {
+    padding: 0 0 1em 0;
+    margin-bottom: 1em;
+    border-bottom: 1px solid #f0f0f0;
+    page-break-inside: avoid;
+}
+
+.card > ul > li:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+}
+
+/* Tags (main item titles) */
+.tags {
+    font-size: 14px;
+    font-weight: bold;
+    margin: 0 0 0.5em 0;
+    line-height: 1.4;
+}
+
+.tags span {
+    font-size: 12px;
+    font-weight: normal;
+    color: #0e141e;
+    display: block;
+    margin-top: 0.3em;
+}
+
+.tags span span {
+    color: #738f93;
+}
+
+/* Description text */
+.description {
+    font-size: 12px;
+    color: #444;
+    line-height: 1.5;
+    margin: 0.5em 0;
+}
+
+/* Achievements lists (nested) */
+.achievements {
+    list-style-type: disc;
+    padding-left: 1.5em;
+    margin: 0.5em 0;
+}
+
+.achievements li {
+    font-size: 12px;
+    line-height: 1.5;
+    margin-bottom: 0.3em;
+}
+
+/* Technologies */
+.technologies {
+    font-size: 11px;
+    color: #555;
+    margin: 0.5em 0 0 0;
+}
+
+.technologies strong {
+    color: #000;
+}
+
+/* GPA */
+.gpa {
+    font-size: 12px;
+    color: #555;
+    margin: 0.5em 0;
+}
+
+.gpa strong {
+    color: #000;
+}
+
+/* Project URL */
+.project-url {
+    font-size: 11px;
+    margin: 0.5em 0 0 0;
+}
+
+.project-url a {
+    color: #097bbf;
+    text-decoration: underline;
+}
+
+/* Skills section */
+.skill-category {
+    margin-bottom: 1em;
+}
+
+.skill-category-title {
+    font-size: 13px;
+    font-weight: bold;
+    color: #0e141e;
+    margin: 0 0 0.5em 0;
+}
+
+.skills-list {
+    list-style-type: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-wrap: wrap;
+}
+
+.skills-list li {
+    font-size: 11px;
+    background: #f5f5f5;
+    padding: 0.3em 0.6em;
+    margin: 0.2em 0.3em 0.2em 0;
+    border-radius: 3px;
+    display: inline-block;
+}
+
+.proficiency {
+    color: #738f93;
+    font-size: 10px;
+}
+
+/* Icon styling */
+.icon {
+    font-style: normal;
+}
+
+/* Page break control */
+h1, h2, h3,
+.card > p:first-child {
+    page-break-after: avoid;
+}
+
+.card > ul > li,
+.achievements li {
+    page-break-inside: avoid;
+}
+
+/* Print optimization */
+@media print {
+    body {
+        font-size: 10pt;
+    }
+
+    .card {
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+    }
+}
+
+/* Responsive adjustments for smaller pages */
+@media (max-width: 850px) {
+    #container {
+        display: block;
+    }
+
+    #profile {
+        float: none;
+        width: 100%;
+        margin-bottom: 2em;
+    }
+
+    #info-cards {
+        float: none;
+        width: 100%;
+    }
+}

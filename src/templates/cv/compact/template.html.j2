@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ cv.contact.full_name }} - Resume</title>
+</head>
+<body>
+    <div class="resume">
+        <!-- Header Section -->
+        <header class="resume__header">
+            <div class="resume__content">
+                <h1>{{ cv.contact.full_name }}</h1>
+                <div class="info-item">
+                    <span class="info-label"><i class="icon">📍</i></span>
+                    <span class="info-text">{{ cv.contact.location or 'Location not specified' }}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label"><i class="icon">✉</i></span>
+                    <span class="info-text">{{ cv.contact.email }}</span>
+                </div>
+                {% if cv.contact.phone %}
+                <div class="info-item">
+                    <span class="info-label"><i class="icon">📱</i></span>
+                    <span class="info-text">{{ cv.contact.phone }}</span>
+                </div>
+                {% endif %}
+                {% if cv.contact.linkedin_url %}
+                <div class="info-item">
+                    <span class="info-label"><i class="icon">🔗</i></span>
+                    <span class="info-text">{{ cv.contact.linkedin_url }}</span>
+                </div>
+                {% endif %}
+            </div>
+        </header>
+
+        <!-- Two Column Layout -->
+        <div class="resume__columns">
+            <!-- Main Column (Left - 70%) -->
+            <div class="resume__main">
+                <!-- Professional Summary -->
+                {% if cv.summary %}
+                <section class="resume__section resume__summary">
+                    <div class="resume__content">
+                        <div class="resume__section-title">
+                            <i class="section-icon">📝</i>
+                            <h2>Professional Summary</h2>
+                        </div>
+                        <div class="section-content">
+                            <p>{{ cv.summary }}</p>
+                        </div>
+                    </div>
+                </section>
+                {% endif %}
+
+                <!-- Employment History -->
+                {% if cv.experiences %}
+                <section class="resume__section resume__experience">
+                    <div class="resume__content">
+                        <div class="resume__section-title">
+                            <i class="section-icon">💼</i>
+                            <h2>Employment History</h2>
+                        </div>
+                        {% for exp in cv.experiences %}
+                        <div class="xp-item">
+                            <div class="xp-job">
+                                {{ exp.position }}
+                                <span>@ {{ exp.company }}</span>
+                                {% if exp.location %}<br><small>{{ exp.location }}</small>{% endif %}
+                            </div>
+                            <div class="xp-date">{{ exp.start_date|format_date }} – {{ exp.end_date|format_date if exp.end_date else 'Present' }}</div>
+                            {% if exp.description %}
+                            <div class="xp-detail">
+                                <p>{{ exp.description }}</p>
+                            </div>
+                            {% endif %}
+                            {% if exp.achievements %}
+                            <div class="xp-detail">
+                                <ul>
+                                    {% for achievement in exp.achievements %}
+                                    <li>{{ achievement }}</li>
+                                    {% endfor %}
+                                </ul>
+                            </div>
+                            {% endif %}
+                            {% if exp.technologies %}
+                            <div class="technologies">
+                                <strong>Tech Stack:</strong> {{ exp.technologies|join(', ') }}
+                            </div>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                </section>
+                {% endif %}
+
+                <!-- Projects -->
+                {% if cv.projects %}
+                <section class="resume__section resume__projects">
+                    <div class="resume__content">
+                        <div class="resume__section-title">
+                            <i class="section-icon">🚀</i>
+                            <h2>Notable Projects</h2>
+                        </div>
+                        {% for project in cv.projects %}
+                        <div class="project-item">
+                            <div class="project-name">
+                                {{ project.name }}
+                                {% if project.url %}<a href="{{ project.url }}" class="project-link">↗</a>{% endif %}
+                            </div>
+                            {% if project.description %}
+                            <p>{{ project.description }}</p>
+                            {% endif %}
+                            {% if project.achievements %}
+                            <ul>
+                                {% for achievement in project.achievements %}
+                                <li>{{ achievement }}</li>
+                                {% endfor %}
+                            </ul>
+                            {% endif %}
+                            {% if project.technologies %}
+                            <div class="technologies">
+                                <strong>Technologies:</strong> {{ project.technologies|join(', ') }}
+                            </div>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                </section>
+                {% endif %}
+
+                <!-- Education -->
+                {% if cv.education %}
+                <section class="resume__section resume__education">
+                    <div class="resume__content">
+                        <div class="resume__section-title">
+                            <i class="section-icon">🎓</i>
+                            <h2>Education</h2>
+                        </div>
+                        {% for edu in cv.education %}
+                        <div class="edu-item">
+                            <div class="edu-degree">{{ edu.degree }}{% if edu.field_of_study %} in {{ edu.field_of_study }}{% endif %}</div>
+                            <div class="edu-institution">{{ edu.institution }}</div>
+                            <div class="edu-date">{{ edu.start_date|format_date }} – {{ edu.end_date|format_date if edu.end_date else 'Present' }}</div>
+                            {% if edu.gpa %}<div class="edu-gpa">GPA: {{ edu.gpa }}</div>{% endif %}
+                            {% if edu.achievements %}
+                            <ul>
+                                {% for achievement in edu.achievements %}
+                                <li>{{ achievement }}</li>
+                                {% endfor %}
+                            </ul>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                </section>
+                {% endif %}
+            </div>
+
+            <!-- Sidebar Column (Right - 30%) -->
+            <div class="resume__side">
+                <!-- Skills -->
+                {% if cv.skills %}
+                <section class="resume__section resume__skills">
+                    <div class="resume__content">
+                        <div class="resume__section-title">
+                            <i class="section-icon">⚡</i>
+                            <h2>Skills</h2>
+                        </div>
+                        <div class="resume__text">
+                            {% set skills_by_category = cv.skills | groupby('category') %}
+                            {% for category, category_skills in skills_by_category %}
+                            <div class="skill-category-title">{{ category }}</div>
+                            {% for skill in category_skills %}
+                            <div class="extra">
+                                <div class="extra-info">
+                                    {{ skill.name }}
+                                    {% if skill.proficiency %}<br><small>{{ skill.proficiency }}</small>{% endif %}
+                                </div>
+                                <div class="extra-details">
+                                    {% if skill.proficiency %}
+                                        {% if skill.proficiency in ['Expert', 'Advanced'] %}
+                                        <div class="extra-details__progress" style="width:90%"></div>
+                                        {% elif skill.proficiency == 'Intermediate' %}
+                                        <div class="extra-details__progress" style="width:70%"></div>
+                                        {% else %}
+                                        <div class="extra-details__progress" style="width:50%"></div>
+                                        {% endif %}
+                                    {% else %}
+                                        <div class="extra-details__progress" style="width:80%"></div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% endfor %}
+                            {% endfor %}
+                        </div>
+                    </div>
+                </section>
+                {% endif %}
+
+                <!-- Languages -->
+                {% if cv.languages %}
+                <section class="resume__section resume__languages">
+                    <div class="resume__content">
+                        <div class="resume__section-title">
+                            <i class="section-icon">🌍</i>
+                            <h2>Languages</h2>
+                        </div>
+                        {% for lang in cv.languages %}
+                        <div class="extra">
+                            <div class="extra-info">{{ lang.language }} <small>({{ lang.level }})</small></div>
+                            <div class="extra-details">
+                                {% if lang.level in ['Native', 'Fluent'] %}
+                                <div class="extra-details__progress" style="width:100%"></div>
+                                {% elif lang.level in ['Professional', 'Advanced'] %}
+                                <div class="extra-details__progress" style="width:75%"></div>
+                                {% elif lang.level == 'Intermediate' %}
+                                <div class="extra-details__progress" style="width:50%"></div>
+                                {% else %}
+                                <div class="extra-details__progress" style="width:30%"></div>
+                                {% endif %}
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </section>
+                {% endif %}
+
+                <!-- Certifications -->
+                {% if cv.certifications %}
+                <section class="resume__section resume__certifications">
+                    <div class="resume__content">
+                        <div class="resume__section-title">
+                            <i class="section-icon">🏆</i>
+                            <h2>Certifications</h2>
+                        </div>
+                        {% for cert in cv.certifications %}
+                        <div class="cert-item">
+                            <div class="cert-name">{{ cert.name }}</div>
+                            <div class="cert-issuer">{{ cert.issuer }}</div>
+                            {% if cert.date %}<div class="cert-date">{{ cert.date|format_date }}</div>{% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                </section>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</body>
+</html>

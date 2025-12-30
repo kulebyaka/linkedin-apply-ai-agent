@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ cv.contact.full_name }} - Resume</title>
+</head>
+<body>
+    <div id="container">
+        <!-- Left Profile Sidebar -->
+        <div id="profile">
+            {# Profile Image Section (placeholder - no actual image in CV model) #}
+            <div id="image-placeholder">
+                <div id="profile-initials">{{ cv.contact.full_name.split()[0][0] }}{{ cv.contact.full_name.split()[-1][0] if cv.contact.full_name.split()|length > 1 else '' }}</div>
+            </div>
+
+            {# Name and Email #}
+            <p id="name">{{ cv.contact.full_name }}<br><span id="email">{{ cv.contact.email }}</span></p>
+
+            {# Current Position (from most recent experience) #}
+            {% if cv.experiences and cv.experiences|length > 0 %}
+            <p id="designation">{{ cv.experiences[0].position }}<br><span id="college">{{ cv.experiences[0].company }}{% if cv.experiences[0].location %}, {{ cv.experiences[0].location }}{% endif %}</span></p>
+            {% endif %}
+
+            {# Social Links #}
+            <div id="social-links">
+                {% if cv.contact.linkedin_url %}
+                <a href="{{ cv.contact.linkedin_url }}"><i class="icon">🔗</i></a>
+                {% endif %}
+                {% if cv.contact.github_url %}
+                <a href="{{ cv.contact.github_url }}"><i class="icon">💻</i></a>
+                {% endif %}
+                {% if cv.contact.portfolio_url %}
+                <a href="{{ cv.contact.portfolio_url }}"><i class="icon">🌐</i></a>
+                {% endif %}
+            </div>
+
+            <hr width="100%">
+
+            {# About Section #}
+            <div id="about">
+                <p>About</p>
+            </div>
+            {% if cv.summary %}
+            <p id="about-text">{{ cv.summary }}</p>
+            {% endif %}
+
+            {# Education Snapshot (most recent) #}
+            {% if cv.education and cv.education|length > 0 %}
+            <p id="education-snapshot">Education<br><strong>{{ cv.education[0].degree }}, {{ cv.education[0].institution }}</strong></p>
+            {% if cv.education[0].end_date %}
+            <p id="year-graduation">Graduation<br><strong>{{ cv.education[0].end_date|format_date }}</strong></p>
+            {% endif %}
+            {% endif %}
+
+            {# Contact Information #}
+            {% if cv.contact.phone %}
+            <p id="telephone">Telephone<br><strong>{{ cv.contact.phone }}</strong></p>
+            {% endif %}
+            {% if cv.contact.location %}
+            <p id="location-info">Location<br><strong>{{ cv.contact.location }}</strong></p>
+            {% endif %}
+        </div>
+
+        <!-- Right Content Area with Cards -->
+        <div id="info-cards">
+            {# Work Experience Card #}
+            {% if cv.experiences and cv.experiences|length > 0 %}
+            <div class="card">
+                <p><i class="icon">💼</i>&nbsp;&nbsp;&nbsp;Work Experience</p>
+                <ul>
+                    {% for exp in cv.experiences %}
+                    <li>
+                        <p class="tags">
+                            {{ exp.position }} at {{ exp.company }}
+                            <br><span>
+                                {{ exp.start_date|format_date }} - {{ exp.end_date|format_date if exp.end_date else 'Present' }}
+                                {% if exp.location %} | {{ exp.location }}{% endif %}
+                            </span>
+                        </p>
+                        {% if exp.description %}
+                        <p class="description">{{ exp.description }}</p>
+                        {% endif %}
+                        {% if exp.achievements and exp.achievements|length > 0 %}
+                        <ul class="achievements">
+                            {% for achievement in exp.achievements %}
+                            <li>{{ achievement }}</li>
+                            {% endfor %}
+                        </ul>
+                        {% endif %}
+                        {% if exp.technologies and exp.technologies|length > 0 %}
+                        <p class="technologies"><strong>Technologies:</strong> {{ exp.technologies|join(', ') }}</p>
+                        {% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+
+            {# Certifications/Workshops Card #}
+            {% if cv.certifications and cv.certifications|length > 0 %}
+            <div class="card">
+                <p><i class="icon">🏆</i>&nbsp;&nbsp;&nbsp;Certifications & Workshops</p>
+                <ul>
+                    {% for cert in cv.certifications %}
+                    <li>
+                        <p class="tags">
+                            {{ cert.name }}
+                            <br><span>
+                                {{ cert.issuer }}{% if cert.date %} | <span>{{ cert.date }}</span>{% endif %}
+                            </span>
+                        </p>
+                        {% if cert.description %}
+                        <p class="description">{{ cert.description }}</p>
+                        {% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+
+            {# Projects Card #}
+            {% if cv.projects and cv.projects|length > 0 %}
+            <div class="card">
+                <p><i class="icon">🚀</i>&nbsp;&nbsp;&nbsp;Projects</p>
+                <ul>
+                    {% for project in cv.projects %}
+                    <li>
+                        <p class="tags">
+                            {{ project.name }}
+                            <br><span>
+                                {% if project.role %}{{ project.role }}{% endif %}
+                                {% if project.status %} | {{ project.status|capitalize }}{% endif %}
+                            </span>
+                        </p>
+                        {% if project.description %}
+                        <p class="description">{{ project.description }}</p>
+                        {% endif %}
+                        {% if project.technologies and project.technologies|length > 0 %}
+                        <p class="technologies"><strong>Technologies:</strong> {{ project.technologies|join(', ') }}</p>
+                        {% endif %}
+                        {% if project.url %}
+                        <p class="project-url"><a href="{{ project.url }}">{{ project.url }}</a></p>
+                        {% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+
+            {# Education Card (Full Details) #}
+            {% if cv.education and cv.education|length > 0 %}
+            <div class="card">
+                <p><i class="icon">🎓</i>&nbsp;&nbsp;&nbsp;Education</p>
+                <ul>
+                    {% for edu in cv.education %}
+                    <li>
+                        <p class="tags">
+                            {{ edu.institution }}
+                            <br><span>
+                                {{ edu.degree }}, {{ edu.field_of_study }} |
+                                <span>{{ edu.start_date|format_date }} - {{ edu.end_date|format_date if edu.end_date else 'Present' }}</span>
+                            </span>
+                        </p>
+                        {% if edu.gpa %}
+                        <p class="gpa"><strong>GPA:</strong> {{ edu.gpa }}</p>
+                        {% endif %}
+                        {% if edu.achievements and edu.achievements|length > 0 %}
+                        <ul class="achievements">
+                            {% for achievement in edu.achievements %}
+                            <li>{{ achievement }}</li>
+                            {% endfor %}
+                        </ul>
+                        {% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+
+            {# Skills Card #}
+            {% if cv.skills and cv.skills|length > 0 %}
+            <div class="card">
+                <p><i class="icon">⚡</i>&nbsp;&nbsp;&nbsp;Skills</p>
+                {% set skills_by_category = cv.skills | groupby('category') %}
+                {% for category, category_skills in skills_by_category %}
+                <div class="skill-category">
+                    <p class="skill-category-title">{{ category }}</p>
+                    <ul class="skills-list">
+                        {% for skill in category_skills %}
+                        <li>
+                            {{ skill.name }}{% if skill.proficiency %} <span class="proficiency">({{ skill.proficiency }})</span>{% endif %}
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            {# Languages Card #}
+            {% if cv.languages and cv.languages|length > 0 %}
+            <div class="card">
+                <p><i class="icon">🌍</i>&nbsp;&nbsp;&nbsp;Languages</p>
+                <ul>
+                    {% for lang in cv.languages %}
+                    <li>
+                        <p class="tags">
+                            {{ lang.language }}
+                            <br><span>{{ lang.level }}</span>
+                        </p>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>
