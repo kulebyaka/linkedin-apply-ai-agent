@@ -13,6 +13,7 @@ from pathlib import Path
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from src.agents.preparation_workflow import (
     create_preparation_workflow,
@@ -92,8 +93,8 @@ def run_workflow_async(job_id: str, thread_id: str, initial_state: dict):
         # Error is stored in workflow state, no need to re-raise
 
 
-@app.get("/")
-async def root():
+@app.get("/api/health")
+async def health():
     """Health check endpoint"""
     return {"status": "running", "message": "LinkedIn Job Application Agent API"}
 
@@ -277,6 +278,11 @@ def run_retry_workflow_async(job_id: str, thread_id: str, initial_state: dict):
         logger.error(f"Retry workflow for job {job_id} failed: {e}", exc_info=True)
 
 
+@app.options("/api/jobs/submit")
+async def submit_job_options():
+    """Handle CORS preflight for job submission."""
+    return {}
+
 @app.post("/api/jobs/submit", response_model=JobSubmitResponse)
 async def submit_job(
     request: JobSubmitRequest, background_tasks: BackgroundTasks
@@ -410,6 +416,7 @@ async def get_job_status(job_id: str) -> JobStatusResponse:
                 retry_count=state_values.get("retry_count", 0),
                 error_message=state_values.get("error_message"),
                 created_at=thread_info["created_at"],
+                updated_at=datetime.now(),
             )
 
         # Fallback to legacy MVP threads (now also uses preparation_workflow)
@@ -430,6 +437,7 @@ async def get_job_status(job_id: str) -> JobStatusResponse:
                 retry_count=state_values.get("retry_count", 0),
                 error_message=state_values.get("error_message"),
                 created_at=workflow_created_at.get(job_id, datetime.now()),
+                updated_at=datetime.now(),
             )
 
         raise HTTPException(404, f"Job {job_id} not found")
@@ -695,6 +703,23 @@ async def get_application_history(
     except Exception as e:
         logger.error(f"Failed to get application history: {e}", exc_info=True)
         raise HTTPException(500, f"Failed to get history: {str(e)}")
+
+
+# =============================================================================
+# Static File Serving for UI
+# =============================================================================
+
+# Mount static files for UI (SvelteKit build output)
+# IMPORTANT: This must be the LAST route definition to avoid shadowing API routes
+UI_BUILD_PATH = Path(__file__).parent.parent.parent / "ui" / "build"
+if UI_BUILD_PATH.exists():
+    app.mount("/", StaticFiles(directory=str(UI_BUILD_PATH), html=True), name="ui")
+    logger.info(f"Mounted UI at / from {UI_BUILD_PATH}")
+else:
+    logger.warning(
+        f"UI build directory not found at {UI_BUILD_PATH}. "
+        "Run 'cd ui && npm run build' to build the UI."
+    )
 
 
 if __name__ == "__main__":
