@@ -1,0 +1,406 @@
+/* Compact Two-Column Resume Template - Based on Thiago Braga Design */
+
+/* Page Setup - A4 Size with tight margins for maximum content */
+@page {
+    size: A4;  /* 210mm x 297mm */
+    margin: 0.5in 0.6in;  /* Reduced margins for more content */
+}
+
+/* Reset and Base Styles */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Open Sans', 'Helvetica', Arial, sans-serif;
+    font-weight: 400;
+    font-size: 9pt;  /* Smaller base font for compact layout */
+    line-height: 1.4;  /* Tighter line height */
+    color: #333;
+    background-color: #fff;
+}
+
+/* Color Variables */
+:root {
+    --accent-color: #5695cd;
+    --light-accent: #a8c9e8;
+    --progress-bg: #d1d9e1;
+    --text-dark: #2c3e50;
+    --text-gray: #666;
+    --text-light: #999;
+}
+
+/* Resume Container */
+.resume {
+    display: block;
+    min-height: 1090.41px;
+}
+
+/* Typography */
+h1 {
+    font-size: 20pt;  /* Slightly smaller than original */
+    font-weight: 600;
+    letter-spacing: -0.5px;
+    color: var(--text-dark);
+    margin-bottom: 0.5em;
+}
+
+h2 {
+    font-size: 11pt;  /* Compact section headers */
+    font-weight: 600;
+    line-height: 1;
+    margin-bottom: 0;
+    color: var(--text-dark);
+}
+
+h3 {
+    font-size: 10pt;
+    font-weight: 600;
+    margin-bottom: 0.15em;
+}
+
+p {
+    margin-bottom: 0.5em;
+    line-height: 1.3;
+}
+
+ul {
+    padding-left: 1.2em;
+    margin-bottom: 0.5em;
+}
+
+li {
+    margin-bottom: 0.15em;
+    line-height: 1.3;
+}
+
+small {
+    font-size: 8pt;
+    color: var(--text-gray);
+}
+
+/* Header Section */
+.resume__header {
+    padding: 1.5em 2em 0;
+    page-break-after: avoid;
+}
+
+.info-item {
+    margin-bottom: 0.15em;
+    font-weight: 300;
+    font-size: 8.5pt;
+}
+
+.info-item:last-child {
+    margin-bottom: 0;
+}
+
+.info-label {
+    display: inline-block;
+    padding-right: 0.4em;
+    min-width: 1.5em;
+    text-align: center;
+}
+
+.info-label .icon {
+    font-style: normal;
+    font-size: 9pt;
+}
+
+.info-text {
+    color: var(--text-gray);
+}
+
+/* Section Styling */
+.resume__section {
+    margin-bottom: 1.5em;  /* Reduced from 4em for compactness */
+    page-break-inside: avoid;
+}
+
+.resume__section:last-child {
+    padding-bottom: 0;
+}
+
+.resume__section-title {
+    display: flex;
+    align-items: center;
+    margin-bottom: 0.6em;  /* Reduced spacing */
+}
+
+.resume__section-title .section-icon {
+    margin-right: 0.4em;
+    font-style: normal;
+    font-size: 10pt;
+    background-color: var(--accent-color);
+    color: white;
+    border: 2px solid var(--light-accent);
+    border-radius: 50%;
+    width: 1.8em;
+    height: 1.8em;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    flex-shrink: 0;
+}
+
+/* Two Column Layout */
+.resume__columns {
+    overflow: hidden;
+    padding: 0 2em 2em;
+}
+
+.resume__main {
+    float: left;
+    width: 70%;  /* Main content */
+    padding-right: 2em;
+}
+
+.resume__side {
+    float: left;
+    width: 30%;  /* Sidebar */
+}
+
+/* Professional Summary */
+.resume__summary .section-content p {
+    text-align: justify;
+    line-height: 1.35;
+}
+
+/* Experience Section */
+.xp-item {
+    margin-bottom: 1.2em;
+    page-break-inside: avoid;
+}
+
+.xp-item:last-child {
+    margin-bottom: 0;
+}
+
+.xp-job {
+    font-size: 10pt;
+    font-weight: 600;
+    line-height: 1.2;
+    color: var(--text-dark);
+}
+
+.xp-job span {
+    font-weight: 400;
+    color: var(--accent-color);
+}
+
+.xp-job small {
+    font-weight: 400;
+    font-size: 8pt;
+    color: var(--text-gray);
+}
+
+.xp-date {
+    font-size: 8pt;
+    margin-top: 0.2em;
+    margin-bottom: 0.4em;
+    color: var(--accent-color);
+    font-weight: 500;
+}
+
+.xp-detail {
+    margin-bottom: 0.4em;
+}
+
+.xp-detail p {
+    margin-bottom: 0.3em;
+}
+
+.xp-detail ul {
+    margin-top: 0.3em;
+    margin-bottom: 0.3em;
+}
+
+.technologies {
+    font-size: 8pt;
+    color: var(--text-gray);
+    margin-top: 0.3em;
+}
+
+.technologies strong {
+    color: var(--text-dark);
+}
+
+/* Projects Section */
+.project-item {
+    margin-bottom: 1em;
+    page-break-inside: avoid;
+}
+
+.project-name {
+    font-size: 10pt;
+    font-weight: 600;
+    margin-bottom: 0.3em;
+    color: var(--text-dark);
+}
+
+.project-link {
+    font-size: 9pt;
+    color: var(--accent-color);
+    text-decoration: none;
+    margin-left: 0.3em;
+}
+
+/* Education Section */
+.edu-item {
+    margin-bottom: 1em;
+    page-break-inside: avoid;
+}
+
+.edu-degree {
+    font-size: 10pt;
+    font-weight: 600;
+    color: var(--text-dark);
+    margin-bottom: 0.2em;
+}
+
+.edu-institution {
+    font-weight: 500;
+    color: var(--text-gray);
+    margin-bottom: 0.2em;
+}
+
+.edu-date {
+    font-size: 8pt;
+    color: var(--accent-color);
+    margin-bottom: 0.2em;
+}
+
+.edu-gpa {
+    font-size: 8pt;
+    color: var(--text-gray);
+}
+
+/* Sidebar - Skills Section */
+.resume__side .resume__section {
+    margin-bottom: 1.2em;
+}
+
+.skill-category-title {
+    font-weight: 600;
+    font-size: 9pt;
+    color: var(--text-dark);
+    margin-top: 0.6em;
+    margin-bottom: 0.4em;
+}
+
+.skill-category-title:first-child {
+    margin-top: 0;
+}
+
+.extra {
+    margin-bottom: 0.8em;
+}
+
+.extra:last-child {
+    margin-bottom: 0;
+}
+
+.extra-info {
+    font-size: 8.5pt;
+    line-height: 1.3;
+    margin-bottom: 0.3em;
+}
+
+.extra-info small {
+    display: inline-block;
+    font-size: 7pt;
+    color: var(--text-light);
+}
+
+/* Progress Bars */
+.extra-details,
+.extra-details__progress {
+    border-radius: 3px;
+}
+
+.extra-details {
+    background-color: var(--progress-bg);
+    width: 100%;
+    height: 4px;
+    position: relative;
+}
+
+.extra-details__progress {
+    background-color: var(--accent-color);
+    height: 4px;
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+
+/* Certifications */
+.cert-item {
+    margin-bottom: 0.8em;
+    page-break-inside: avoid;
+}
+
+.cert-name {
+    font-size: 8.5pt;
+    font-weight: 600;
+    color: var(--text-dark);
+    margin-bottom: 0.15em;
+    line-height: 1.2;
+}
+
+.cert-issuer {
+    font-size: 8pt;
+    color: var(--text-gray);
+    margin-bottom: 0.1em;
+}
+
+.cert-date {
+    font-size: 7.5pt;
+    color: var(--text-light);
+}
+
+/* Print Optimization */
+@media print {
+    body {
+        font-size: 9pt;
+    }
+
+    /* Ensure content doesn't get cut off */
+    h1, h2, h3,
+    .resume__section-title,
+    .xp-job,
+    .project-name,
+    .edu-degree {
+        page-break-after: avoid;
+    }
+
+    .xp-item,
+    .project-item,
+    .edu-item,
+    .cert-item,
+    .extra {
+        page-break-inside: avoid;
+    }
+
+    /* Remove background colors for better printing */
+    .resume__section-title .section-icon {
+        border: 2px solid var(--accent-color);
+        color: var(--accent-color);
+        background-color: white;
+    }
+}
+
+/* Page break utilities */
+.page-break-before {
+    page-break-before: always;
+}
+
+.page-break-after {
+    page-break-after: always;
+}
+
+.no-page-break {
+    page-break-inside: avoid;
+}

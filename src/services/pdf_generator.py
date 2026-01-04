@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 class PDFGenerator:
     """Generates professional PDF resumes from CV JSON data using WeasyPrint"""
 
-    SUPPORTED_TEMPLATES = ["modern", "classic", "minimal"]
+    SUPPORTED_TEMPLATES = ["modern", "classic", "minimal", "compact", "profile-card"]
     DEFAULT_TEMPLATE = "modern"
 
     def __init__(
