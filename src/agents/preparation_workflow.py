@@ -12,6 +12,7 @@ The workflow ends at the HITL boundary. Application is handled by a separate wor
 
 import json
 import logging
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Literal, TypedDict
@@ -151,9 +152,10 @@ def extract_job_node(state: PreparationWorkflowState) -> PreparationWorkflowStat
     Returns:
         Updated state with job_posting.
     """
+    start_time = time.time()
     job_id = state.get("job_id", "unknown")
     source = state.get("source", "unknown")
-    logger.info(f"Extracting job data for {job_id} from source: {source}")
+    logger.info(f"[TIMING] Starting extract_job_node for {job_id} from source: {source}")
     state["current_step"] = "extracting"
 
     try:
@@ -223,6 +225,8 @@ def extract_job_node(state: PreparationWorkflowState) -> PreparationWorkflowStat
         state["error_message"] = f"Job extraction failed: {str(e)}"
         state["current_step"] = "failed"
 
+    elapsed = time.time() - start_time
+    logger.info(f"[TIMING] extract_job_node completed in {elapsed:.2f}s")
     return state
 
 
@@ -261,9 +265,10 @@ def compose_cv_node(state: PreparationWorkflowState) -> PreparationWorkflowState
     Returns:
         Updated state with tailored_cv_json.
     """
+    start_time = time.time()
     job_id = state.get("job_id", "unknown")
     user_feedback = state.get("user_feedback")
-    logger.info(f"Starting CV composition for job {job_id}")
+    logger.info(f"[TIMING] Starting compose_cv_node for job {job_id}")
     if user_feedback:
         logger.info(f"Retry with feedback: {user_feedback}")
     state["current_step"] = "composing_cv"
@@ -304,6 +309,8 @@ def compose_cv_node(state: PreparationWorkflowState) -> PreparationWorkflowState
         state["error_message"] = f"CV composition failed: {str(e)}"
         state["tailored_cv_json"] = None
 
+    elapsed = time.time() - start_time
+    logger.info(f"[TIMING] compose_cv_node completed in {elapsed:.2f}s")
     return state
 
 
@@ -318,8 +325,9 @@ def generate_pdf_node(state: PreparationWorkflowState) -> PreparationWorkflowSta
     Returns:
         Updated state with tailored_cv_pdf_path.
     """
+    start_time = time.time()
     job_id = state.get("job_id", "unknown")
-    logger.info(f"Starting PDF generation for job {job_id}")
+    logger.info(f"[TIMING] Starting generate_pdf_node for job {job_id}")
     state["current_step"] = "generating_pdf"
 
     # Check if we have CV data
@@ -386,6 +394,8 @@ def generate_pdf_node(state: PreparationWorkflowState) -> PreparationWorkflowSta
         state["tailored_cv_pdf_path"] = None
         state["current_step"] = "failed"
 
+    elapsed = time.time() - start_time
+    logger.info(f"[TIMING] generate_pdf_node completed in {elapsed:.2f}s")
     return state
 
 

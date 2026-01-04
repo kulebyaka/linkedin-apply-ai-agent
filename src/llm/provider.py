@@ -41,6 +41,7 @@ from typing import Any, Dict, List, Optional
 from enum import Enum
 import json
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -170,12 +171,16 @@ class OpenAIClient(BaseLLMClient):
                     user_prompt = f"{prompt}\n\nYou must respond with valid JSON only."
                     api_kwargs = {"temperature": temperature, **kwargs}
 
+                logger.info(f"[TIMING] Starting OpenAI API call (model={self.model}, attempt={attempt + 1})")
+                api_start = time.time()
                 response = self.client.chat.completions.create(
                     model=self.model,
                     messages=[{"role": "user", "content": user_prompt}],
                     response_format=response_format,
                     **api_kwargs
                 )
+                api_elapsed = time.time() - api_start
+                logger.info(f"[TIMING] OpenAI API call completed in {api_elapsed:.2f}s")
 
                 content = response.choices[0].message.content
                 result = json.loads(content)
@@ -442,12 +447,16 @@ class GrokClient(BaseLLMClient):
                     user_prompt = f"{prompt}\n\nYou must respond with valid JSON only."
                     api_kwargs = {"temperature": temperature, **kwargs}
 
+                logger.info(f"[TIMING] Starting OpenAI API call (model={self.model}, attempt={attempt + 1})")
+                api_start = time.time()
                 response = self.client.chat.completions.create(
                     model=self.model,
                     messages=[{"role": "user", "content": user_prompt}],
                     response_format=response_format,
                     **api_kwargs
                 )
+                api_elapsed = time.time() - api_start
+                logger.info(f"[TIMING] OpenAI API call completed in {api_elapsed:.2f}s")
 
                 content = response.choices[0].message.content
                 result = json.loads(content)

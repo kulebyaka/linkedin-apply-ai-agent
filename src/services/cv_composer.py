@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -170,9 +171,13 @@ Requirements:
 
         # Generate structured summary using LLM
         try:
+            logger.info("[TIMING] Starting LLM API call for job summary")
+            llm_start = time.time()
             summary = self.llm.generate_json(
                 prompt, schema=JOB_SUMMARY_SCHEMA, temperature=self.TEMPERATURE_ANALYSIS
             )
+            llm_elapsed = time.time() - llm_start
+            logger.info(f"[TIMING] LLM API call for job summary completed in {llm_elapsed:.2f}s")
         except Exception as e:
             logger.error(f"Failed to analyze job description: {e}")
             raise CVCompositionError(f"Job analysis failed: {e}") from e
@@ -226,11 +231,15 @@ Requirements:
 
         # Generate complete tailored CV using unified schema
         try:
+            logger.info("[TIMING] Starting LLM API call for full CV generation")
+            llm_start = time.time()
             result = self.llm.generate_json(
                 prompt,
                 schema=FULL_CV_SCHEMA,
                 temperature=self.TEMPERATURE_GENERATION,
             )
+            llm_elapsed = time.time() - llm_start
+            logger.info(f"[TIMING] LLM API call for full CV generation completed in {llm_elapsed:.2f}s")
         except Exception as e:
             logger.error(f"Failed to generate CV sections: {e}")
             raise CVCompositionError(f"CV generation failed: {e}") from e
