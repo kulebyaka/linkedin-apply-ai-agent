@@ -147,34 +147,32 @@
 	<title>LinkedIn Job Application Agent - CV Generator</title>
 </svelte:head>
 
-<div class="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-	<div class="max-w-7xl mx-auto">
+<div class="min-h-screen grain py-16 px-4 sm:px-6 lg:px-8" style="background-color: var(--color-stone);">
+	<div class="max-w-5xl mx-auto">
 		<!-- Header -->
-		<div class="text-center mb-12">
-			<h1 class="text-4xl font-bold text-gray-900 mb-4">CV Generator</h1>
-			<p class="text-lg text-gray-600">
-				Paste a job description and get a tailored CV PDF instantly
-			</p>
+		<div class="mb-16">
+			<div class="border-l-4 pl-6 mb-8" style="border-color: var(--color-amber);">
+				<h1 class="text-5xl tracking-tight mb-3" style="color: var(--color-charcoal);">CV Generator</h1>
+				<p class="text-lg font-light" style="color: var(--color-warm-gray);">
+					Paste a job description and get a tailored CV PDF instantly
+				</p>
+			</div>
 		</div>
 
 		<!-- Main content -->
 		<div class="space-y-8">
-			<!-- Form (show when idle or failed) -->
-			{#if currentState.status === 'idle' || currentState.status === 'failed'}
-				<JobDescriptionForm
-					onSubmit={handleSubmit}
-					isLoading={currentState.status === 'submitting'}
-					errorMessage={currentState.status === 'failed' ? currentState.errorMessage : undefined}
+			<!-- Progress stepper (show when processing or failed) -->
+			{#if currentState.status === 'polling' || currentState.status === 'submitting' || currentState.status === 'failed'}
+				<ProgressStepper
+					currentStep={currentState.currentStep}
+					hasError={currentState.status === 'failed'}
 				/>
-			{/if}
 
-			<!-- Progress stepper (show when processing) -->
-			{#if currentState.status === 'polling' || currentState.status === 'submitting'}
-				<ProgressStepper currentStep={currentState.currentStep} />
-
-				<div class="text-center">
-					<p class="text-gray-600">
-						{#if currentState.currentStep === 'queued'}
+				<div class="text-center mt-8">
+					<p class="text-base font-mono tracking-wide" style="color: var(--color-warm-gray);">
+						{#if currentState.status === 'failed'}
+							<!-- Error message shown via toast -->
+						{:else if currentState.currentStep === 'queued'}
 							Job submitted successfully. Starting processing...
 						{:else if currentState.currentStep === 'extracting'}
 							Extracting job details from description...
@@ -187,11 +185,21 @@
 				</div>
 			{/if}
 
+			<!-- Form (show when idle or failed) -->
+			{#if currentState.status === 'idle' || currentState.status === 'failed'}
+				<JobDescriptionForm
+					onSubmit={handleSubmit}
+					isLoading={currentState.status === 'submitting'}
+					errorMessage={currentState.status === 'failed' ? currentState.errorMessage : undefined}
+					initialValue={currentState.jobDescription}
+				/>
+			{/if}
+
 			<!-- Completed state -->
 			{#if currentState.status === 'completed'}
-				<div class="text-center space-y-6">
-					<div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-green-100">
-						<svg class="w-10 h-10 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+				<div class="text-center space-y-8 py-12">
+					<div class="inline-flex items-center justify-center w-20 h-20 rounded-none border-4" style="border-color: var(--color-success); background-color: transparent;">
+						<svg class="w-12 h-12" style="color: var(--color-success);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path
 								stroke-linecap="round"
 								stroke-linejoin="round"
@@ -201,16 +209,17 @@
 						</svg>
 					</div>
 
-					<h2 class="text-2xl font-bold text-gray-900">Your CV is Ready!</h2>
+					<h2 class="text-3xl tracking-tight" style="color: var(--color-charcoal);">Your CV is Ready!</h2>
 
 					{#if currentState.autoDownloadFailed && currentState.pdfBlob}
-						<div class="space-y-4">
-							<p class="text-gray-600">
+						<div class="space-y-6">
+							<p class="text-base" style="color: var(--color-warm-gray);">
 								Your browser blocked the automatic download. Click below to download manually.
 							</p>
 							<button
 								onclick={handleManualDownload}
-								class="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-lg shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+								class="inline-flex items-center px-8 py-4 border-2 text-base font-medium transition-all duration-200 hover:translate-y-[-2px]"
+								style="border-color: var(--color-amber); background-color: var(--color-amber); color: var(--color-charcoal); box-shadow: 4px 4px 0 var(--color-charcoal);"
 							>
 								<svg
 									class="w-5 h-5 mr-2"
@@ -232,7 +241,8 @@
 
 					<button
 						onclick={handleReset}
-						class="inline-flex items-center px-6 py-3 border border-gray-300 text-base font-medium rounded-lg shadow-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+						class="inline-flex items-center px-8 py-4 border-2 text-base font-medium transition-all duration-200 hover:translate-y-[-2px]"
+						style="border-color: var(--color-charcoal); background-color: transparent; color: var(--color-charcoal); box-shadow: 4px 4px 0 var(--color-warm-gray-light);"
 					>
 						<svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path

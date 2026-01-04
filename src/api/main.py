@@ -93,8 +93,8 @@ def run_workflow_async(job_id: str, thread_id: str, initial_state: dict):
         # Error is stored in workflow state, no need to re-raise
 
 
-@app.get("/")
-async def root():
+@app.get("/api/health")
+async def health():
     """Health check endpoint"""
     return {"status": "running", "message": "LinkedIn Job Application Agent API"}
 
@@ -278,6 +278,11 @@ def run_retry_workflow_async(job_id: str, thread_id: str, initial_state: dict):
         logger.error(f"Retry workflow for job {job_id} failed: {e}", exc_info=True)
 
 
+@app.options("/api/jobs/submit")
+async def submit_job_options():
+    """Handle CORS preflight for job submission."""
+    return {}
+
 @app.post("/api/jobs/submit", response_model=JobSubmitResponse)
 async def submit_job(
     request: JobSubmitRequest, background_tasks: BackgroundTasks
@@ -411,6 +416,7 @@ async def get_job_status(job_id: str) -> JobStatusResponse:
                 retry_count=state_values.get("retry_count", 0),
                 error_message=state_values.get("error_message"),
                 created_at=thread_info["created_at"],
+                updated_at=datetime.now(),
             )
 
         # Fallback to legacy MVP threads (now also uses preparation_workflow)
@@ -431,6 +437,7 @@ async def get_job_status(job_id: str) -> JobStatusResponse:
                 retry_count=state_values.get("retry_count", 0),
                 error_message=state_values.get("error_message"),
                 created_at=workflow_created_at.get(job_id, datetime.now()),
+                updated_at=datetime.now(),
             )
 
         raise HTTPException(404, f"Job {job_id} not found")
