@@ -17,6 +17,7 @@ Every hour, based on a set of filters (in the future, filters will be built base
 |-----------|--------|-------|
 | **Two-Workflow Architecture** | ✅ Complete | Preparation + Application workflows with HITL boundary. |
 | **LLM Provider Layer** | ✅ Complete | Implemented in `src/llm/provider.py`. |
+| **MVP Web UI** | ✅ Complete | `ui/` - SvelteKit 5 with Runes, Tailwind CSS v3, TypeScript. Single-page CV generator. |
 | **Job Source Adapters** | 🟡 Interface | `src/services/job_source.py` - interface only, no implementation. |
 | **Data Access Layer (DAL)** | 🟡 Stubs | `src/services/job_repository.py` - stubs only, no persistence. |
 | **Preparation Workflow** | ✅ Complete | `src/agents/preparation_workflow.py` - extract → filter → compose → PDF → save. |
@@ -28,6 +29,7 @@ Every hour, based on a set of filters (in the future, filters will be built base
 | **Unified Data Models** | ✅ Complete | `src/models/unified.py` - Pydantic models for new architecture. |
 | **Job Filter (LLM)** | 🔴 Pending | `src/services/job_filter.py` skeleton exists. |
 | **Browser Automation** | 🔴 Pending | `src/services/browser_automation.py` is a skeleton. |
+| **HITL Frontend (Full Mode)** | 🔴 Pending | Tinder-like batch review UI for Full mode - not implemented. |
 
 ## Two-Workflow Pipeline Architecture
 
@@ -194,11 +196,86 @@ The two-workflow architecture enables true batch HITL:
    - Decline → Mark as declined, no action
    - Retry → Retry Workflow with feedback
 
+## MVP Web UI
+
+A single-page web interface for generating tailored CV PDFs from job descriptions (MVP mode only).
+
+**Location**: `ui/`
+**Tech Stack**: SvelteKit 2.x with Svelte 5 (Runes API), TypeScript, Tailwind CSS v3
+**Status**: ✅ Complete
+
+### Features
+
+- Simple textarea input for job descriptions (minimum 50 characters)
+- Real-time progress tracking with visual stepper (5 stages)
+- Auto-download PDF when generation complete (with manual fallback)
+- Toast notifications for error handling
+- Responsive design (mobile-friendly)
+- API polling every 2 seconds for status updates
+
+### Architecture
+
+```
+ui/
+├── src/
+│   ├── routes/
+│   │   ├── +layout.svelte       # Root layout
+│   │   ├── +layout.ts           # Prerender config
+│   │   └── +page.svelte         # Main CV generator page
+│   ├── lib/
+│   │   ├── components/          # Svelte components
+│   │   │   ├── JobDescriptionForm.svelte
+│   │   │   ├── ProgressStepper.svelte
+│   │   │   └── ToastNotification.svelte
+│   │   ├── stores/
+│   │   │   └── appState.svelte.ts  # Svelte 5 runes state
+│   │   ├── api/
+│   │   │   └── client.ts           # API client
+│   │   ├── utils/
+│   │   │   └── validation.ts       # Input validation
+│   │   └── types/
+│   │       └── index.ts            # TypeScript types
+│   ├── app.html
+│   └── app.css                  # Tailwind imports
+├── build/                        # Production build (served by FastAPI)
+└── package.json
+```
+
+### Integration with Backend
+
+- FastAPI serves static files from `ui/build/` at root path `/`
+- API endpoints remain at `/api/*` (no conflicts)
+- UI polls `/api/jobs/{job_id}/status` every 2 seconds
+- Auto-downloads from `/api/jobs/{job_id}/pdf` when complete
+
+### Workflow
+
+1. User pastes job description → validates (50+ chars)
+2. Submits to `/api/jobs/submit` with `mode="mvp"`
+3. UI polls status, shows progress: queued → extracting → composing_cv → generating_pdf → completed
+4. PDF auto-downloads (or shows manual button if blocked)
+5. "Generate Another CV" button to reset
+
+### Usage
+
+```bash
+# Build UI (from project root)
+cd ui
+npm run build
+
+# Start backend (from project root)
+python -m uvicorn src.api.main:app --reload
+
+# Access at http://localhost:8000/
+```
+
+See `ui/README.md` for detailed documentation.
+
 ## Next Steps
 
 1. **Implement Job Source Adapters** - URL extraction using HTTP + LLM, manual input processing
 2. **Implement DAL** - SQLite or PostgreSQL persistence for job records
-3. **Build HITL Frontend** - Tinder-like React/Vue UI for batch review
+3. **Build HITL Frontend (Full Mode)** - Tinder-like UI for batch review of pending CVs (extends MVP UI)
 4. **Implement Application Workflow** - Deep agent with Playwright MCP for browser automation
 5. **Add Job Filter Logic** - LLM-based job suitability evaluation
 6. **LinkedIn Integration** - Job fetching and Easy Apply automation

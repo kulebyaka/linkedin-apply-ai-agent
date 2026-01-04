@@ -13,6 +13,7 @@ from pathlib import Path
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from src.agents.preparation_workflow import (
     create_preparation_workflow,
@@ -695,6 +696,23 @@ async def get_application_history(
     except Exception as e:
         logger.error(f"Failed to get application history: {e}", exc_info=True)
         raise HTTPException(500, f"Failed to get history: {str(e)}")
+
+
+# =============================================================================
+# Static File Serving for UI
+# =============================================================================
+
+# Mount static files for UI (SvelteKit build output)
+# IMPORTANT: This must be the LAST route definition to avoid shadowing API routes
+UI_BUILD_PATH = Path(__file__).parent.parent.parent / "ui" / "build"
+if UI_BUILD_PATH.exists():
+    app.mount("/", StaticFiles(directory=str(UI_BUILD_PATH), html=True), name="ui")
+    logger.info(f"Mounted UI at / from {UI_BUILD_PATH}")
+else:
+    logger.warning(
+        f"UI build directory not found at {UI_BUILD_PATH}. "
+        "Run 'cd ui && npm run build' to build the UI."
+    )
 
 
 if __name__ == "__main__":
