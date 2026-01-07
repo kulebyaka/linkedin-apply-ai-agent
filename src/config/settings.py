@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     master_cv_path: str = "./data/cv/master_cv.json"
     prompts_dir: str = "./prompts/cv_composer"
 
+    # Repository Configuration
+    repo_type: str = "memory"  # "memory" or "sqlite"
+    db_path: str = "./data/jobs.db"  # SQLite database path
+
     # PDF Generation Settings
     cv_template_dir: str = "src/templates/cv"
     cv_template_name: str = "modern"  # Template theme: modern, compact (2-column), classic, minimal, profile-card (LinkedIn-style)

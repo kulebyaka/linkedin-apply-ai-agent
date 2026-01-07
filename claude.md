@@ -223,7 +223,7 @@ Defined in `src/models/unified.py`:
 | **Generate PDF** | ✅ Complete | `src/services/pdf_generator.py` (WeasyPrint + Jinja2) |
 | **HITL API Endpoints** | ✅ Complete | `src/api/main.py` |
 | **Unified Data Models** | ✅ Complete | `src/models/unified.py` |
-| **Job Repository (DAL)** | ✅ Complete | `src/services/job_repository.py` (in-memory) |
+| **Job Repository (DAL)** | ✅ Complete | `src/services/job_repository.py` (in-memory + SQLite via Piccolo ORM) |
 | **Job Source Adapters** | 🟡 Interface | `src/services/job_source.py` - interface only |
 | **Application Workflow** | 🟡 Stubs | `src/agents/application_workflow.py` - stubs only |
 | **Job Filter (LLM)** | 🔴 Pending | `src/services/job_filter.py` skeleton |
@@ -249,6 +249,9 @@ All settings in `.env`:
 - Paths and directories
 - Workflow parameters (fetch interval, concurrency)
 - API server settings
+- **Repository Configuration:**
+  - `REPO_TYPE=memory` (default) or `REPO_TYPE=sqlite` for persistent storage
+  - `DB_PATH=./data/jobs.db` (SQLite database path)
 
 **Never commit `.env` or real CV data to git!**
 

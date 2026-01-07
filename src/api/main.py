@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -39,7 +39,7 @@ from src.models.unified import (
     JobSubmitResponse,
     PendingApproval,
 )
-from src.services.job_repository import InMemoryJobRepository
+from src.services.job_repository import get_repository, JobRepository
 
 settings = get_settings()
 logging.basicConfig(level=logging.INFO)
@@ -49,8 +49,11 @@ logger = logging.getLogger(__name__)
 preparation_workflow = create_preparation_workflow()
 retry_workflow = create_retry_workflow()
 
-# Initialize shared repository
-job_repository = InMemoryJobRepository()
+# Initialize shared repository using factory (environment-based selection)
+job_repository: JobRepository = get_repository(
+    repo_type=settings.repo_type,
+    db_path=settings.db_path,
+)
 set_prep_repository(job_repository)
 set_retry_repository(job_repository)
 
@@ -76,6 +79,22 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize repository on startup."""
+    logger.info(f"Starting up with repository type: {settings.repo_type}")
+    await job_repository.initialize()
+    logger.info("Repository initialized successfully")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Close repository on shutdown."""
+    logger.info("Shutting down repository...")
+    await job_repository.close()
+    logger.info("Repository closed")
 
 
 def run_workflow_async(job_id: str, thread_id: str, initial_state: dict):
@@ -328,7 +347,9 @@ async def submit_job(
                 "company": request.job_description.company,
                 "description": request.job_description.description,
                 "requirements": request.job_description.requirements,
+                "template_name": request.job_description.template_name,
             }
+            logger.info(f"API received template_name: {request.job_description.template_name}")
 
         # Load master CV
         from src.agents.preparation_workflow import load_master_cv
@@ -703,6 +724,45 @@ async def get_application_history(
     except Exception as e:
         logger.error(f"Failed to get application history: {e}", exc_info=True)
         raise HTTPException(500, f"Failed to get history: {str(e)}")
+
+
+# =============================================================================
+# Data Cleanup Endpoints
+# =============================================================================
+
+
+@app.delete("/api/jobs/cleanup")
+async def cleanup_jobs(
+    older_than_days: int = Query(90, ge=1, description="Delete jobs older than this many days"),
+    statuses: list[str] = Query(
+        ["declined", "failed"], description="Only delete jobs with these statuses"
+    ),
+) -> dict:
+    """Delete old jobs to prevent database bloat.
+
+    This endpoint removes job records that are older than the specified number of days
+    and have one of the specified statuses. Useful for data retention and cleanup.
+
+    Args:
+        older_than_days: Delete jobs older than this many days (default: 90, min: 1)
+        statuses: Only delete jobs with these statuses (default: ["declined", "failed"])
+
+    Returns:
+        {"deleted": int, "message": str}
+    """
+    try:
+        if not statuses:
+            raise HTTPException(400, "At least one status must be provided")
+
+        deleted = await job_repository.cleanup(older_than_days, statuses)
+        return {"deleted": deleted, "message": f"Deleted {deleted} jobs"}
+
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    except Exception as e:
+        logger.error(f"Failed to cleanup jobs: {e}", exc_info=True)
+        raise HTTPException(500, f"Failed to cleanup jobs: {str(e)}")
 
 
 # =============================================================================
