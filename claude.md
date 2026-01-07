@@ -340,12 +340,28 @@ The `Obsolete/` directory contains **two production-ready projects** that serve 
   - `resume_schemas/` - Pydantic models for type safety
 - **Documentation:** See `Obsolete/Jobs_Applier_AI_Agent_AIHawk/ARCHITECTURE.md` for comprehensive analysis
 
+## Quick Start
+
+Run both API and UI with one command (kills previous instances automatically):
+
+```bash
+# Windows PowerShell
+.\scripts\dev.ps1
+
+# Git Bash / Linux / macOS
+./scripts/dev.sh
+```
+
+Then open:
+- **UI**: http://localhost:5173 (Vite dev server with HMR)
+- **API**: http://localhost:8000 (FastAPI with auto-reload on .py changes)
+
 ## Useful Commands
 
 ```bash
 # Development
-python -m uvicorn src.api.main:app --reload  # Start API server
-python main.py                               # Run workflow
+python -m uvicorn src.api.main:app --reload  # Start API server only
+cd ui && npm run dev                          # Start UI dev server only
 pytest                                        # Run tests
 black src/                                   # Format code
 mypy src/                                    # Type check
