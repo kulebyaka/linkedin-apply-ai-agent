@@ -2,6 +2,9 @@ import type {
   JobSubmitRequest,
   JobSubmitResponse,
   JobStatusResponse,
+  TemplateName,
+  LLMProvider,
+  LLMModel,
 } from "$lib/types";
 
 const API_BASE_URL =
@@ -9,6 +12,9 @@ const API_BASE_URL =
 
 export async function submitJob(
   jobDescription: string,
+  templateName: TemplateName = "compact",
+  llmProvider: LLMProvider = "openai",
+  llmModel: LLMModel = "gpt-4o-mini",
 ): Promise<JobSubmitResponse> {
   // Generate placeholders in case LLM extraction fails
   const timestamp = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
@@ -21,6 +27,9 @@ export async function submitJob(
       company: `mvp-${timestamp}-company`, // Placeholder if LLM fails
       description: jobDescription,
       requirements: "", // LLM will extract or leave empty
+      template_name: templateName,
+      llm_provider: llmProvider,
+      llm_model: llmModel,
     },
   };
 

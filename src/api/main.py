@@ -348,8 +348,10 @@ async def submit_job(
                 "description": request.job_description.description,
                 "requirements": request.job_description.requirements,
                 "template_name": request.job_description.template_name,
+                "llm_provider": request.job_description.llm_provider,
+                "llm_model": request.job_description.llm_model,
             }
-            logger.info(f"API received template_name: {request.job_description.template_name}")
+            logger.info(f"API received template_name: {request.job_description.template_name}, llm_provider: {request.job_description.llm_provider}, llm_model: {request.job_description.llm_model}")
 
         # Load master CV
         from src.agents.preparation_workflow import load_master_cv

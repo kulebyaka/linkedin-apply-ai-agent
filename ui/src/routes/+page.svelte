@@ -15,13 +15,13 @@
 	let toastType = $state<'error' | 'success' | 'info'>('info');
 
 	// Handle form submission
-	async function handleSubmit(description: string) {
+	async function handleSubmit(description: string, templateName: import('$lib/types').TemplateName, llmProvider?: import('$lib/types').LLMProvider, llmModel?: import('$lib/types').LLMModel) {
 		try {
 			appState.setJobDescription(description);
 			appState.setSubmitting();
 
 			// Submit job
-			const response = await submitJob(description);
+			const response = await submitJob(description, templateName, llmProvider, llmModel);
 
 			// Start polling
 			appState.startPolling(response.job_id);

@@ -77,7 +77,7 @@ class CVComposer:
         master_cv: dict[str, Any],
         job_posting: dict[str, Any],
         user_feedback: str | None = None,
-    ) -> CV:
+    ) -> CVLLMOutput:
         """
         Generate a tailored CV for a specific job posting
 
@@ -384,7 +384,7 @@ Requirements:
             logger.error(f"Invalid interests in master CV: {e}")
             raise CVCompositionError(f"Invalid interests data: {e}") from e
 
-    def _validate_output(self, tailored_cv: dict[str, Any], master_cv: dict[str, Any]) -> CV:
+    def _validate_output(self, tailored_cv: dict[str, Any], master_cv: dict[str, Any]) -> CVLLMOutput:
         """
         Validate tailored CV against master CV to prevent hallucinations
 
@@ -406,9 +406,9 @@ Requirements:
         """
         logger.debug("Validating tailored CV output")
 
-        # Validate schema with Pydantic
+        # Validate schema with Pydantic (use relaxed CVLLMOutput since LLM uses string dates/enums)
         try:
-            validated = CV(**tailored_cv)
+            validated = CVLLMOutput(**tailored_cv)
         except Exception as e:
             logger.error(f"Schema validation failed: {e}")
             raise CVCompositionError(f"Tailored CV does not match expected schema: {e}") from e

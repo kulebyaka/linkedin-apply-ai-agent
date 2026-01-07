@@ -1,17 +1,57 @@
 <script lang="ts">
 	import { validateJobDescription } from '$lib/utils/validation';
+	import type { TemplateName, LLMProvider, LLMModel } from '$lib/types';
 
 	interface Props {
-		onSubmit: (description: string) => void;
+		onSubmit: (description: string, templateName: TemplateName, llmProvider?: LLMProvider, llmModel?: LLMModel) => void;
 		isLoading: boolean;
 		errorMessage?: string;
 		initialValue?: string;
+		initialTemplate?: TemplateName;
+		initialLLMProvider?: LLMProvider;
+		initialLLMModel?: LLMModel;
 	}
 
-	let { onSubmit, isLoading, errorMessage, initialValue = '' }: Props = $props();
+	let { onSubmit, isLoading, errorMessage, initialValue = '', initialTemplate = 'compact', initialLLMProvider = 'openai', initialLLMModel = 'gpt-4o-mini' }: Props = $props();
 
 	let jobDescription = $state(initialValue);
+	let selectedTemplate = $state<TemplateName>(initialTemplate);
+	let selectedLLMProvider = $state<LLMProvider>(initialLLMProvider);
+	let selectedLLMModel = $state<LLMModel>(initialLLMModel);
 	let validationError = $state<string | null>(null);
+
+	const templates: { value: TemplateName; label: string; description: string }[] = [
+		{ value: 'compact', label: 'Compact', description: '2-column layout, space-efficient' },
+		{ value: 'modern', label: 'Modern', description: 'Clean single-column design' },
+		{ value: 'profile-card', label: 'Profile Card', description: 'LinkedIn-style layout' },
+	];
+
+	const llmProviders: { value: LLMProvider; label: string }[] = [
+		{ value: 'openai', label: 'OpenAI' },
+		{ value: 'anthropic', label: 'Anthropic' },
+	];
+
+	const modelsByProvider: Record<LLMProvider, { value: LLMModel; label: string; description: string }[]> = {
+		openai: [
+			{ value: 'gpt-4o-mini', label: 'GPT-4o Mini', description: 'Fast & reliable' },
+			{ value: 'gpt-4o', label: 'GPT-4o', description: 'Best quality' },
+			{ value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo', description: 'Fastest (no strict schema)' },
+		],
+		anthropic: [
+			{ value: 'claude-haiku-4.5', label: 'Claude Haiku 4.5', description: 'Fast & efficient' },
+		],
+	};
+
+	// Get available models for selected provider
+	const availableModels = $derived(modelsByProvider[selectedLLMProvider]);
+
+	// When provider changes, reset model to first available
+	$effect(() => {
+		const models = modelsByProvider[selectedLLMProvider];
+		if (models && !models.some(m => m.value === selectedLLMModel)) {
+			selectedLLMModel = models[0].value;
+		}
+	});
 
 	function handleSubmit(e: Event) {
 		e.preventDefault();
@@ -23,7 +63,7 @@
 		}
 
 		validationError = null;
-		onSubmit(jobDescription);
+		onSubmit(jobDescription, selectedTemplate, selectedLLMProvider, selectedLLMModel);
 	}
 
 	function handleInput() {
@@ -93,6 +133,88 @@ Requirements:
 			{#if errorMessage}
 				<p class="mt-3 text-sm font-medium" style="color: var(--color-error);">{errorMessage}</p>
 			{/if}
+		</div>
+
+		<!-- Template selector -->
+		<div>
+			<label for="template-select" class="block text-sm font-medium tracking-wide mb-3" style="color: var(--color-charcoal); font-family: 'JetBrains Mono', monospace;">
+				CV Template
+			</label>
+			<div class="relative">
+				<select
+					id="template-select"
+					bind:value={selectedTemplate}
+					disabled={isLoading}
+					class="w-full px-6 py-4 pr-12 border-2 transition-all duration-200 disabled:cursor-not-allowed font-mono text-sm cursor-pointer appearance-none"
+					style="border-color: var(--color-warm-gray-light); background-color: white; color: var(--color-charcoal); box-shadow: 2px 2px 0 var(--color-warm-gray-light);"
+					onfocus={(e) => { e.currentTarget.style.borderColor = 'var(--color-amber)'; e.currentTarget.style.boxShadow = '4px 4px 0 var(--color-amber-dark)'; }}
+					onblur={(e) => { e.currentTarget.style.borderColor = 'var(--color-warm-gray-light)'; e.currentTarget.style.boxShadow = '2px 2px 0 var(--color-warm-gray-light)'; }}
+				>
+					{#each templates as template}
+						<option value={template.value}>{template.label} - {template.description}</option>
+					{/each}
+				</select>
+				<div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4" style="color: var(--color-warm-gray);">
+					<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+					</svg>
+				</div>
+			</div>
+		</div>
+
+		<!-- LLM Provider & Model selectors -->
+		<div class="grid grid-cols-2 gap-4">
+			<div>
+				<label for="llm-provider-select" class="block text-sm font-medium tracking-wide mb-3" style="color: var(--color-charcoal); font-family: 'JetBrains Mono', monospace;">
+					LLM Provider
+				</label>
+				<div class="relative">
+					<select
+						id="llm-provider-select"
+						bind:value={selectedLLMProvider}
+						disabled={isLoading}
+						class="w-full px-6 py-4 pr-12 border-2 transition-all duration-200 disabled:cursor-not-allowed font-mono text-sm cursor-pointer appearance-none"
+						style="border-color: var(--color-warm-gray-light); background-color: white; color: var(--color-charcoal); box-shadow: 2px 2px 0 var(--color-warm-gray-light);"
+						onfocus={(e) => { e.currentTarget.style.borderColor = 'var(--color-amber)'; e.currentTarget.style.boxShadow = '4px 4px 0 var(--color-amber-dark)'; }}
+						onblur={(e) => { e.currentTarget.style.borderColor = 'var(--color-warm-gray-light)'; e.currentTarget.style.boxShadow = '2px 2px 0 var(--color-warm-gray-light)'; }}
+					>
+						{#each llmProviders as provider}
+							<option value={provider.value}>{provider.label}</option>
+						{/each}
+					</select>
+					<div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4" style="color: var(--color-warm-gray);">
+						<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+						</svg>
+					</div>
+				</div>
+			</div>
+
+			<div>
+				<label for="llm-model-select" class="block text-sm font-medium tracking-wide mb-3" style="color: var(--color-charcoal); font-family: 'JetBrains Mono', monospace;">
+					Model
+				</label>
+				<div class="relative">
+					<select
+						id="llm-model-select"
+						bind:value={selectedLLMModel}
+						disabled={isLoading}
+						class="w-full px-6 py-4 pr-12 border-2 transition-all duration-200 disabled:cursor-not-allowed font-mono text-sm cursor-pointer appearance-none"
+						style="border-color: var(--color-warm-gray-light); background-color: white; color: var(--color-charcoal); box-shadow: 2px 2px 0 var(--color-warm-gray-light);"
+						onfocus={(e) => { e.currentTarget.style.borderColor = 'var(--color-amber)'; e.currentTarget.style.boxShadow = '4px 4px 0 var(--color-amber-dark)'; }}
+						onblur={(e) => { e.currentTarget.style.borderColor = 'var(--color-warm-gray-light)'; e.currentTarget.style.boxShadow = '2px 2px 0 var(--color-warm-gray-light)'; }}
+					>
+						{#each availableModels as model}
+							<option value={model.value}>{model.label} - {model.description}</option>
+						{/each}
+					</select>
+					<div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4" style="color: var(--color-warm-gray);">
+						<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+						</svg>
+					</div>
+				</div>
+			</div>
 		</div>
 
 		<button

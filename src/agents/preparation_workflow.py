@@ -159,15 +159,19 @@ def extract_job_node(state: PreparationWorkflowState) -> PreparationWorkflowStat
     state["current_step"] = "extracting"
 
     try:
-        # Initialize LLM client for URL extraction
-        llm_client = _init_llm_client()
+        # Extract job data
+        raw_input = state.get("raw_input", {})
+
+        # Get LLM provider/model from raw_input if specified
+        llm_provider = raw_input.get("llm_provider")
+        llm_model = raw_input.get("llm_model")
+
+        # Initialize LLM client for URL extraction (with optional overrides)
+        llm_client = _init_llm_client(llm_provider, llm_model)
 
         # Get appropriate adapter
         factory = JobSourceFactory(llm_client=llm_client)
         adapter = factory.get_adapter(source)
-
-        # Extract job data
-        raw_input = state.get("raw_input", {})
 
         # For manual input, pass through directly (no async extraction needed)
         if source == "manual":
@@ -274,8 +278,13 @@ def compose_cv_node(state: PreparationWorkflowState) -> PreparationWorkflowState
     state["current_step"] = "composing_cv"
 
     try:
-        # Initialize LLM client
-        llm_client = _init_llm_client()
+        # Get LLM provider/model from raw_input if specified
+        raw_input = state.get("raw_input", {})
+        llm_provider = raw_input.get("llm_provider")
+        llm_model = raw_input.get("llm_model")
+
+        # Initialize LLM client with optional overrides
+        llm_client = _init_llm_client(llm_provider, llm_model)
 
         # Initialize CV composer
         cv_composer = CVComposer(llm_client=llm_client, prompts_dir=settings.prompts_dir)
@@ -367,9 +376,14 @@ def generate_pdf_node(state: PreparationWorkflowState) -> PreparationWorkflowSta
         output_dir.mkdir(parents=True, exist_ok=True)
         output_path = output_dir / pdf_filename
 
+        # Get template name from raw_input or fall back to settings
+        raw_input = state.get("raw_input", {})
+        template_name = raw_input.get("template_name") or settings.cv_template_name
+        logger.info(f"Template selection - raw_input: {raw_input.get('template_name')}, using: {template_name}")
+
         # Initialize PDF generator
         generator = PDFGenerator(
-            template_dir=settings.cv_template_dir, template_name=settings.cv_template_name
+            template_dir=settings.cv_template_dir, template_name=template_name
         )
 
         # Generate PDF
@@ -472,23 +486,30 @@ def save_to_db_node(state: PreparationWorkflowState) -> PreparationWorkflowState
 # =============================================================================
 
 
-def _init_llm_client():
-    """Initialize LLM client based on settings."""
-    provider = LLMProvider(settings.primary_llm_provider)
+def _init_llm_client(llm_provider: str | None = None, llm_model: str | None = None):
+    """Initialize LLM client based on settings or override parameters.
+
+    Args:
+        llm_provider: Optional provider override (openai, anthropic)
+        llm_model: Optional model override (e.g., gpt-4.1-nano, claude-haiku-4.5)
+    """
+    # Use override or fall back to settings
+    provider_str = llm_provider or settings.primary_llm_provider
+    provider = LLMProvider(provider_str)
 
     # Get API key and model based on provider
     if provider == LLMProvider.OPENAI:
         api_key = settings.openai_api_key
-        model = settings.openai_model
+        model = llm_model or settings.openai_model
     elif provider == LLMProvider.DEEPSEEK:
         api_key = settings.deepseek_api_key
-        model = settings.deepseek_model
+        model = llm_model or settings.deepseek_model
     elif provider == LLMProvider.GROK:
         api_key = settings.grok_api_key
-        model = settings.grok_model
+        model = llm_model or settings.grok_model
     elif provider == LLMProvider.ANTHROPIC:
         api_key = settings.anthropic_api_key
-        model = settings.anthropic_model
+        model = llm_model or settings.anthropic_model
     else:
         raise ValueError(f"Unsupported LLM provider: {provider}")
 

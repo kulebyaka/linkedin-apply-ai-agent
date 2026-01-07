@@ -52,7 +52,7 @@ class Settings(BaseSettings):
 
     # PDF Generation Settings
     cv_template_dir: str = "src/templates/cv"
-    cv_template_name: str = "modern"  # Template theme: modern, compact (2-column), classic, minimal, profile-card (LinkedIn-style)
+    cv_template_name: str = "compact"  # Template theme: modern, compact (2-column), classic, minimal, profile-card (LinkedIn-style)
 
     # Workflow
     job_fetch_interval_hours: int = 1

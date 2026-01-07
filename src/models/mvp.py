@@ -11,6 +11,9 @@ class JobDescriptionInput(BaseModel):
     company: str = Field(..., description="Company name")
     description: str = Field(..., description="Full job description")
     requirements: Optional[str] = Field(None, description="Job requirements section")
+    template_name: Optional[str] = Field(None, description="CV template: modern, compact, classic, minimal, profile-card")
+    llm_provider: Optional[Literal["openai", "anthropic"]] = Field(None, description="LLM provider: openai, anthropic")
+    llm_model: Optional[str] = Field(None, description="LLM model name (e.g., gpt-4.1-nano, claude-haiku-4.5)")
 
 
 class CVGenerationResponse(BaseModel):

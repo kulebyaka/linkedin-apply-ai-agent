@@ -1,5 +1,9 @@
 // API Request/Response Types
 
+export type TemplateName = 'compact' | 'modern' | 'profile-card';
+export type LLMProvider = 'openai' | 'anthropic';
+export type LLMModel = 'gpt-4o-mini' | 'gpt-4o' | 'gpt-3.5-turbo' | 'claude-haiku-4.5';
+
 export interface JobSubmitRequest {
 	source: 'manual';
 	mode: 'mvp';
@@ -8,6 +12,9 @@ export interface JobSubmitRequest {
 		company: string;
 		description: string;
 		requirements: string;
+		template_name?: TemplateName;
+		llm_provider?: LLMProvider;
+		llm_model?: LLMModel;
 	};
 }
 
