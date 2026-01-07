@@ -25,6 +25,8 @@ dependencies = [
     "httpx>=0.26.0",
     "sqlalchemy>=2.0.25",
     "apscheduler>=3.10.4",
+    "piccolo[sqlite]>=1.21.0",
+    "aiosqlite>=0.20.0",
 ]
 
 [project.optional-dependencies]
