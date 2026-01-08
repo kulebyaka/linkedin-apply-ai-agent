@@ -110,11 +110,9 @@ black src/          # Format code
 mypy src/           # Type check
 ```
 
-See [CLAUDE.md](CLAUDE.md) for detailed architecture documentation.
-
 ## License
 
-MIT
+All Rights Reserved. This code is provided for viewing purposes only. No permission is granted to use, copy, modify, or distribute this software.
 
 ## Disclaimer
 
