@@ -39,16 +39,13 @@ def test_template(template_name: str, cv_json: dict, verbose: bool = True) -> bo
         True if successful, False otherwise
     """
     if verbose:
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"Testing template: {template_name}")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
 
     try:
         # Initialize PDF generator
-        generator = PDFGenerator(
-            template_dir="src/templates/cv",
-            template_name=template_name
-        )
+        generator = PDFGenerator(template_dir="src/templates/cv", template_name=template_name)
 
         # Generate PDF
         output_path = f"data/generated_cvs/test_{template_name}_resume.pdf"
@@ -72,6 +69,7 @@ def test_template(template_name: str, cv_json: dict, verbose: bool = True) -> bo
             print(f"\n[ERROR] Failed to generate PDF with '{template_name}' template")
             print(f"Error: {e}")
             import traceback
+
             traceback.print_exc()
         else:
             print(f"[ERROR] {template_name}: {e}")
@@ -99,38 +97,22 @@ Examples:
   %(prog)s modern compact             # Test multiple templates
   %(prog)s --all                      # Test all available templates
   %(prog)s --list                     # List available templates
-        """
+        """,
     )
 
-    parser.add_argument(
-        'templates',
-        nargs='*',
-        help='Template name(s) to test'
-    )
+    parser.add_argument("templates", nargs="*", help="Template name(s) to test")
+
+    parser.add_argument("--all", action="store_true", help="Test all available templates")
+
+    parser.add_argument("--list", action="store_true", help="List available templates and exit")
 
     parser.add_argument(
-        '--all',
-        action='store_true',
-        help='Test all available templates'
+        "--cv",
+        default="data/cv/master_cv.example.json",
+        help="Path to CV JSON file (default: data/cv/master_cv.example.json)",
     )
 
-    parser.add_argument(
-        '--list',
-        action='store_true',
-        help='List available templates and exit'
-    )
-
-    parser.add_argument(
-        '--cv',
-        default='data/cv/master_cv.example.json',
-        help='Path to CV JSON file (default: data/cv/master_cv.example.json)'
-    )
-
-    parser.add_argument(
-        '-q', '--quiet',
-        action='store_true',
-        help='Suppress detailed output'
-    )
+    parser.add_argument("-q", "--quiet", action="store_true", help="Suppress detailed output")
 
     return parser.parse_args()
 
@@ -185,9 +167,9 @@ def main():
         results[template] = test_template(template, cv_json, verbose=verbose)
 
     # Summary
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("SUMMARY")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     for template, success in results.items():
         status = "SUCCESS" if success else "FAILED"
@@ -205,7 +187,6 @@ def main():
         print(f"\nGenerated PDFs saved to: data/generated_cvs/test_<template>_resume.pdf")
     else:
         print("\n[WARNING] Some templates failed to generate.")
-        print("\nNote: PDF generation requires GTK+ libraries.")
         print("If running on Windows, use Docker:")
         print("  docker-compose exec app python scripts/test_cv_template.py <template>")
 

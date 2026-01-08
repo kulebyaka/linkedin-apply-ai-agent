@@ -5,12 +5,12 @@ Provides two sets of endpoints:
 2. Unified endpoints (/api/jobs/*, /api/hitl/*) - new two-workflow pipeline
 """
 
-import logging
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -39,11 +39,11 @@ from src.models.unified import (
     JobSubmitResponse,
     PendingApproval,
 )
-from src.services.job_repository import get_repository, JobRepository
+from src.services.job_repository import JobRepository, get_repository
+from src.utils.logger import setup_api_logger
 
 settings = get_settings()
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = setup_api_logger(level="INFO")
 
 # Initialize LangGraph workflows (singletons)
 preparation_workflow = create_preparation_workflow()
@@ -79,6 +79,25 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Log all API requests with method, path, status, and duration."""
+    start_time = time.time()
+
+    # Process request
+    response = await call_next(request)
+
+    # Calculate duration
+    duration_ms = (time.time() - start_time) * 1000
+
+    # Log request details
+    logger.info(
+        f"{request.method} {request.url.path} - {response.status_code} ({duration_ms:.1f}ms)"
+    )
+
+    return response
 
 
 @app.on_event("startup")
@@ -302,6 +321,7 @@ async def submit_job_options():
     """Handle CORS preflight for job submission."""
     return {}
 
+
 @app.post("/api/jobs/submit", response_model=JobSubmitResponse)
 async def submit_job(
     request: JobSubmitRequest, background_tasks: BackgroundTasks
@@ -351,7 +371,9 @@ async def submit_job(
                 "llm_provider": request.job_description.llm_provider,
                 "llm_model": request.job_description.llm_model,
             }
-            logger.info(f"API received template_name: {request.job_description.template_name}, llm_provider: {request.job_description.llm_provider}, llm_model: {request.job_description.llm_model}")
+            logger.info(
+                f"API received template_name: {request.job_description.template_name}, llm_provider: {request.job_description.llm_provider}, llm_model: {request.job_description.llm_model}"
+            )
 
         # Load master CV
         from src.agents.preparation_workflow import load_master_cv

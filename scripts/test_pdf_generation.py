@@ -1,6 +1,5 @@
 """Manual test script for PDF generation
 
-Run this script in Docker or on Linux/macOS with GTK+ libraries installed:
     python scripts/test_pdf_generation.py
 
 Or in Docker:
@@ -16,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.services.pdf_generator import PDFGenerator
 
+
 def test_pdf_generation():
     """Test PDF generation with master_cv.example.json"""
 
@@ -23,20 +23,17 @@ def test_pdf_generation():
     cv_path = "data/cv/master_cv.example.json"
     print(f"Loading CV from: {cv_path}")
 
-    with open(cv_path, "r") as f:
+    with open(cv_path) as f:
         cv_json = json.load(f)
 
     # Initialize PDF generator
-    generator = PDFGenerator(
-        template_dir="src/templates/cv",
-        template_name="modern"
-    )
+    generator = PDFGenerator(template_dir="src/templates/cv", template_name="modern")
 
     # Generate PDF
     output_path = "data/generated_cvs/test_resume_john_doe.pdf"
 
     print(f"\nGenerating PDF for: {cv_json['contact']['full_name']}")
-    print(f"Template: modern")
+    print("Template: modern")
     print(f"Output path: {output_path}")
 
     try:
@@ -54,8 +51,10 @@ def test_pdf_generation():
         print("  docker-compose exec app python scripts/test_pdf_generation.py")
 
         import traceback
+
         traceback.print_exc()
         return False
+
 
 if __name__ == "__main__":
     success = test_pdf_generation()
