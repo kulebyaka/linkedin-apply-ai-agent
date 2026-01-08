@@ -33,6 +33,7 @@
 
 	const modelsByProvider: Record<LLMProvider, { value: LLMModel; label: string; description: string }[]> = {
 		openai: [
+			{ value: 'gpt-5-mini', label: 'GPT-5 Mini', description: 'Latest & smartest' },
 			{ value: 'gpt-4o-mini', label: 'GPT-4o Mini', description: 'Fast & reliable' },
 			{ value: 'gpt-4o', label: 'GPT-4o', description: 'Best quality' },
 			{ value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo', description: 'Fastest (no strict schema)' },

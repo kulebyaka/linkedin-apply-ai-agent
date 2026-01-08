@@ -2,7 +2,7 @@
 
 export type TemplateName = 'compact' | 'modern' | 'profile-card';
 export type LLMProvider = 'openai' | 'anthropic';
-export type LLMModel = 'gpt-4o-mini' | 'gpt-4o' | 'gpt-3.5-turbo' | 'claude-haiku-4.5';
+export type LLMModel = 'gpt-5-mini' | 'gpt-4o-mini' | 'gpt-4o' | 'gpt-3.5-turbo' | 'claude-haiku-4.5';
 
 export interface JobSubmitRequest {
 	source: 'manual';

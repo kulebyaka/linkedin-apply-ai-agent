@@ -18,7 +18,7 @@ from playwright.sync_api import sync_playwright, Page, expect
 
 # Expected dropdown options
 EXPECTED_PROVIDERS = ["openai", "anthropic"]
-EXPECTED_OPENAI_MODELS = ["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo"]
+EXPECTED_OPENAI_MODELS = ["gpt-5-mini", "gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo"]
 EXPECTED_ANTHROPIC_MODELS = ["claude-haiku-4.5"]
 
 DEFAULT_PROVIDER = "openai"
