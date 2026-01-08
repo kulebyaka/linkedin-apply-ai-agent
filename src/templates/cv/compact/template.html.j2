@@ -205,14 +205,22 @@
                         <div class="extra">
                             <div class="extra-info">{{ lang.language }} <small>({{ lang.level }})</small></div>
                             <div class="extra-details">
-                                {% if lang.level in ['Native', 'Fluent'] %}
+                                {# Determine progress width based on CEFR level or keywords #}
+                                {% set level_lower = lang.level|lower %}
+                                {% if 'native' in level_lower or 'c2' in level_lower %}
                                 <div class="extra-details__progress" style="width:100%"></div>
-                                {% elif lang.level in ['Professional', 'Advanced'] %}
-                                <div class="extra-details__progress" style="width:75%"></div>
-                                {% elif lang.level == 'Intermediate' %}
+                                {% elif 'c1' in level_lower or 'fluent' in level_lower %}
+                                <div class="extra-details__progress" style="width:88%"></div>
+                                {% elif 'b2' in level_lower or 'upper intermediate' in level_lower %}
+                                <div class="extra-details__progress" style="width:66%"></div>
+                                {% elif 'b1' in level_lower or 'intermediate' in level_lower %}
                                 <div class="extra-details__progress" style="width:50%"></div>
+                                {% elif 'a2' in level_lower or 'elementary' in level_lower %}
+                                <div class="extra-details__progress" style="width:33%"></div>
+                                {% elif 'a1' in level_lower or 'beginner' in level_lower %}
+                                <div class="extra-details__progress" style="width:17%"></div>
                                 {% else %}
-                                <div class="extra-details__progress" style="width:30%"></div>
+                                <div class="extra-details__progress" style="width:50%"></div>
                                 {% endif %}
                             </div>
                         </div>

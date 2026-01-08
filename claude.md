@@ -347,9 +347,6 @@ Run both API and UI with one command (kills previous instances automatically):
 ```bash
 # Windows PowerShell
 .\scripts\dev.ps1
-
-# Git Bash / Linux / macOS
-./scripts/dev.sh
 ```
 
 Then open:
