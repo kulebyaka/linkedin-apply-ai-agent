@@ -152,18 +152,15 @@
 	<title>Generate CV - Job Application Agent</title>
 </svelte:head>
 
-<div
-	class="grain min-h-screen px-4 py-16 sm:px-6 lg:px-8"
-	style="background-color: var(--color-stone);"
->
+<div class="grain-texture min-h-screen bg-[var(--color-background)] px-4 py-16 sm:px-6 lg:px-8">
 	<div class="mx-auto max-w-5xl">
 		<!-- Header -->
 		<div class="mb-16">
-			<div class="mb-8 border-l-4 pl-6" style="border-color: var(--color-amber);">
-				<h1 class="mb-3 text-5xl tracking-tight" style="color: var(--color-charcoal);">
+			<div class="mb-8 border-l-4 border-[var(--color-primary)] pl-6">
+				<h1 class="font-heading mb-3 text-5xl tracking-tight text-[var(--color-foreground)]">
 					CV Generator
 				</h1>
-				<p class="text-lg font-light" style="color: var(--color-warm-gray);">
+				<p class="font-body text-lg font-light text-[var(--color-muted-foreground)]">
 					Paste a job description and get a tailored CV PDF instantly
 				</p>
 			</div>
@@ -179,7 +176,7 @@
 				/>
 
 				<div class="mt-8 text-center">
-					<p class="font-mono text-base tracking-wide" style="color: var(--color-warm-gray);">
+					<p class="font-mono text-base tracking-wide text-[var(--color-muted-foreground)]">
 						{#if currentState.status === 'failed'}
 							<!-- Error message shown via toast -->
 						{:else if currentState.currentStep === 'queued'}
@@ -209,12 +206,10 @@
 			{#if currentState.status === 'completed'}
 				<div class="space-y-8 py-12 text-center">
 					<div
-						class="inline-flex h-20 w-20 items-center justify-center rounded-none border-4"
-						style="border-color: var(--color-success); background-color: transparent;"
+						class="inline-flex h-20 w-20 items-center justify-center rounded-none border-4 border-[var(--color-success)] bg-transparent"
 					>
 						<svg
-							class="h-12 w-12"
-							style="color: var(--color-success);"
+							class="h-12 w-12 text-[var(--color-success)]"
 							fill="none"
 							stroke="currentColor"
 							viewBox="0 0 24 24"
@@ -228,19 +223,18 @@
 						</svg>
 					</div>
 
-					<h2 class="text-3xl tracking-tight" style="color: var(--color-charcoal);">
+					<h2 class="font-heading text-3xl tracking-tight text-[var(--color-foreground)]">
 						Your CV is Ready!
 					</h2>
 
 					{#if currentState.autoDownloadFailed && currentState.pdfBlob}
 						<div class="space-y-6">
-							<p class="text-base" style="color: var(--color-warm-gray);">
+							<p class="font-body text-base text-[var(--color-muted-foreground)]">
 								Your browser blocked the automatic download. Click below to download manually.
 							</p>
 							<button
 								onclick={handleManualDownload}
-								class="inline-flex items-center border-2 px-8 py-4 text-base font-medium transition-all duration-200 hover:translate-y-[-2px]"
-								style="border-color: var(--color-amber); background-color: var(--color-amber); color: var(--color-charcoal); box-shadow: 4px 4px 0 var(--color-charcoal);"
+								class="inline-flex items-center border-2 border-[var(--color-primary)] bg-[var(--color-primary)] px-8 py-4 font-mono text-sm uppercase tracking-wider text-[var(--color-primary-foreground)] shadow-brutal transition-all duration-200 hover:-translate-y-0.5"
 							>
 								<svg class="mr-2 h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 									<path
@@ -257,8 +251,7 @@
 
 					<button
 						onclick={handleReset}
-						class="inline-flex items-center border-2 px-8 py-4 text-base font-medium transition-all duration-200 hover:translate-y-[-2px]"
-						style="border-color: var(--color-charcoal); background-color: transparent; color: var(--color-charcoal); box-shadow: 4px 4px 0 var(--color-warm-gray-light);"
+						class="inline-flex items-center border-2 border-[var(--color-foreground)] bg-transparent px-8 py-4 font-mono text-sm uppercase tracking-wider text-[var(--color-foreground)] shadow-[4px_4px_0_var(--color-muted)] transition-all duration-200 hover:-translate-y-0.5"
 					>
 						<svg class="mr-2 h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path

@@ -76,14 +76,14 @@
 
 	function handleFocus(e: FocusEvent) {
 		const target = e.currentTarget as HTMLTextAreaElement;
-		target.style.borderColor = 'var(--color-amber)';
-		target.style.boxShadow = '4px 4px 0 var(--color-amber-dark)';
+		target.style.borderColor = 'var(--color-primary)';
+		target.style.boxShadow = '6px 6px 0 var(--color-foreground)';
 	}
 
 	function handleBlur(e: FocusEvent) {
 		const target = e.currentTarget as HTMLTextAreaElement;
-		target.style.borderColor = 'var(--color-warm-gray-light)';
-		target.style.boxShadow = '2px 2px 0 var(--color-warm-gray-light)';
+		target.style.borderColor = 'var(--color-foreground)';
+		target.style.boxShadow = '4px 4px 0 var(--color-foreground)';
 	}
 
 	// Compute if submit button should be disabled
@@ -93,7 +93,7 @@
 <form onsubmit={handleSubmit} class="w-full max-w-4xl mx-auto">
 	<div class="space-y-6">
 		<div>
-			<label for="job-description" class="block text-sm font-medium tracking-wide mb-3" style="color: var(--color-charcoal); font-family: 'JetBrains Mono', monospace;">
+			<label for="job-description" class="block font-mono text-sm font-medium tracking-wide text-[var(--color-foreground)] mb-3">
 				Job Description
 			</label>
 			<textarea
@@ -116,29 +116,28 @@ Requirements:
 - 3+ years of experience
 - Strong knowledge of JavaScript/TypeScript
 ..."
-				class="w-full px-6 py-4 border-2 transition-all duration-200 resize-y min-h-[300px] max-h-[600px] disabled:cursor-not-allowed font-mono text-sm leading-relaxed"
-				style="border-color: var(--color-warm-gray-light); background-color: white; color: var(--color-charcoal); box-shadow: 2px 2px 0 var(--color-warm-gray-light);"
+				class="w-full px-6 py-4 border-2 border-[var(--color-foreground)] bg-white text-[var(--color-foreground)] shadow-brutal transition-all duration-200 resize-y min-h-[300px] max-h-[600px] disabled:cursor-not-allowed font-mono text-sm leading-relaxed"
 			></textarea>
 
 			<!-- Character count -->
-			<div class="mt-3 text-xs font-mono tracking-wider" style="color: var(--color-warm-gray);">
+			<div class="mt-3 font-mono text-xs tracking-wider text-[var(--color-muted-foreground)]">
 				{jobDescription.length} / 50 characters minimum
 			</div>
 
 			<!-- Validation error -->
 			{#if validationError}
-				<p class="mt-3 text-sm font-medium" style="color: var(--color-error);">{validationError}</p>
+				<p class="mt-3 text-sm font-medium text-[var(--color-destructive)]">{validationError}</p>
 			{/if}
 
 			<!-- Server error -->
 			{#if errorMessage}
-				<p class="mt-3 text-sm font-medium" style="color: var(--color-error);">{errorMessage}</p>
+				<p class="mt-3 text-sm font-medium text-[var(--color-destructive)]">{errorMessage}</p>
 			{/if}
 		</div>
 
 		<!-- Template selector -->
 		<div>
-			<label for="template-select" class="block text-sm font-medium tracking-wide mb-3" style="color: var(--color-charcoal); font-family: 'JetBrains Mono', monospace;">
+			<label for="template-select" class="block font-mono text-sm font-medium tracking-wide text-[var(--color-foreground)] mb-3">
 				CV Template
 			</label>
 			<div class="relative">
@@ -146,16 +145,15 @@ Requirements:
 					id="template-select"
 					bind:value={selectedTemplate}
 					disabled={isLoading}
-					class="w-full px-6 py-4 pr-12 border-2 transition-all duration-200 disabled:cursor-not-allowed font-mono text-sm cursor-pointer appearance-none"
-					style="border-color: var(--color-warm-gray-light); background-color: white; color: var(--color-charcoal); box-shadow: 2px 2px 0 var(--color-warm-gray-light);"
-					onfocus={(e) => { e.currentTarget.style.borderColor = 'var(--color-amber)'; e.currentTarget.style.boxShadow = '4px 4px 0 var(--color-amber-dark)'; }}
-					onblur={(e) => { e.currentTarget.style.borderColor = 'var(--color-warm-gray-light)'; e.currentTarget.style.boxShadow = '2px 2px 0 var(--color-warm-gray-light)'; }}
+					class="w-full px-6 py-4 pr-12 border-2 border-[var(--color-foreground)] bg-white text-[var(--color-foreground)] shadow-brutal transition-all duration-200 disabled:cursor-not-allowed font-mono text-sm cursor-pointer appearance-none"
+					onfocus={(e) => { e.currentTarget.style.borderColor = 'var(--color-primary)'; e.currentTarget.style.boxShadow = '6px 6px 0 var(--color-foreground)'; }}
+					onblur={(e) => { e.currentTarget.style.borderColor = 'var(--color-foreground)'; e.currentTarget.style.boxShadow = '4px 4px 0 var(--color-foreground)'; }}
 				>
 					{#each templates as template}
 						<option value={template.value}>{template.label} - {template.description}</option>
 					{/each}
 				</select>
-				<div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4" style="color: var(--color-warm-gray);">
+				<div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-[var(--color-foreground)]">
 					<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
 					</svg>
@@ -166,7 +164,7 @@ Requirements:
 		<!-- LLM Provider & Model selectors -->
 		<div class="grid grid-cols-2 gap-4">
 			<div>
-				<label for="llm-provider-select" class="block text-sm font-medium tracking-wide mb-3" style="color: var(--color-charcoal); font-family: 'JetBrains Mono', monospace;">
+				<label for="llm-provider-select" class="block font-mono text-sm font-medium tracking-wide text-[var(--color-foreground)] mb-3">
 					LLM Provider
 				</label>
 				<div class="relative">
@@ -174,16 +172,15 @@ Requirements:
 						id="llm-provider-select"
 						bind:value={selectedLLMProvider}
 						disabled={isLoading}
-						class="w-full px-6 py-4 pr-12 border-2 transition-all duration-200 disabled:cursor-not-allowed font-mono text-sm cursor-pointer appearance-none"
-						style="border-color: var(--color-warm-gray-light); background-color: white; color: var(--color-charcoal); box-shadow: 2px 2px 0 var(--color-warm-gray-light);"
-						onfocus={(e) => { e.currentTarget.style.borderColor = 'var(--color-amber)'; e.currentTarget.style.boxShadow = '4px 4px 0 var(--color-amber-dark)'; }}
-						onblur={(e) => { e.currentTarget.style.borderColor = 'var(--color-warm-gray-light)'; e.currentTarget.style.boxShadow = '2px 2px 0 var(--color-warm-gray-light)'; }}
+						class="w-full px-6 py-4 pr-12 border-2 border-[var(--color-foreground)] bg-white text-[var(--color-foreground)] shadow-brutal transition-all duration-200 disabled:cursor-not-allowed font-mono text-sm cursor-pointer appearance-none"
+						onfocus={(e) => { e.currentTarget.style.borderColor = 'var(--color-primary)'; e.currentTarget.style.boxShadow = '6px 6px 0 var(--color-foreground)'; }}
+						onblur={(e) => { e.currentTarget.style.borderColor = 'var(--color-foreground)'; e.currentTarget.style.boxShadow = '4px 4px 0 var(--color-foreground)'; }}
 					>
 						{#each llmProviders as provider}
 							<option value={provider.value}>{provider.label}</option>
 						{/each}
 					</select>
-					<div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4" style="color: var(--color-warm-gray);">
+					<div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-[var(--color-foreground)]">
 						<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
 						</svg>
@@ -192,7 +189,7 @@ Requirements:
 			</div>
 
 			<div>
-				<label for="llm-model-select" class="block text-sm font-medium tracking-wide mb-3" style="color: var(--color-charcoal); font-family: 'JetBrains Mono', monospace;">
+				<label for="llm-model-select" class="block font-mono text-sm font-medium tracking-wide text-[var(--color-foreground)] mb-3">
 					Model
 				</label>
 				<div class="relative">
@@ -200,16 +197,15 @@ Requirements:
 						id="llm-model-select"
 						bind:value={selectedLLMModel}
 						disabled={isLoading}
-						class="w-full px-6 py-4 pr-12 border-2 transition-all duration-200 disabled:cursor-not-allowed font-mono text-sm cursor-pointer appearance-none"
-						style="border-color: var(--color-warm-gray-light); background-color: white; color: var(--color-charcoal); box-shadow: 2px 2px 0 var(--color-warm-gray-light);"
-						onfocus={(e) => { e.currentTarget.style.borderColor = 'var(--color-amber)'; e.currentTarget.style.boxShadow = '4px 4px 0 var(--color-amber-dark)'; }}
-						onblur={(e) => { e.currentTarget.style.borderColor = 'var(--color-warm-gray-light)'; e.currentTarget.style.boxShadow = '2px 2px 0 var(--color-warm-gray-light)'; }}
+						class="w-full px-6 py-4 pr-12 border-2 border-[var(--color-foreground)] bg-white text-[var(--color-foreground)] shadow-brutal transition-all duration-200 disabled:cursor-not-allowed font-mono text-sm cursor-pointer appearance-none"
+						onfocus={(e) => { e.currentTarget.style.borderColor = 'var(--color-primary)'; e.currentTarget.style.boxShadow = '6px 6px 0 var(--color-foreground)'; }}
+						onblur={(e) => { e.currentTarget.style.borderColor = 'var(--color-foreground)'; e.currentTarget.style.boxShadow = '4px 4px 0 var(--color-foreground)'; }}
 					>
 						{#each availableModels as model}
 							<option value={model.value}>{model.label} - {model.description}</option>
 						{/each}
 					</select>
-					<div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4" style="color: var(--color-warm-gray);">
+					<div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-[var(--color-foreground)]">
 						<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
 						</svg>
@@ -221,16 +217,14 @@ Requirements:
 		<button
 			type="submit"
 			disabled={isSubmitDisabled}
-			class="w-full border-2 font-medium py-4 px-8 transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-50"
-			style="{isSubmitDisabled ? 'border-color: var(--color-warm-gray-light); background-color: var(--color-warm-gray-light); color: var(--color-warm-gray);' : 'border-color: var(--color-amber); background-color: var(--color-amber); color: var(--color-charcoal); box-shadow: 4px 4px 0 var(--color-charcoal);'}"
-			onmouseenter={isSubmitDisabled ? undefined : function(e) { e.currentTarget.style.transform = 'translateY(-2px)'; }}
-			onmouseleave={isSubmitDisabled ? undefined : function(e) { e.currentTarget.style.transform = 'translateY(0)'; }}
+			class="w-full border-2 py-4 px-8 font-mono text-sm uppercase tracking-wider transition-all duration-200 disabled:cursor-not-allowed disabled:pointer-events-none {isSubmitDisabled
+				? 'border-[var(--color-muted)] bg-[var(--color-muted)] text-[var(--color-muted-foreground)] opacity-50'
+				: 'border-[var(--color-primary)] bg-[var(--color-primary)] text-[var(--color-primary-foreground)] shadow-brutal hover:-translate-y-0.5'}"
 		>
 			{#if isLoading}
-				<span class="flex items-center justify-center font-mono tracking-wide">
+				<span class="flex items-center justify-center">
 					<svg
-						class="animate-spin -ml-1 mr-3 h-5 w-5"
-						style="color: var(--color-charcoal);"
+						class="animate-spin -ml-1 mr-3 h-5 w-5 text-[var(--color-primary-foreground)]"
 						xmlns="http://www.w3.org/2000/svg"
 						fill="none"
 						viewBox="0 0 24 24"
@@ -249,10 +243,10 @@ Requirements:
 							d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
 						></path>
 					</svg>
-					GENERATING CV...
+					Generating CV...
 				</span>
 			{:else}
-				<span class="font-mono tracking-wide">GENERATE CV</span>
+				Generate CV
 			{/if}
 		</button>
 	</div>
