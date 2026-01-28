@@ -27,9 +27,9 @@ Every hour, based on a set of filters (in the future, filters will be built base
 | **Generate PDF** | ✅ Complete | `src/services/pdf_generator.py` fully implemented. Uses WeasyPrint + Jinja2. |
 | **HITL API Endpoints** | ✅ Complete | `src/api/main.py` - batch review, approve/decline/retry endpoints. |
 | **Unified Data Models** | ✅ Complete | `src/models/unified.py` - Pydantic models for new architecture. |
+| **HITL Frontend (Full Mode)** | ✅ Complete | Tinder-like batch review UI in `ui/` - neo-brutalist design. |
 | **Job Filter (LLM)** | 🔴 Pending | `src/services/job_filter.py` skeleton exists. |
 | **Browser Automation** | 🔴 Pending | `src/services/browser_automation.py` is a skeleton. |
-| **HITL Frontend (Full Mode)** | 🔴 Pending | Tinder-like batch review UI for Full mode - not implemented. |
 
 ## Two-Workflow Pipeline Architecture
 
@@ -196,9 +196,9 @@ The two-workflow architecture enables true batch HITL:
    - Decline → Mark as declined, no action
    - Retry → Retry Workflow with feedback
 
-## MVP Web UI
+## Web UI
 
-A single-page web interface for generating tailored CV PDFs from job descriptions (MVP mode only).
+A web interface with two main features: HITL Review (batch approval) and CV Generator (MVP mode).
 
 **Location**: `ui/`
 **Tech Stack**: SvelteKit 2.x with Svelte 5 (Runes API), TypeScript, Tailwind CSS v3
@@ -206,12 +206,21 @@ A single-page web interface for generating tailored CV PDFs from job description
 
 ### Features
 
+#### HITL Review UI (Homepage `/`)
+- Tinder-like batch review interface for pending applications
+- Job card with toggle between Job Description and CV Preview panels
+- Decision buttons: Approve (green), Decline (red), Retry (amber)
+- Keyboard shortcuts: Arrow keys for navigation, 1/2/3 for actions
+- Feedback modal for decline/retry with optional/required notes
+- Neo-brutalist design: bold borders, grain texture, brutal shadows
+- Mock data mode for development (`USE_MOCK=true` in `lib/api/hitl.ts`)
+
+#### CV Generator (`/generate`)
 - Simple textarea input for job descriptions (minimum 50 characters)
 - Real-time progress tracking with visual stepper (5 stages)
 - Auto-download PDF when generation complete (with manual fallback)
 - Toast notifications for error handling
 - Responsive design (mobile-friendly)
-- API polling every 2 seconds for status updates
 
 ### Architecture
 
@@ -219,24 +228,37 @@ A single-page web interface for generating tailored CV PDFs from job description
 ui/
 ├── src/
 │   ├── routes/
-│   │   ├── +layout.svelte       # Root layout
+│   │   ├── +layout.svelte       # Root layout with navigation
 │   │   ├── +layout.ts           # Prerender config
-│   │   └── +page.svelte         # Main CV generator page
+│   │   ├── +page.svelte         # HITL Review page (homepage)
+│   │   └── generate/
+│   │       └── +page.svelte     # CV Generator page
 │   ├── lib/
-│   │   ├── components/          # Svelte components
+│   │   ├── components/
+│   │   │   ├── review/          # HITL Review components
+│   │   │   │   ├── JobCard.svelte
+│   │   │   │   ├── PanelSwitcher.svelte
+│   │   │   │   ├── JobDescriptionPanel.svelte
+│   │   │   │   ├── CVPreviewPanel.svelte
+│   │   │   │   ├── DecisionButtons.svelte
+│   │   │   │   ├── NavigationControls.svelte
+│   │   │   │   ├── FeedbackModal.svelte
+│   │   │   │   └── EmptyState.svelte
 │   │   │   ├── JobDescriptionForm.svelte
 │   │   │   ├── ProgressStepper.svelte
 │   │   │   └── ToastNotification.svelte
 │   │   ├── stores/
-│   │   │   └── appState.svelte.ts  # Svelte 5 runes state
+│   │   │   ├── appState.svelte.ts    # CV generator state
+│   │   │   └── reviewQueue.svelte.ts # HITL review queue state
 │   │   ├── api/
-│   │   │   └── client.ts           # API client
+│   │   │   ├── client.ts             # CV generator API client
+│   │   │   └── hitl.ts               # HITL API client (with mock data)
 │   │   ├── utils/
-│   │   │   └── validation.ts       # Input validation
+│   │   │   └── validation.ts         # Input validation
 │   │   └── types/
-│   │       └── index.ts            # TypeScript types
+│   │       └── index.ts              # TypeScript types (includes HITL types)
 │   ├── app.html
-│   └── app.css                  # Tailwind imports
+│   └── app.css                  # Tailwind + neo-brutalist styles
 ├── build/                        # Production build (served by FastAPI)
 └── package.json
 ```
@@ -245,37 +267,32 @@ ui/
 
 - FastAPI serves static files from `ui/build/` at root path `/`
 - API endpoints remain at `/api/*` (no conflicts)
-- UI polls `/api/jobs/{job_id}/status` every 2 seconds
-- Auto-downloads from `/api/jobs/{job_id}/pdf` when complete
-
-### Workflow
-
-1. User pastes job description → validates (50+ chars)
-2. Submits to `/api/jobs/submit` with `mode="mvp"`
-3. UI polls status, shows progress: queued → extracting → composing_cv → generating_pdf → completed
-4. PDF auto-downloads (or shows manual button if blocked)
-5. "Generate Another CV" button to reset
+- HITL Review uses `/api/hitl/pending` and `/api/hitl/{job_id}/decide`
+- CV Generator polls `/api/jobs/{job_id}/status` every 2 seconds
+- CV HTML preview fetched from `/api/jobs/{job_id}/html`
 
 ### Usage
 
 ```bash
-# Build UI (from project root)
-cd ui
-npm run build
+# Development (both servers)
+.\scripts\dev.ps1
 
-# Start backend (from project root)
-python -m uvicorn src.api.main:app --reload
+# Or manually:
+cd ui && npm run dev          # UI at http://localhost:5173
+python -m uvicorn src.api.main:app --reload  # API at http://localhost:8000
 
-# Access at http://localhost:8000/
+# Production build
+cd ui && npm run build
+python -m uvicorn src.api.main:app  # Access at http://localhost:8000/
 ```
 
-See `ui/README.md` for detailed documentation.
+See `ui/README.md` for detailed documentation and `docs/plans/hitl-svelte-conversion.md` for HITL UI specification.
 
 ## Next Steps
 
 1. **Implement Job Source Adapters** - URL extraction using HTTP + LLM, manual input processing
 2. **Implement DAL** - SQLite or PostgreSQL persistence for job records
-3. **Build HITL Frontend (Full Mode)** - Tinder-like UI for batch review of pending CVs (extends MVP UI)
+3. **Connect HITL UI to Real API** - Disable mock mode, implement `/api/jobs/{job_id}/html` endpoint
 4. **Implement Application Workflow** - Deep agent with Playwright MCP for browser automation
 5. **Add Job Filter Logic** - LLM-based job suitability evaluation
 6. **LinkedIn Integration** - Job fetching and Easy Apply automation

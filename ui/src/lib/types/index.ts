@@ -67,3 +67,39 @@ export interface AppState {
 	// Polling control
 	pollingInterval: number | null;
 }
+
+// HITL Review Types
+
+export interface JobPosting {
+	title: string;
+	company: string;
+	description: string;
+	location?: string;
+	salary?: string;
+	posted_at?: string;
+	requirements?: string[];
+}
+
+export interface PendingApproval {
+	job_id: string;
+	job_posting: JobPosting;
+	cv_json: Record<string, unknown>;
+	pdf_path: string;
+	retry_count: number;
+	created_at: string;
+	source: 'url' | 'manual' | 'linkedin';
+	application_url: string;
+}
+
+export type Decision = 'approved' | 'declined' | 'retry';
+
+export interface DecisionPayload {
+	decision: Decision;
+	feedback?: string;
+}
+
+export interface DecisionResponse {
+	job_id: string;
+	status: 'applying' | 'declined' | 'retrying';
+	message: string;
+}

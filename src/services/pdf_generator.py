@@ -140,6 +140,41 @@ class PDFGenerator:
         html = template.render(cv=cv_json)
         return html
 
+    def render_html(self, cv_json: dict) -> str:
+        """
+        Render CV data to standalone HTML with embedded CSS.
+
+        This method returns a complete HTML document with styles embedded,
+        suitable for browser preview (without PDF conversion).
+
+        Args:
+            cv_json: CV data dictionary
+
+        Returns:
+            Complete HTML string with embedded CSS
+        """
+        # Get the base HTML content
+        html_content = self._cv_to_html(cv_json)
+        css_content = self._load_css()
+
+        # Embed CSS into HTML for standalone rendering
+        # Wrap in a complete HTML document structure
+        full_html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{cv_json.get('contact', {}).get('full_name', 'CV')} - Resume</title>
+    <style>
+{css_content}
+    </style>
+</head>
+<body>
+{html_content}
+</body>
+</html>"""
+        return full_html
+
     def _load_css(self) -> str:
         """Return cached CSS for current template"""
         if self._cached_css is None:
