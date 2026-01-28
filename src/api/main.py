@@ -12,7 +12,7 @@ from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from src.agents.preparation_workflow import (
@@ -534,6 +534,54 @@ async def download_job_pdf(job_id: str):
     except Exception as e:
         logger.error(f"Failed to download PDF for job {job_id}: {e}", exc_info=True)
         raise HTTPException(500, f"Failed to download PDF: {str(e)}")
+
+
+@app.get("/api/jobs/{job_id}/html", response_class=HTMLResponse)
+async def get_job_cv_html(job_id: str) -> HTMLResponse:
+    """
+    Return rendered HTML CV for a job.
+
+    Uses the same Jinja2 template as PDF generation but returns HTML directly.
+    Useful for frontend preview without downloading PDF.
+    """
+    try:
+        # Get job status
+        status = await get_job_status(job_id)
+
+        # Check if job is ready
+        if status.status == "failed":
+            raise HTTPException(400, f"Job failed: {status.error_message}")
+
+        if status.status not in ["completed", "pending", "pdf_generated"]:
+            raise HTTPException(400, f"CV not ready yet (status: {status.status})")
+
+        # Check CV JSON exists
+        if not status.cv_json:
+            raise HTTPException(404, "CV JSON not found for this job")
+
+        # Render HTML using existing template system
+        from src.services.pdf_generator import PDFGenerator
+
+        # Get template name from job state
+        template_name = "compact"  # Default template
+        if job_id in unified_threads:
+            thread_info = unified_threads[job_id]
+            thread_id = thread_info["thread_id"]
+            config = {"configurable": {"thread_id": thread_id}}
+            state = preparation_workflow.get_state(config).values
+            raw_input = state.get("raw_input", {})
+            template_name = raw_input.get("template_name", "compact")
+
+        generator = PDFGenerator(template_name=template_name)
+        html = generator.render_html(status.cv_json)
+
+        return HTMLResponse(content=html, media_type="text/html")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get CV HTML for job {job_id}: {e}", exc_info=True)
+        raise HTTPException(500, f"Failed to get CV HTML: {str(e)}")
 
 
 # =============================================================================

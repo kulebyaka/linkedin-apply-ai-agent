@@ -80,6 +80,7 @@ data/cv/*.json
 data/jobs/
 data/generated_cvs/
 !data/cv/master_cv.example.json
+scripts/test_job.json
 
 # Prompts (ignore user customizations, keep examples)
 prompts/cv_composer/*.txt

@@ -24,9 +24,9 @@ The goal is a fully automated job application pipeline:
 | Retry Workflow | **Complete** | Re-compose CV with user feedback |
 | HITL API | **Complete** | Approve/decline/retry endpoints |
 | MVP Web UI | **Complete** | Single-page CV generator |
+| HITL Review UI | **Complete** | Tinder-like batch review interface |
 | Job Source Adapters | *Interface only* | URL extraction, manual input |
 | Job Filter (LLM) | *Not implemented* | Skeleton exists |
-| HITL Frontend (Full) | *Not implemented* | Tinder-like batch review UI |
 | Application Workflow | *Stubs only* | Browser automation pending |
 | LinkedIn Integration | *Not implemented* | Job fetching & Easy Apply |
 
@@ -89,7 +89,7 @@ This covers the core value proposition: AI-powered CV tailoring with professiona
 
 - [ ] Job source adapters (URL extraction, LinkedIn API)
 - [ ] LLM-based job filtering for hidden disqualifiers
-- [ ] Tinder-like HITL UI for batch review
+- [x] Tinder-like HITL UI for batch review
 - [ ] Browser automation for LinkedIn Easy Apply
 
 ## API Endpoints

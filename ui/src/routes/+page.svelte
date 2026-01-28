@@ -1,266 +1,165 @@
 <script lang="ts">
-	import { onDestroy } from 'svelte';
-	import { appState } from '$lib/stores/appState.svelte';
-	import { submitJob, getJobStatus, downloadPDF, triggerDownload } from '$lib/api/client';
-	import JobDescriptionForm from '$lib/components/JobDescriptionForm.svelte';
-	import ProgressStepper from '$lib/components/ProgressStepper.svelte';
+	import { onMount, onDestroy } from 'svelte';
+	import { reviewQueue } from '$lib/stores/reviewQueue.svelte';
+	import JobCard from '$lib/components/review/JobCard.svelte';
+	import DecisionButtons from '$lib/components/review/DecisionButtons.svelte';
+	import NavigationControls from '$lib/components/review/NavigationControls.svelte';
+	import FeedbackModal from '$lib/components/review/FeedbackModal.svelte';
+	import EmptyState from '$lib/components/review/EmptyState.svelte';
 	import ToastNotification from '$lib/components/ToastNotification.svelte';
 
-	// Reactive state references
-	const currentState = appState.value;
-
-	// Toast state
+	let modalType = $state<'decline' | 'retry' | null>(null);
 	let showToast = $state(false);
 	let toastMessage = $state('');
-	let toastType = $state<'error' | 'success' | 'info'>('info');
+	let toastType = $state<'success' | 'error' | 'info'>('info');
 
-	// Handle form submission
-	async function handleSubmit(description: string, templateName: import('$lib/types').TemplateName, llmProvider?: import('$lib/types').LLMProvider, llmModel?: import('$lib/types').LLMModel) {
-		try {
-			appState.setJobDescription(description);
-			appState.setSubmitting();
-
-			// Submit job
-			const response = await submitJob(description, templateName, llmProvider, llmModel);
-
-			// Start polling
-			appState.startPolling(response.job_id);
-			startPolling(response.job_id);
-		} catch (error) {
-			const errorMsg = error instanceof Error ? error.message : 'Unknown error occurred';
-			appState.setError(errorMsg);
-			showErrorToast(`Failed to submit job: ${errorMsg}`);
-		}
-	}
-
-	// Start polling for job status
-	function startPolling(jobId: string) {
-		const intervalId = setInterval(async () => {
-			try {
-				const status = await getJobStatus(jobId);
-
-				// Update current step
-				appState.updateStep(status.status);
-
-				// Check if job completed
-				if (status.status === 'completed') {
-					clearInterval(intervalId);
-					await handleJobCompleted(jobId, status);
-				} else if (status.status === 'failed') {
-					clearInterval(intervalId);
-					const errorMsg = status.error_message || 'Job processing failed';
-					appState.setError(errorMsg);
-					showErrorToast(`CV generation failed: ${errorMsg}`);
-				}
-			} catch (error) {
-				clearInterval(intervalId);
-				const errorMsg = error instanceof Error ? error.message : 'Unknown error occurred';
-				appState.setError(errorMsg);
-				showErrorToast(`Failed to check job status: ${errorMsg}`);
-			}
-		}, 2000); // Poll every 2 seconds
-
-		appState.setPollingInterval(intervalId);
-	}
-
-	// Handle job completion
-	async function handleJobCompleted(jobId: string, status: any) {
-		try {
-			// Download PDF
-			const pdfBlob = await downloadPDF(jobId);
-
-			// Generate filename from job details
-			const title = status.job_posting?.title || 'CV';
-			const company = status.job_posting?.company || 'Job';
-			const filename = `${company.replace(/[^a-z0-9]/gi, '_')}_${title.replace(/[^a-z0-9]/gi, '_')}_CV.pdf`;
-
-			// Try auto-download
-			const autoDownloadSucceeded = triggerDownload(pdfBlob, filename);
-
-			// Update state
-			appState.setCompleted(pdfBlob, autoDownloadSucceeded);
-
-			// Show success toast
-			if (autoDownloadSucceeded) {
-				showSuccessToast('Your CV has been generated and downloaded!');
-			} else {
-				showInfoToast('Your CV is ready! Click the download button to save it.');
-			}
-		} catch (error) {
-			const errorMsg = error instanceof Error ? error.message : 'Unknown error occurred';
-			appState.setError(errorMsg);
-			showErrorToast(`Failed to download PDF: ${errorMsg}`);
-		}
-	}
-
-	// Manual download (fallback)
-	function handleManualDownload() {
-		if (!currentState.pdfBlob) return;
-
-		const title = 'CV';
-		const company = 'Job';
-		const filename = `${company}_${title}_CV.pdf`;
-
-		const succeeded = triggerDownload(currentState.pdfBlob, filename);
-		if (succeeded) {
-			showSuccessToast('CV downloaded successfully!');
-		} else {
-			showErrorToast('Failed to download PDF. Please try again.');
-		}
-	}
-
-	// Reset and start over
-	function handleReset() {
-		appState.reset();
-	}
-
-	// Toast helpers
-	function showErrorToast(message: string) {
-		toastMessage = message;
-		toastType = 'error';
-		showToast = true;
-	}
-
-	function showSuccessToast(message: string) {
-		toastMessage = message;
-		toastType = 'success';
-		showToast = true;
-	}
-
-	function showInfoToast(message: string) {
-		toastMessage = message;
-		toastType = 'info';
-		showToast = true;
-	}
-
-	function closeToast() {
-		showToast = false;
-	}
-
-	// Cleanup on component destroy
-	onDestroy(() => {
-		appState.cleanup();
+	onMount(() => {
+		reviewQueue.loadPending();
+		window.addEventListener('keydown', handleKeyDown);
 	});
+
+	onDestroy(() => {
+		window.removeEventListener('keydown', handleKeyDown);
+	});
+
+	// Keyboard shortcuts
+	function handleKeyDown(e: KeyboardEvent) {
+		if (e.target instanceof HTMLTextAreaElement) return;
+		if (modalType !== null) return; // Don't handle shortcuts when modal is open
+
+		switch (e.key) {
+			case 'ArrowLeft':
+				reviewQueue.goToPrevious();
+				break;
+			case 'ArrowRight':
+				reviewQueue.goToNext();
+				break;
+			case '1':
+				if (reviewQueue.currentJob) modalType = 'decline';
+				break;
+			case '2':
+				if (reviewQueue.currentJob) modalType = 'retry';
+				break;
+			case '3':
+				if (reviewQueue.currentJob) handleApprove();
+				break;
+		}
+	}
+
+	async function handleDecision(
+		decision: 'approved' | 'declined' | 'retry',
+		feedback?: string
+	) {
+		const result = await reviewQueue.submitDecision(decision, feedback);
+		if (result) {
+			showToastMessage(
+				decision === 'approved'
+					? 'Application Approved'
+					: decision === 'declined'
+						? 'Application Declined'
+						: 'CV Regeneration Started',
+				'success'
+			);
+		} else if (reviewQueue.error) {
+			showToastMessage(reviewQueue.error, 'error');
+		}
+		modalType = null;
+	}
+
+	function handleApprove() {
+		handleDecision('approved');
+	}
+
+	function handleModalSubmit(feedback: string) {
+		if (modalType) {
+			handleDecision(modalType === 'decline' ? 'declined' : 'retry', feedback);
+		}
+	}
+
+	function showToastMessage(message: string, type: 'success' | 'error' | 'info') {
+		toastMessage = message;
+		toastType = type;
+		showToast = true;
+	}
 </script>
 
 <svelte:head>
-	<title>LinkedIn Job Application Agent - CV Generator</title>
+	<title>Review Applications - Job Application Agent</title>
 </svelte:head>
 
-<div class="min-h-screen grain py-16 px-4 sm:px-6 lg:px-8" style="background-color: var(--color-stone);">
-	<div class="max-w-5xl mx-auto">
+<div class="grain-texture min-h-screen bg-[var(--color-background)]">
+	<div class="container mx-auto max-w-4xl px-4 py-8">
 		<!-- Header -->
-		<div class="mb-16">
-			<div class="border-l-4 pl-6 mb-8" style="border-color: var(--color-amber);">
-				<h1 class="text-5xl tracking-tight mb-3" style="color: var(--color-charcoal);">CV Generator</h1>
-				<p class="text-lg font-light" style="color: var(--color-warm-gray);">
-					Paste a job description and get a tailored CV PDF instantly
-				</p>
-			</div>
-		</div>
-
-		<!-- Main content -->
-		<div class="space-y-8">
-			<!-- Progress stepper (show when processing or failed) -->
-			{#if currentState.status === 'polling' || currentState.status === 'submitting' || currentState.status === 'failed'}
-				<ProgressStepper
-					currentStep={currentState.currentStep}
-					hasError={currentState.status === 'failed'}
-				/>
-
-				<div class="text-center mt-8">
-					<p class="text-base font-mono tracking-wide" style="color: var(--color-warm-gray);">
-						{#if currentState.status === 'failed'}
-							<!-- Error message shown via toast -->
-						{:else if currentState.currentStep === 'queued'}
-							Job submitted successfully. Starting processing...
-						{:else if currentState.currentStep === 'extracting'}
-							Extracting job details from description...
-						{:else if currentState.currentStep === 'composing_cv'}
-							Tailoring your CV to match the job requirements...
-						{:else if currentState.currentStep === 'generating_pdf'}
-							Generating professional PDF resume...
-						{/if}
+		<header class="mb-8">
+			<div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+				<div>
+					<h1 class="font-heading text-2xl font-bold sm:text-3xl">Review Applications</h1>
+					<p class="mt-1 font-body text-[var(--color-muted-foreground)]">
+						Review AI-generated CVs and approve job applications
 					</p>
 				</div>
-			{/if}
-
-			<!-- Form (show when idle or failed) -->
-			{#if currentState.status === 'idle' || currentState.status === 'failed'}
-				<JobDescriptionForm
-					onSubmit={handleSubmit}
-					isLoading={currentState.status === 'submitting'}
-					errorMessage={currentState.status === 'failed' ? currentState.errorMessage : undefined}
-					initialValue={currentState.jobDescription}
-				/>
-			{/if}
-
-			<!-- Completed state -->
-			{#if currentState.status === 'completed'}
-				<div class="text-center space-y-8 py-12">
-					<div class="inline-flex items-center justify-center w-20 h-20 rounded-none border-4" style="border-color: var(--color-success); background-color: transparent;">
-						<svg class="w-12 h-12" style="color: var(--color-success);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								stroke-width="2"
-								d="M5 13l4 4L19 7"
-							></path>
-						</svg>
-					</div>
-
-					<h2 class="text-3xl tracking-tight" style="color: var(--color-charcoal);">Your CV is Ready!</h2>
-
-					{#if currentState.autoDownloadFailed && currentState.pdfBlob}
-						<div class="space-y-6">
-							<p class="text-base" style="color: var(--color-warm-gray);">
-								Your browser blocked the automatic download. Click below to download manually.
-							</p>
-							<button
-								onclick={handleManualDownload}
-								class="inline-flex items-center px-8 py-4 border-2 text-base font-medium transition-all duration-200 hover:translate-y-[-2px]"
-								style="border-color: var(--color-amber); background-color: var(--color-amber); color: var(--color-charcoal); box-shadow: 4px 4px 0 var(--color-charcoal);"
-							>
-								<svg
-									class="w-5 h-5 mr-2"
-									fill="none"
-									stroke="currentColor"
-									viewBox="0 0 24 24"
-								>
-									<path
-										stroke-linecap="round"
-										stroke-linejoin="round"
-										stroke-width="2"
-										d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-									></path>
-								</svg>
-								Download CV PDF
-							</button>
-						</div>
-					{/if}
-
-					<button
-						onclick={handleReset}
-						class="inline-flex items-center px-8 py-4 border-2 text-base font-medium transition-all duration-200 hover:translate-y-[-2px]"
-						style="border-color: var(--color-charcoal); background-color: transparent; color: var(--color-charcoal); box-shadow: 4px 4px 0 var(--color-warm-gray-light);"
+				{#if reviewQueue.totalCount > 0}
+					<div
+						class="border-2 border-[var(--color-foreground)] bg-[var(--color-primary)] px-4 py-2 shadow-brutal"
 					>
-						<svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								stroke-width="2"
-								d="M12 4v16m8-8H4"
-							></path>
-						</svg>
-						Generate Another CV
-					</button>
+						<span class="font-mono text-sm font-semibold">{reviewQueue.totalCount} pending</span>
+					</div>
+				{/if}
+			</div>
+		</header>
+
+		<!-- Main Content -->
+		{#if reviewQueue.isLoading}
+			<div class="flex min-h-[500px] items-center justify-center">
+				<div
+					class="animate-pulse border-4 border-[var(--color-foreground)] bg-[var(--color-background)] p-8 shadow-brutal"
+				>
+					<p class="font-mono text-sm uppercase tracking-wider">Loading applications...</p>
 				</div>
-			{/if}
-		</div>
+			</div>
+		{:else if reviewQueue.totalCount === 0}
+			<EmptyState />
+		{:else if reviewQueue.currentJob}
+			<div class="space-y-6">
+				<JobCard job={reviewQueue.currentJob} />
+
+				<DecisionButtons
+					onApprove={handleApprove}
+					onDecline={() => (modalType = 'decline')}
+					onRetry={() => (modalType = 'retry')}
+					isSubmitting={reviewQueue.isSubmitting}
+				/>
+
+				<NavigationControls
+					currentIndex={reviewQueue.currentIndex}
+					totalCount={reviewQueue.totalCount}
+					hasPrevious={reviewQueue.hasPrevious}
+					hasNext={reviewQueue.hasNext}
+					onPrevious={reviewQueue.goToPrevious}
+					onNext={reviewQueue.goToNext}
+				/>
+
+				<!-- Keyboard shortcuts hint -->
+				<div class="text-center">
+					<p class="font-mono text-xs text-[var(--color-muted-foreground)]">
+						Keyboard: ← → to navigate | 1 decline | 2 retry | 3 approve
+					</p>
+				</div>
+			</div>
+		{/if}
+
+		<!-- Feedback Modal -->
+		<FeedbackModal
+			isOpen={modalType !== null}
+			type={modalType || 'decline'}
+			isSubmitting={reviewQueue.isSubmitting}
+			onClose={() => (modalType = null)}
+			onSubmit={handleModalSubmit}
+		/>
 	</div>
 </div>
 
-<!-- Toast notification -->
+<!-- Toast -->
 {#if showToast}
-	<ToastNotification message={toastMessage} type={toastType} onClose={closeToast} />
+	<ToastNotification message={toastMessage} type={toastType} onClose={() => (showToast = false)} />
 {/if}

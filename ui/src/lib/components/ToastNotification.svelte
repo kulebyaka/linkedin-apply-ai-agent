@@ -23,24 +23,24 @@
 	// Compute icon and colors based on type
 	const config = $derived({
 		error: {
-			bgColor: '#fef2f2',
-			borderColor: 'var(--color-error)',
-			textColor: 'var(--color-charcoal)',
-			iconColor: 'var(--color-error)',
+			bgColor: 'hsl(0 100% 97%)',
+			borderColor: 'var(--color-destructive)',
+			textColor: 'var(--color-foreground)',
+			iconColor: 'var(--color-destructive)',
 			icon: 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z'
 		},
 		success: {
-			bgColor: '#f0fdf4',
+			bgColor: 'hsl(140 100% 97%)',
 			borderColor: 'var(--color-success)',
-			textColor: 'var(--color-charcoal)',
+			textColor: 'var(--color-foreground)',
 			iconColor: 'var(--color-success)',
 			icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z'
 		},
 		info: {
-			bgColor: 'white',
-			borderColor: 'var(--color-amber)',
-			textColor: 'var(--color-charcoal)',
-			iconColor: 'var(--color-amber)',
+			bgColor: 'var(--color-background)',
+			borderColor: 'var(--color-primary)',
+			textColor: 'var(--color-foreground)',
+			iconColor: 'var(--color-primary)',
 			icon: 'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z'
 		}
 	}[type]);
@@ -52,8 +52,8 @@
 	aria-live="assertive"
 >
 	<div
-		class="flex items-start p-5 border-2 transition-all duration-200"
-		style="background-color: {config.bgColor}; border-color: {config.borderColor}; box-shadow: 4px 4px 0 var(--color-charcoal);"
+		class="flex items-start p-5 border-2 shadow-brutal transition-all duration-200"
+		style="background-color: {config.bgColor}; border-color: {config.borderColor};"
 	>
 		<!-- Icon -->
 		<div class="flex-shrink-0">
