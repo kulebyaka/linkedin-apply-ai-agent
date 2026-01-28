@@ -36,18 +36,19 @@ All providers use native structured outputs when a schema is provided to reduce
 JSON parsing errors and improve reliability.
 """
 
-from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
-from enum import Enum
 import json
 import logging
 import time
+from abc import ABC, abstractmethod
+from enum import Enum
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 
 class LLMProvider(str, Enum):
     """Supported LLM providers"""
+
     OPENAI = "openai"
     DEEPSEEK = "deepseek"
     GROK = "grok"
@@ -81,11 +82,11 @@ class BaseLLMClient(ABC):
     def generate_json(
         self,
         prompt: str,
-        schema: Optional[Dict] = None,
+        schema: Optional[dict] = None,
         temperature: float = 0.4,
         max_retries: int = 3,
-        **kwargs
-    ) -> Dict:
+        **kwargs,
+    ) -> dict:
         """
         Generate structured JSON output with schema validation
 
@@ -112,11 +113,10 @@ class OpenAIClient(BaseLLMClient):
         super().__init__(api_key, model, **kwargs)
         try:
             from openai import OpenAI
+
             self.client = OpenAI(api_key=api_key)
         except ImportError:
-            raise ImportError(
-                "OpenAI package not installed. Install with: pip install openai"
-            )
+            raise ImportError("OpenAI package not installed. Install with: pip install openai")
 
     def generate(self, prompt: str, temperature: float = 0.7, **kwargs) -> str:
         """Generate text completion using OpenAI"""
@@ -125,7 +125,7 @@ class OpenAIClient(BaseLLMClient):
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=temperature,
-                **kwargs
+                **kwargs,
             )
             return response.choices[0].message.content
         except Exception as e:
@@ -138,7 +138,7 @@ class OpenAIClient(BaseLLMClient):
         schema: Optional[Dict] = None,
         temperature: float = 0.4,
         max_retries: int = 3,
-        **kwargs
+        **kwargs,
     ) -> Dict:
         """Generate structured JSON output using OpenAI with native JSON Schema support"""
         for attempt in range(max_retries):
@@ -156,8 +156,8 @@ class OpenAIClient(BaseLLMClient):
                         "json_schema": {
                             "name": "response",
                             "strict": True,
-                            "schema": strict_schema
-                        }
+                            "schema": strict_schema,
+                        },
                     }
                     # No need for JSON instruction in prompt with strict mode
                     user_prompt = prompt
@@ -171,13 +171,15 @@ class OpenAIClient(BaseLLMClient):
                     user_prompt = f"{prompt}\n\nYou must respond with valid JSON only."
                     api_kwargs = {"temperature": temperature, **kwargs}
 
-                logger.info(f"[TIMING] Starting OpenAI API call (model={self.model}, attempt={attempt + 1})")
+                logger.info(
+                    f"[TIMING] Starting OpenAI API call (model={self.model}, attempt={attempt + 1})"
+                )
                 api_start = time.time()
                 response = self.client.chat.completions.create(
                     model=self.model,
                     messages=[{"role": "user", "content": user_prompt}],
                     response_format=response_format,
-                    **api_kwargs
+                    **api_kwargs,
                 )
                 api_elapsed = time.time() - api_start
                 logger.info(f"[TIMING] OpenAI API call completed in {api_elapsed:.2f}s")
@@ -209,6 +211,7 @@ class OpenAIClient(BaseLLMClient):
         - Ensures all properties are in the required array
         """
         import copy
+
         schema = copy.deepcopy(schema)
 
         # OpenAI strict mode requires root schema to be type: object
@@ -216,19 +219,19 @@ class OpenAIClient(BaseLLMClient):
         if schema.get("type") == "array":
             schema = {
                 "type": "object",
-                "properties": {
-                    "items": schema
-                },
+                "properties": {"items": schema},
                 "required": ["items"],
-                "additionalProperties": False
+                "additionalProperties": False,
             }
 
         def make_strict_recursive(obj):
             if isinstance(obj, dict):
                 # If this is an object type schema
                 type_val = obj.get("type")
-                is_object = type_val == "object" or (isinstance(type_val, list) and "object" in type_val)
-                
+                is_object = type_val == "object" or (
+                    isinstance(type_val, list) and "object" in type_val
+                )
+
                 if is_object:
                     # Add additionalProperties: false
                     if "additionalProperties" not in obj:
@@ -289,15 +292,11 @@ class DeepSeekClient(BaseLLMClient):
         super().__init__(api_key, model, **kwargs)
         try:
             from openai import OpenAI
+
             # DeepSeek uses OpenAI-compatible API
-            self.client = OpenAI(
-                api_key=api_key,
-                base_url="https://api.deepseek.com/v1"
-            )
+            self.client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com/v1")
         except ImportError:
-            raise ImportError(
-                "OpenAI package not installed. Install with: pip install openai"
-            )
+            raise ImportError("OpenAI package not installed. Install with: pip install openai")
 
     def generate(self, prompt: str, temperature: float = 0.7, **kwargs) -> str:
         """Generate text completion using DeepSeek"""
@@ -306,7 +305,7 @@ class DeepSeekClient(BaseLLMClient):
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=temperature,
-                **kwargs
+                **kwargs,
             )
             return response.choices[0].message.content
         except Exception as e:
@@ -319,7 +318,7 @@ class DeepSeekClient(BaseLLMClient):
         schema: Optional[Dict] = None,
         temperature: float = 0.4,
         max_retries: int = 3,
-        **kwargs
+        **kwargs,
     ) -> Dict:
         """
         Generate structured JSON output using DeepSeek
@@ -338,7 +337,7 @@ class DeepSeekClient(BaseLLMClient):
                     messages=[{"role": "user", "content": json_prompt}],
                     temperature=temperature,
                     response_format={"type": "json_object"},
-                    **kwargs
+                    **kwargs,
                 )
 
                 content = response.choices[0].message.content
@@ -385,15 +384,11 @@ class GrokClient(BaseLLMClient):
         super().__init__(api_key, model, **kwargs)
         try:
             from openai import OpenAI
+
             # Grok uses OpenAI-compatible API
-            self.client = OpenAI(
-                api_key=api_key,
-                base_url="https://api.x.ai/v1"
-            )
+            self.client = OpenAI(api_key=api_key, base_url="https://api.x.ai/v1")
         except ImportError:
-            raise ImportError(
-                "OpenAI package not installed. Install with: pip install openai"
-            )
+            raise ImportError("OpenAI package not installed. Install with: pip install openai")
 
     def generate(self, prompt: str, temperature: float = 0.7, **kwargs) -> str:
         """Generate text completion using Grok"""
@@ -402,7 +397,7 @@ class GrokClient(BaseLLMClient):
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=temperature,
-                **kwargs
+                **kwargs,
             )
             return response.choices[0].message.content
         except Exception as e:
@@ -415,7 +410,7 @@ class GrokClient(BaseLLMClient):
         schema: Optional[Dict] = None,
         temperature: float = 0.4,
         max_retries: int = 3,
-        **kwargs
+        **kwargs,
     ) -> Dict:
         """Generate structured JSON output using Grok with native JSON Schema support"""
         for attempt in range(max_retries):
@@ -433,8 +428,8 @@ class GrokClient(BaseLLMClient):
                         "json_schema": {
                             "name": "response",
                             "strict": True,
-                            "schema": strict_schema
-                        }
+                            "schema": strict_schema,
+                        },
                     }
                     # No need for JSON instruction in prompt with strict mode
                     user_prompt = prompt
@@ -447,13 +442,15 @@ class GrokClient(BaseLLMClient):
                     user_prompt = f"{prompt}\n\nYou must respond with valid JSON only."
                     api_kwargs = {"temperature": temperature, **kwargs}
 
-                logger.info(f"[TIMING] Starting OpenAI API call (model={self.model}, attempt={attempt + 1})")
+                logger.info(
+                    f"[TIMING] Starting OpenAI API call (model={self.model}, attempt={attempt + 1})"
+                )
                 api_start = time.time()
                 response = self.client.chat.completions.create(
                     model=self.model,
                     messages=[{"role": "user", "content": user_prompt}],
                     response_format=response_format,
-                    **api_kwargs
+                    **api_kwargs,
                 )
                 api_elapsed = time.time() - api_start
                 logger.info(f"[TIMING] OpenAI API call completed in {api_elapsed:.2f}s")
@@ -485,6 +482,7 @@ class GrokClient(BaseLLMClient):
         - Ensures all properties are in the required array
         """
         import copy
+
         schema = copy.deepcopy(schema)
 
         # Grok strict mode requires root schema to be type: object (like OpenAI)
@@ -492,11 +490,9 @@ class GrokClient(BaseLLMClient):
         if schema.get("type") == "array":
             schema = {
                 "type": "object",
-                "properties": {
-                    "items": schema
-                },
+                "properties": {"items": schema},
                 "required": ["items"],
-                "additionalProperties": False
+                "additionalProperties": False,
             }
 
         def make_strict_recursive(obj):
@@ -543,10 +539,10 @@ class AnthropicClient(BaseLLMClient):
         super().__init__(api_key, model, **kwargs)
         try:
             from anthropic import Anthropic
+
             # Enable structured outputs beta header
             self.client = Anthropic(
-                api_key=api_key,
-                default_headers={"anthropic-beta": "structured-outputs-2025-11-13"}
+                api_key=api_key, default_headers={"anthropic-beta": "structured-outputs-2025-11-13"}
             )
         except ImportError:
             raise ImportError(
@@ -562,7 +558,7 @@ class AnthropicClient(BaseLLMClient):
                 max_tokens=max_tokens,
                 temperature=temperature,
                 messages=[{"role": "user", "content": prompt}],
-                **kwargs
+                **kwargs,
             )
             return response.content[0].text
         except Exception as e:
@@ -575,7 +571,7 @@ class AnthropicClient(BaseLLMClient):
         schema: Optional[Dict] = None,
         temperature: float = 0.4,
         max_retries: int = 3,
-        **kwargs
+        **kwargs,
     ) -> Dict:
         """Generate structured JSON output using Anthropic Claude with native structured outputs"""
         for attempt in range(max_retries):
@@ -591,13 +587,9 @@ class AnthropicClient(BaseLLMClient):
                         messages=[{"role": "user", "content": prompt}],
                         output_format={
                             "type": "json_schema",
-                            "json_schema": {
-                                "name": "response",
-                                "strict": True,
-                                "schema": schema
-                            }
+                            "json_schema": {"name": "response", "strict": True, "schema": schema},
                         },
-                        **kwargs
+                        **kwargs,
                     )
                 else:
                     # Fallback to prompt-based JSON without schema
@@ -607,7 +599,7 @@ class AnthropicClient(BaseLLMClient):
                         max_tokens=max_tokens,
                         temperature=temperature,
                         messages=[{"role": "user", "content": json_prompt}],
-                        **kwargs
+                        **kwargs,
                     )
 
                 content = response.content[0].text

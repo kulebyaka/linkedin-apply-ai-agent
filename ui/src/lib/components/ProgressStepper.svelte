@@ -73,34 +73,33 @@
 <div class="w-full max-w-4xl mx-auto py-12">
 	<div class="relative">
 		<!-- Progress bar background -->
-		<div class="absolute top-6 left-0 w-full h-0.5" style="background-color: var(--color-warm-gray-light);"></div>
+		<div class="absolute top-6 left-0 w-full h-0.5 bg-[var(--color-muted)]"></div>
 
 		<!-- Progress bar fill -->
 		<div
-			class="absolute top-6 left-0 h-0.5 transition-all duration-700 ease-out"
-			style="width: {currentStepIndex === -1 ? 0 : (currentStepIndex / (steps.length - 1)) * 100}%; background-color: var(--color-amber);"
+			class="absolute top-6 left-0 h-0.5 bg-[var(--color-primary)] transition-all duration-700 ease-out"
+			style="width: {currentStepIndex === -1 ? 0 : (currentStepIndex / (steps.length - 1)) * 100}%;"
 		></div>
 
 		<!-- Steps -->
 		<div class="relative flex justify-between">
 			{#each steps as step, index}
-				<div class="flex flex-col items-center" style="flex: 1;">
+				<div class="flex flex-1 flex-col items-center">
 					<!-- Step indicator -->
 					<div
-						class="w-12 h-12 border-2 flex items-center justify-center transition-all duration-300"
-						style="{isStepFailed(index)
-							? 'background-color: #fef2f2; border-color: var(--color-error);'
+						class="w-12 h-12 border-2 flex items-center justify-center transition-all duration-300
+						{isStepFailed(index)
+							? 'bg-[hsl(0_100%_97%)] border-[var(--color-destructive)]'
 							: isStepCompleted(index)
-								? 'background-color: var(--color-amber); border-color: var(--color-amber);'
+								? 'bg-[var(--color-primary)] border-[var(--color-primary)]'
 								: isStepActive(index)
-									? 'background-color: white; border-color: var(--color-amber);'
-									: 'background-color: white; border-color: var(--color-warm-gray-light);'}"
+									? 'bg-[var(--color-background)] border-[var(--color-primary)]'
+									: 'bg-[var(--color-background)] border-[var(--color-muted)]'}"
 					>
 						{#if isStepFailed(index)}
 							<!-- Error X icon -->
 							<svg
-								class="w-7 h-7"
-								style="color: var(--color-error);"
+								class="w-7 h-7 text-[var(--color-destructive)]"
 								fill="none"
 								stroke="currentColor"
 								viewBox="0 0 24 24"
@@ -115,8 +114,7 @@
 						{:else if isStepCompleted(index)}
 							<!-- Checkmark -->
 							<svg
-								class="w-7 h-7"
-								style="color: var(--color-charcoal);"
+								class="w-7 h-7 text-[var(--color-primary-foreground)]"
 								fill="none"
 								stroke="currentColor"
 								viewBox="0 0 24 24"
@@ -131,29 +129,29 @@
 						{:else if isStepActive(index)}
 							<!-- Animated pulse square -->
 							<div class="relative">
-								<div class="w-4 h-4 animate-pulse" style="background-color: var(--color-amber);"></div>
+								<div class="w-4 h-4 animate-pulse bg-[var(--color-primary)]"></div>
 							</div>
 						{:else}
 							<!-- Empty square -->
-							<div class="w-3 h-3" style="background-color: var(--color-warm-gray-light);"></div>
+							<div class="w-3 h-3 bg-[var(--color-muted)]"></div>
 						{/if}
 					</div>
 
 					<!-- Step label -->
 					<div class="mt-4 text-center max-w-[140px]">
 						<div
-							class="text-sm font-mono tracking-wide font-medium uppercase"
-							style="{isStepFailed(index)
-								? 'color: var(--color-error);'
+							class="font-mono text-sm font-medium uppercase tracking-wide
+							{isStepFailed(index)
+								? 'text-[var(--color-destructive)]'
 								: isStepActive(index)
-									? 'color: var(--color-amber);'
+									? 'text-[var(--color-primary)]'
 									: isStepCompleted(index)
-										? 'color: var(--color-charcoal);'
-										: 'color: var(--color-warm-gray);'}"
+										? 'text-[var(--color-foreground)]'
+										: 'text-[var(--color-muted-foreground)]'}"
 						>
 							{step.label}
 						</div>
-						<div class="text-xs mt-1.5 leading-snug" style="color: var(--color-warm-gray);">
+						<div class="font-body text-xs mt-1.5 leading-snug text-[var(--color-muted-foreground)]">
 							{isStepFailed(index) ? 'Error occurred - check details below' : step.description}
 						</div>
 					</div>

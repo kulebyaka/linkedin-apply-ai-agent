@@ -184,7 +184,7 @@ def main():
 
     if all_success:
         print("\n[SUCCESS] All templates generated successfully!")
-        print(f"\nGenerated PDFs saved to: data/generated_cvs/test_<template>_resume.pdf")
+        print("\nGenerated PDFs saved to: data/generated_cvs/test_<template>_resume.pdf")
     else:
         print("\n[WARNING] Some templates failed to generate.")
         print("If running on Windows, use Docker:")
