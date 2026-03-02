@@ -113,3 +113,6 @@ Obsolete
 nul
 omnara-windows-x64.exe
 scripts/test_job.json
+
+# ralphex progress logs
+.ralphex/progress/
