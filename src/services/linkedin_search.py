@@ -5,11 +5,9 @@ for keywords, location, date posted, remote filter, experience level,
 job type, and Easy Apply filtering.
 """
 
-from typing import Optional
 from urllib.parse import urlencode
 
 from pydantic import BaseModel
-
 
 # LinkedIn query parameter mappings
 _DATE_POSTED_MAP = {
@@ -51,10 +49,10 @@ class LinkedInSearchParams(BaseModel):
 
     keywords: str = ""
     location: str = ""
-    remote_filter: Optional[str] = None  # "remote", "on-site", "hybrid"
-    date_posted: Optional[str] = None  # "24h", "week", "month"
-    experience_level: Optional[list[str]] = None  # "entry", "associate", "mid-senior", etc.
-    job_type: Optional[list[str]] = None  # "full-time", "part-time", "contract", etc.
+    remote_filter: str | None = None  # "remote", "on-site", "hybrid"
+    date_posted: str | None = None  # "24h", "week", "month"
+    experience_level: list[str] | None = None  # "entry", "associate", "mid-senior", etc.
+    job_type: list[str] | None = None  # "full-time", "part-time", "contract", etc.
     easy_apply_only: bool = False
     max_jobs: int = 50
 

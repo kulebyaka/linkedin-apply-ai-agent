@@ -81,8 +81,8 @@ def set_job_queue(queue: JobQueue) -> None:
 async def process_queue(
     queue: JobQueue,
     *,
-    workflow: "Any | None" = None,
-    master_cv_loader: "Any | None" = None,
+    workflow: Any | None = None,
+    master_cv_loader: Any | None = None,
     delay_between_jobs: float = 2.0,
     stop_event: asyncio.Event | None = None,
 ) -> int:
@@ -129,7 +129,7 @@ async def process_queue(
         # Try to get a job (with timeout so we can re-check stop_event)
         try:
             job_data = await asyncio.wait_for(queue.get(), timeout=1.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             continue
 
         job_id = job_data.get("job_id") or job_data.get("id") or "unknown"
@@ -155,7 +155,7 @@ async def process_queue(
 
             config = {"configurable": {"thread_id": f"linkedin-{job_id}"}}
             result = await asyncio.to_thread(
-                lambda s=initial_state: list(workflow.stream(s, config=config))
+                lambda s=initial_state, c=config: list(workflow.stream(s, config=c))
             )
             logger.info("Workflow completed for job %s (%d steps)", job_id, len(result))
             processed += 1

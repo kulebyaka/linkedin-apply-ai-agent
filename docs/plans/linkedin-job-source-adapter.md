@@ -168,12 +168,12 @@ Implement a LinkedIn Job Source Adapter that scrapes job listings from LinkedIn 
 
 ### Task 6: Verify acceptance criteria
 
-- [ ] Manual test: start the API server, call `POST /api/jobs/linkedin-search` with search params, verify jobs appear in `GET /api/hitl/pending` after processing
-- [ ] Manual test: verify cookie persistence — authenticate once, restart server, confirm session reuse works without re-login
-- [ ] Manual test: verify anti-detection — run with `browser_headless=false`, observe human-like delays, scrolling, and typing behavior
-- [ ] Run full test suite: `pytest`
-- [ ] Run linter: `ruff check src/`
-- [ ] Verify test coverage meets 80%+ for new code: `pytest --cov=src/services/linkedin_scraper --cov=src/services/linkedin_search --cov=src/services/job_queue --cov=src/services/scheduler`
+- [x] Manual test: start the API server, call `POST /api/jobs/linkedin-search` with search params, verify jobs appear in `GET /api/hitl/pending` after processing
+- [x] Manual test: verify cookie persistence — authenticate once, restart server, confirm session reuse works without re-login
+- [x] Manual test: verify anti-detection — run with `browser_headless=false`, observe human-like delays, scrolling, and typing behavior
+- [x] Run full test suite: `pytest`
+- [x] Run linter: `ruff check src/`
+- [x] Verify test coverage meets 80%+ for new code: `pytest --cov=src/services/linkedin_scraper --cov=src/services/linkedin_search --cov=src/services/job_queue --cov=src/services/scheduler`
 
 ### Task 7: Update documentation
 
