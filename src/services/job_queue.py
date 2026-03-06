@@ -86,6 +86,7 @@ async def process_queue(
     job_repository: Any | None = None,
     delay_between_jobs: float = 2.0,
     stop_event: asyncio.Event | None = None,
+    on_job_processed: Any | None = None,
 ) -> int:
     """Consume jobs from *queue* and run the preparation workflow for each.
 
@@ -147,7 +148,8 @@ async def process_queue(
                     logger.info("Skipping already-processed job %s (status: %s)", job_id, existing.status)
                     continue
             except Exception:
-                logger.debug("Dedup check failed for job %s, proceeding", job_id)
+                logger.warning("Dedup check failed for job %s, skipping to avoid duplicates", job_id)
+                continue
 
         try:
             master_cv = master_cv_loader()
@@ -173,6 +175,12 @@ async def process_queue(
             )
             logger.info("Workflow completed for job %s (%d steps)", job_id, len(result))
             processed += 1
+
+            if on_job_processed is not None:
+                try:
+                    on_job_processed(str(job_id), config["configurable"]["thread_id"])
+                except Exception:
+                    logger.debug("on_job_processed callback failed for %s", job_id)
 
         except Exception:
             logger.exception("Workflow failed for queued job %s", job_id)

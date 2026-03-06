@@ -144,7 +144,7 @@ def _start_queue_consumer(queue) -> asyncio.Task:
                 "Queue consumer crashed (%d/%d): %s — restarting in %.1fs",
                 _consumer_restart_count, _MAX_CONSUMER_RESTARTS, exc, delay,
             )
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             if _consumer_restart_handle is not None:
                 _consumer_restart_handle.cancel()
             _consumer_restart_handle = loop.call_later(delay, _restart_consumer, queue)
@@ -152,8 +152,21 @@ def _start_queue_consumer(queue) -> asyncio.Task:
             # Successful exit resets the counter
             _consumer_restart_count = 0
 
+    def _register_linkedin_job(job_id: str, thread_id: str) -> None:
+        """Register a LinkedIn-sourced job in unified_threads for HITL tracking."""
+        unified_threads[job_id] = {
+            "thread_id": thread_id,
+            "workflow_type": "preparation",
+            "created_at": datetime.now(),
+        }
+
     task = asyncio.create_task(
-        process_queue(queue, job_repository=job_repository, delay_between_jobs=2.0)
+        process_queue(
+            queue,
+            job_repository=job_repository,
+            delay_between_jobs=2.0,
+            on_job_processed=_register_linkedin_job,
+        )
     )
     task.add_done_callback(_on_consumer_done)
     return task
@@ -1062,9 +1075,10 @@ async def cleanup_jobs(
         deleted = await job_repository.cleanup(older_than_days, statuses)
         return {"deleted": deleted, "message": f"Deleted {deleted} jobs"}
 
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(400, str(e)) from None
-
     except Exception as e:
         logger.error(f"Failed to cleanup jobs: {e}", exc_info=True)
         raise HTTPException(500, "Failed to cleanup jobs") from None
