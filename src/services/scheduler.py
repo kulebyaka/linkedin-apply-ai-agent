@@ -5,7 +5,7 @@ intervals, feeding results into the async job queue for workflow processing.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -66,13 +66,13 @@ class LinkedInSearchScheduler:
             enqueued = await self.queue.put_batch(jobs)
             logger.info("Enqueued %d jobs (queue size: %d)", enqueued, self.queue.size())
 
-            self._last_run_time = datetime.now()
+            self._last_run_time = datetime.now(tz=timezone.utc)
             self._last_run_jobs = enqueued
             return enqueued
 
         except Exception:
             logger.exception("LinkedIn search cycle failed")
-            self._last_run_time = datetime.now()
+            self._last_run_time = datetime.now(tz=timezone.utc)
             self._last_run_jobs = 0
             return 0
 

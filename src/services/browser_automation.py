@@ -47,21 +47,25 @@ class LinkedInAutomation:
         """Launch Playwright Chromium with stealth patches."""
         self._playwright = await async_playwright().start()
 
-        # Randomized viewport for fingerprint diversity
-        viewport_width = random.randint(1280, 1920)
-        viewport_height = random.randint(800, 1080)
+        try:
+            # Randomized viewport for fingerprint diversity
+            viewport_width = random.randint(1280, 1920)
+            viewport_height = random.randint(800, 1080)
 
-        self.browser = await self._playwright.chromium.launch(headless=self.headless)
-        self.context = await self.browser.new_context(
-            viewport={"width": viewport_width, "height": viewport_height},
-            locale="en-US",
-        )
+            self.browser = await self._playwright.chromium.launch(headless=self.headless)
+            self.context = await self.browser.new_context(
+                viewport={"width": viewport_width, "height": viewport_height},
+                locale="en-US",
+            )
 
-        # Apply stealth patches to context
-        await self._stealth.apply_stealth_async(self.context)
+            # Apply stealth patches to context
+            await self._stealth.apply_stealth_async(self.context)
 
-        self.page = await self.context.new_page()
-        logger.info("Browser initialized with stealth (viewport %dx%d)", viewport_width, viewport_height)
+            self.page = await self.context.new_page()
+            logger.info("Browser initialized with stealth (viewport %dx%d)", viewport_width, viewport_height)
+        except Exception:
+            await self.close()
+            raise
 
     async def _load_cookies(self) -> bool:
         """Load cookies from file and inject into browser context.
@@ -91,6 +95,7 @@ class LinkedInAutomation:
             self.cookie_path.write_text(
                 json.dumps(cookies, indent=2), encoding="utf-8"
             )
+            self.cookie_path.chmod(0o600)
             logger.info("Saved %d cookies to %s", len(cookies), self.cookie_path)
         except OSError as exc:
             logger.warning("Failed to save cookies: %s", exc)
@@ -120,21 +125,21 @@ class LinkedInAutomation:
         await email_input.click()
         await email_input.type(self.email, delay=random.uniform(50, 150))
 
-        await self._random_delay(0.5, 1.5)
+        await self.random_delay(0.5, 1.5)
 
         # Fill password with human-like typing
         password_input = self.page.locator('input#password')
         await password_input.click()
         await password_input.type(self.password, delay=random.uniform(50, 150))
 
-        await self._random_delay(0.5, 1.5)
+        await self.random_delay(0.5, 1.5)
 
         # Click sign in
         await self.page.locator('button[type="submit"]').click()
 
         # Wait for navigation
         await self.page.wait_for_load_state("domcontentloaded")
-        await self._random_delay(2.0, 4.0)
+        await self.random_delay(2.0, 4.0)
 
         # Check for security challenge
         current_url = self.page.url
@@ -166,14 +171,14 @@ class LinkedInAutomation:
         logger.info("Cookie session invalid or missing, performing login")
         await self.login()
 
-    async def _random_delay(self, min_s: float | None = None, max_s: float | None = None) -> None:
+    async def random_delay(self, min_s: float | None = None, max_s: float | None = None) -> None:
         """Sleep for a random duration between min and max seconds."""
         low = min_s if min_s is not None else self.min_delay
         high = max_s if max_s is not None else self.max_delay
         delay = random.uniform(low, high)
         await asyncio.sleep(delay)
 
-    async def _human_scroll(self, page: Page | None = None) -> None:
+    async def human_scroll(self, page: Page | None = None) -> None:
         """Scroll the page with random increments and pauses to simulate human behavior."""
         target = page or self.page
         num_scrolls = random.randint(2, 5)

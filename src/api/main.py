@@ -5,6 +5,7 @@ Provides two sets of endpoints:
 2. Unified endpoints (/api/jobs/*, /api/hitl/*) - new two-workflow pipeline
 """
 
+import asyncio
 import time
 import uuid
 from datetime import datetime
@@ -117,8 +118,6 @@ async def startup_event():
 
     if settings.linkedin_search_schedule_enabled:
         try:
-            import asyncio
-
             from src.services.browser_automation import LinkedInAutomation
             from src.services.linkedin_scraper import LinkedInJobScraper
             from src.services.scheduler import LinkedInSearchScheduler
@@ -153,6 +152,10 @@ async def shutdown_event():
 
     if _queue_consumer_task:
         _queue_consumer_task.cancel()
+        try:
+            await _queue_consumer_task
+        except asyncio.CancelledError:
+            pass
         _queue_consumer_task = None
 
     if _linkedin_browser:
@@ -872,8 +875,6 @@ async def trigger_linkedin_search(
     if _linkedin_scheduler is None:
         # Create a temporary scheduler for one-off search
         try:
-            import asyncio
-
             from src.services.browser_automation import LinkedInAutomation
             from src.services.linkedin_scraper import LinkedInJobScraper
             from src.services.scheduler import LinkedInSearchScheduler

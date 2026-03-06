@@ -164,14 +164,14 @@ class TestEnsureAuthenticated:
 class TestRandomDelay:
     async def test_uses_default_delays(self, automation):
         with patch("src.services.browser_automation.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
-            await automation._random_delay()
+            await automation.random_delay()
             mock_sleep.assert_awaited_once()
             delay = mock_sleep.call_args[0][0]
             assert automation.min_delay <= delay <= automation.max_delay
 
     async def test_uses_custom_delays(self, automation):
         with patch("src.services.browser_automation.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
-            await automation._random_delay(min_s=1.0, max_s=2.0)
+            await automation.random_delay(min_s=1.0, max_s=2.0)
             delay = mock_sleep.call_args[0][0]
             assert 1.0 <= delay <= 2.0
 
@@ -183,7 +183,7 @@ class TestHumanScroll:
 
         with patch("src.services.browser_automation.random.randint", return_value=3):
             with patch("src.services.browser_automation.asyncio.sleep", new_callable=AsyncMock):
-                await automation._human_scroll(mock_page)
+                await automation.human_scroll(mock_page)
 
         assert mock_page.evaluate.await_count == 3
 
@@ -193,7 +193,7 @@ class TestHumanScroll:
 
         with patch("src.services.browser_automation.random.randint", return_value=2):
             with patch("src.services.browser_automation.asyncio.sleep", new_callable=AsyncMock):
-                await automation._human_scroll()
+                await automation.human_scroll()
 
         assert automation.page.evaluate.await_count == 2
 
@@ -243,7 +243,7 @@ class TestLogin:
         automation.page = mock_page
         automation.context = AsyncMock()
         automation.context.cookies = AsyncMock(return_value=[])
-        automation._random_delay = AsyncMock()
+        automation.random_delay = AsyncMock()
 
         await automation.login()
 
@@ -267,7 +267,7 @@ class TestLogin:
         automation.page = mock_page
         automation.context = AsyncMock()
         automation.context.cookies = AsyncMock(return_value=[])
-        automation._random_delay = AsyncMock()
+        automation.random_delay = AsyncMock()
 
         # Should not raise, just log warning
         await automation.login()

@@ -7,7 +7,7 @@ of job cards with full detail page data.
 
 import logging
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from src.config.settings import Settings
 from src.services.browser_automation import LinkedInAutomation
@@ -54,7 +54,7 @@ def _parse_relative_time(text: str) -> datetime | None:
     amount = int(match.group(1))
     unit = match.group(2).lower()
     seconds = _TIME_UNIT_SECONDS.get(unit, 0) * amount
-    return datetime.now() - timedelta(seconds=seconds)
+    return datetime.now(tz=timezone.utc) - timedelta(seconds=seconds)
 
 
 def _extract_job_id_from_url(url: str) -> str | None:
@@ -68,10 +68,6 @@ def _extract_job_id_from_url(url: str) -> str | None:
         return m.group(1)
     # Pattern: currentJobId=1234567890
     m = re.search(r"currentJobId=(\d+)", url)
-    if m:
-        return m.group(1)
-    # Pattern: /jobs/collections/.../?currentJobId=...
-    m = re.search(r"(\d{8,})", url)
     if m:
         return m.group(1)
     return None
@@ -108,8 +104,8 @@ class LinkedInJobScraper:
             logger.info("Navigating to search page %d: %s", page_num, url)
 
             await self.browser.page.goto(url, wait_until="domcontentloaded")
-            await self.browser._random_delay()
-            await self.browser._human_scroll(self.browser.page)
+            await self.browser.random_delay()
+            await self.browser.human_scroll(self.browser.page)
 
             # Check for no results
             no_results = await self.browser.page.locator(SELECTORS["no_results"]).count()
@@ -148,7 +144,7 @@ class LinkedInJobScraper:
             page_num += 1
 
             # Delay between pages
-            await self.browser._random_delay(
+            await self.browser.random_delay(
                 self.browser.page_delay_min, self.browser.page_delay_max
             )
 
@@ -161,9 +157,9 @@ class LinkedInJobScraper:
         Returns dict with description, requirements, salary, job_type,
         experience_level.
         """
-        await self.browser._random_delay()
+        await self.browser.random_delay()
         await self.browser.page.goto(job_url, wait_until="domcontentloaded")
-        await self.browser._random_delay(1.0, 3.0)
+        await self.browser.random_delay(1.0, 3.0)
 
         return await self._parse_job_detail_page(self.browser.page)
 

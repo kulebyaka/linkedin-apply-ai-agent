@@ -1,6 +1,6 @@
 """Tests for LinkedInJobScraper with mocked Playwright page elements."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, PropertyMock
 
 import pytest
@@ -31,8 +31,8 @@ def _make_mock_settings():
 def _make_mock_browser(page=None):
     browser = MagicMock()
     browser.page = page or AsyncMock()
-    browser._random_delay = AsyncMock()
-    browser._human_scroll = AsyncMock()
+    browser.random_delay = AsyncMock()
+    browser.human_scroll = AsyncMock()
     browser.page_delay_min = 0.0
     browser.page_delay_max = 0.0
     return browser
@@ -92,8 +92,8 @@ class TestExtractJobIdFromUrl:
     def test_current_job_id_param(self):
         assert _extract_job_id_from_url("?currentJobId=9876543210") == "9876543210"
 
-    def test_fallback_long_number(self):
-        assert _extract_job_id_from_url("/jobs/collections/12345678") == "12345678"
+    def test_ambiguous_url_returns_none(self):
+        assert _extract_job_id_from_url("/jobs/collections/12345678") is None
 
     def test_no_match(self):
         assert _extract_job_id_from_url("/about") is None
@@ -108,19 +108,19 @@ class TestParseRelativeTime:
         result = _parse_relative_time("2 days ago")
         assert result is not None
         # Should be approximately 2 days ago
-        expected = datetime.now() - timedelta(days=2)
+        expected = datetime.now(tz=timezone.utc) - timedelta(days=2)
         assert abs((result - expected).total_seconds()) < 5
 
     def test_hours_ago(self):
         result = _parse_relative_time("5 hours ago")
         assert result is not None
-        expected = datetime.now() - timedelta(hours=5)
+        expected = datetime.now(tz=timezone.utc) - timedelta(hours=5)
         assert abs((result - expected).total_seconds()) < 5
 
     def test_week_ago(self):
         result = _parse_relative_time("1 week ago")
         assert result is not None
-        expected = datetime.now() - timedelta(weeks=1)
+        expected = datetime.now(tz=timezone.utc) - timedelta(weeks=1)
         assert abs((result - expected).total_seconds()) < 5
 
     def test_invalid_string(self):
