@@ -145,6 +145,14 @@ class LinkedInJobScraper:
                 self._seen_job_ids.add(job_data["job_id"])
                 all_jobs.append(job_data)
 
+            # Warn if cards were found but none could be parsed (possible selector breakage)
+            parsed_this_page = len(all_jobs) - jobs_before
+            if card_count > 0 and parsed_this_page == 0 and len(self._seen_job_ids) == 0:
+                logger.warning(
+                    "Page %d had %d cards but none were parsed — CSS selectors may be outdated",
+                    page_num, card_count,
+                )
+
             # Track stale pages (cards found but no new jobs added)
             if len(all_jobs) == jobs_before:
                 stale_pages += 1

@@ -20,7 +20,7 @@ Interface Methods:
 import json
 import logging
 from abc import ABC, abstractmethod
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -346,7 +346,7 @@ class InMemoryJobRepository(JobRepository):
             raise ValueError(f"Invalid update fields: {invalid_fields}")
 
         # Auto-set updated_at
-        updates["updated_at"] = datetime.now()
+        updates["updated_at"] = datetime.now(tz=timezone.utc)
         self._jobs[job_id] = self._jobs[job_id].model_copy(update=updates)
 
     async def delete(self, job_id: str) -> bool:
@@ -480,7 +480,7 @@ class InMemoryJobRepository(JobRepository):
         if not statuses:
             raise ValueError("statuses list cannot be empty")
 
-        cutoff_date = datetime.now() - timedelta(days=older_than_days)
+        cutoff_date = datetime.now(tz=timezone.utc) - timedelta(days=older_than_days)
         to_delete = [
             job_id
             for job_id, job in self._jobs.items()
@@ -598,11 +598,13 @@ class SQLiteJobRepository(JobRepository):
         return value
 
     def _normalize_datetime(self, dt) -> datetime | None:
-        """Convert timezone-aware datetime to naive (remove tzinfo)."""
+        """Ensure datetime is UTC-aware. Naive datetimes are assumed UTC."""
         if dt is None:
             return None
-        if hasattr(dt, 'replace') and dt.tzinfo is not None:
-            return dt.replace(tzinfo=None)
+        if isinstance(dt, str):
+            dt = datetime.fromisoformat(dt)
+        if hasattr(dt, 'replace') and dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
         return dt
 
     def _row_to_job_record(self, row: dict) -> JobRecord:
@@ -622,8 +624,8 @@ class SQLiteJobRepository(JobRepository):
             user_feedback=row.get("user_feedback"),
             retry_count=row.get("retry_count", 0),
             error_message=row.get("error_message"),
-            created_at=self._normalize_datetime(row.get("created_at")) or datetime.now(),
-            updated_at=self._normalize_datetime(row.get("updated_at")) or datetime.now(),
+            created_at=self._normalize_datetime(row.get("created_at")) or datetime.now(tz=timezone.utc),
+            updated_at=self._normalize_datetime(row.get("updated_at")) or datetime.now(tz=timezone.utc),
             applied_at=self._normalize_datetime(row.get("applied_at")),
         )
 
@@ -701,7 +703,7 @@ class SQLiteJobRepository(JobRepository):
             raise ValueError(f"Invalid update fields: {invalid_fields}")
 
         # Auto-set updated_at
-        updates["updated_at"] = datetime.now()
+        updates["updated_at"] = datetime.now(tz=timezone.utc)
 
         # Build update query
         update_query = Job.update(updates).where(Job.job_id == job_id)
@@ -884,7 +886,7 @@ class SQLiteJobRepository(JobRepository):
         if not statuses:
             raise ValueError("statuses list cannot be empty")
 
-        cutoff_date = datetime.now() - timedelta(days=older_than_days)
+        cutoff_date = datetime.now(tz=timezone.utc) - timedelta(days=older_than_days)
 
         # Count jobs to delete
         to_delete = (

@@ -7,7 +7,7 @@ This module contains models for:
 - Status responses for API endpoints
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -141,8 +141,8 @@ class JobRecord(BaseModel):
     error_message: str | None = None
 
     # Timestamps
-    created_at: datetime = Field(default_factory=datetime.now)
-    updated_at: datetime = Field(default_factory=datetime.now)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
     applied_at: datetime | None = None
 
 

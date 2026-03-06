@@ -8,7 +8,7 @@ Provides two sets of endpoints:
 import asyncio
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated
 
@@ -157,7 +157,7 @@ def _start_queue_consumer(queue) -> asyncio.Task:
         unified_threads[job_id] = {
             "thread_id": thread_id,
             "workflow_type": "preparation",
-            "created_at": datetime.now(),
+            "created_at": datetime.now(tz=timezone.utc),
         }
 
     task = asyncio.create_task(
@@ -298,7 +298,7 @@ async def generate_cv(
 
         # Store thread mapping
         workflow_threads[job_id] = thread_id
-        workflow_created_at[job_id] = datetime.now()
+        workflow_created_at[job_id] = datetime.now(tz=timezone.utc)
 
         # Load master CV
         master_cv = load_master_cv()
@@ -374,8 +374,8 @@ async def get_cv_status(job_id: str) -> CVGenerationStatus:
         return CVGenerationStatus(
             job_id=job_id,
             status=state_values.get("current_step", "queued"),
-            created_at=workflow_created_at.get(job_id, datetime.now()),
-            completed_at=datetime.now()
+            created_at=workflow_created_at.get(job_id, datetime.now(tz=timezone.utc)),
+            completed_at=datetime.now(tz=timezone.utc)
             if state_values.get("current_step") in ["completed", "failed"]
             else None,
             error_message=state_values.get("error_message"),
@@ -543,7 +543,7 @@ async def submit_job(
         unified_threads[job_id] = {
             "thread_id": thread_id,
             "workflow_type": "preparation",
-            "created_at": datetime.now(),
+            "created_at": datetime.now(tz=timezone.utc),
         }
 
         # Run workflow in background
@@ -607,7 +607,7 @@ async def get_job_status(job_id: str) -> JobStatusResponse:
                 retry_count=state_values.get("retry_count", 0),
                 error_message=state_values.get("error_message"),
                 created_at=thread_info["created_at"],
-                updated_at=datetime.now(),
+                updated_at=datetime.now(tz=timezone.utc),
             )
 
         # Fallback to legacy MVP threads (now also uses preparation_workflow)
@@ -627,8 +627,8 @@ async def get_job_status(job_id: str) -> JobStatusResponse:
                 pdf_path=state_values.get("tailored_cv_pdf_path"),
                 retry_count=state_values.get("retry_count", 0),
                 error_message=state_values.get("error_message"),
-                created_at=workflow_created_at.get(job_id, datetime.now()),
-                updated_at=datetime.now(),
+                created_at=workflow_created_at.get(job_id, datetime.now(tz=timezone.utc)),
+                updated_at=datetime.now(tz=timezone.utc),
             )
 
         raise HTTPException(404, f"Job {job_id} not found")
@@ -889,7 +889,7 @@ async def submit_hitl_decision(
             unified_threads[job_id] = {
                 "thread_id": retry_thread_id,
                 "workflow_type": "retry",
-                "created_at": datetime.now(),
+                "created_at": datetime.now(tz=timezone.utc),
             }
 
             # Run retry workflow in background
@@ -1046,7 +1046,7 @@ async def cleanup_jobs(
     older_than_days: Annotated[int, Query(ge=1, description="Delete jobs older than this many days")] = 90,
     statuses: Annotated[
         list[str], Query(description="Only delete jobs with these statuses")
-    ] = ("declined", "failed"),
+    ] = None,
 ) -> dict:
     """Delete old jobs to prevent database bloat.
 
@@ -1062,6 +1062,8 @@ async def cleanup_jobs(
     """
     deletable_statuses = {"declined", "failed", "completed"}
     try:
+        if statuses is None:
+            statuses = ["declined", "failed"]
         if not statuses:
             raise HTTPException(400, "At least one status must be provided")
 
