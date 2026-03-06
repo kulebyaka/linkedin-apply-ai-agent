@@ -76,8 +76,8 @@ Implement a LinkedIn Job Source Adapter that scrapes job listings from LinkedIn 
 - Modify: `pyproject.toml`
 - Create: `tests/test_browser_automation.py`
 
-- [ ] Add `playwright-stealth` to `pyproject.toml` dependencies
-- [ ] Rewrite `LinkedInAutomation` in `src/services/browser_automation.py`:
+- [x] Add `playwright-stealth` to `pyproject.toml` dependencies
+- [x] Rewrite `LinkedInAutomation` in `src/services/browser_automation.py`:
   - `__init__(self, settings)` — accept Settings object, store credentials and config
   - `async initialize(self) -> None` — launch Playwright Chromium with stealth: apply `playwright-stealth` patches, set realistic viewport (randomized 1280-1920 width), set user-agent, disable webdriver flag
   - `async _load_cookies(self) -> bool` — load cookies from `linkedin_session_cookie_path` JSON file, inject into browser context, return True if cookies loaded and session is valid
@@ -88,8 +88,8 @@ Implement a LinkedIn Job Source Adapter that scrapes job listings from LinkedIn 
   - `async _random_delay(self, min_s: float = None, max_s: float = None) -> None` — sleep for random duration between min/max (defaults from settings)
   - `async _human_scroll(self, page) -> None` — scroll page with random increments and pauses to simulate human behavior
   - `async close(self) -> None` — save cookies before closing, then close browser
-- [ ] Write tests with mocked Playwright: test cookie load/save, test `ensure_authenticated` tries cookies first then falls back to login, test random delay ranges
-- [ ] Run project test suite - must pass before task 3
+- [x] Write tests with mocked Playwright: test cookie load/save, test `ensure_authenticated` tries cookies first then falls back to login, test random delay ranges
+- [x] Run project test suite - must pass before task 3
 
 ### Task 3: LinkedIn job scraper (search results parser)
 
