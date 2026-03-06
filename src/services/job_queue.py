@@ -148,8 +148,7 @@ async def process_queue(
                     logger.info("Skipping already-processed job %s (status: %s)", job_id, existing.status)
                     continue
             except Exception:
-                logger.warning("Dedup check failed for job %s, skipping to avoid duplicates", job_id)
-                continue
+                logger.warning("Dedup check failed for job %s, proceeding with processing", job_id)
 
         try:
             master_cv = master_cv_loader()
