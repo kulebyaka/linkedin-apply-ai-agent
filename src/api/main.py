@@ -10,6 +10,7 @@ import time
 import uuid
 from datetime import datetime
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -254,7 +255,7 @@ async def generate_cv(
 
     except Exception as e:
         logger.error(f"Failed to submit job: {e}", exc_info=True)
-        raise HTTPException(500, "Failed to submit job")
+        raise HTTPException(500, "Failed to submit job") from None
 
 
 @app.get("/api/cv/status/{job_id}", response_model=CVGenerationStatus)
@@ -296,7 +297,7 @@ async def get_cv_status(job_id: str) -> CVGenerationStatus:
         raise
     except Exception as e:
         logger.error(f"Failed to get status for job {job_id}: {e}", exc_info=True)
-        raise HTTPException(500, "Failed to get job status")
+        raise HTTPException(500, "Failed to get job status") from None
 
 
 @app.get("/api/cv/download/{job_id}")
@@ -342,7 +343,7 @@ async def download_cv(job_id: str):
         raise
     except Exception as e:
         logger.error(f"Failed to download CV for job {job_id}: {e}", exc_info=True)
-        raise HTTPException(500, "Failed to download CV")
+        raise HTTPException(500, "Failed to download CV") from None
 
 
 # =============================================================================
@@ -476,7 +477,7 @@ async def submit_job(
         raise
     except Exception as e:
         logger.error(f"Failed to submit job: {e}", exc_info=True)
-        raise HTTPException(500, "Failed to submit job")
+        raise HTTPException(500, "Failed to submit job") from None
 
 
 @app.get("/api/jobs/{job_id}/status", response_model=JobStatusResponse)
@@ -547,7 +548,7 @@ async def get_job_status(job_id: str) -> JobStatusResponse:
         raise
     except Exception as e:
         logger.error(f"Failed to get status for job {job_id}: {e}", exc_info=True)
-        raise HTTPException(500, "Failed to get job status")
+        raise HTTPException(500, "Failed to get job status") from None
 
 
 @app.get("/api/jobs/{job_id}/pdf")
@@ -593,7 +594,7 @@ async def download_job_pdf(job_id: str):
         raise
     except Exception as e:
         logger.error(f"Failed to download PDF for job {job_id}: {e}", exc_info=True)
-        raise HTTPException(500, "Failed to download PDF")
+        raise HTTPException(500, "Failed to download PDF") from None
 
 
 @app.get("/api/jobs/{job_id}/html", response_class=HTMLResponse)
@@ -641,7 +642,7 @@ async def get_job_cv_html(job_id: str) -> HTMLResponse:
         raise
     except Exception as e:
         logger.error(f"Failed to get CV HTML for job {job_id}: {e}", exc_info=True)
-        raise HTTPException(500, "Failed to get CV HTML")
+        raise HTTPException(500, "Failed to get CV HTML") from None
 
 
 # =============================================================================
@@ -669,6 +670,7 @@ async def get_hitl_pending() -> list[PendingApproval]:
                 pdf_path=job.pdf_path,
                 retry_count=job.retry_count,
                 created_at=job.created_at,
+                source=job.source,
             )
             for job in pending_jobs
         ]
@@ -698,6 +700,7 @@ async def get_hitl_pending() -> list[PendingApproval]:
                             pdf_path=state_values.get("tailored_cv_pdf_path"),
                             retry_count=state_values.get("retry_count", 0),
                             created_at=thread_info["created_at"],
+                            source=state_values.get("source", "manual"),
                         )
                     )
             except Exception as e:
@@ -707,7 +710,7 @@ async def get_hitl_pending() -> list[PendingApproval]:
 
     except Exception as e:
         logger.error(f"Failed to get pending jobs: {e}", exc_info=True)
-        raise HTTPException(500, "Failed to get pending jobs")
+        raise HTTPException(500, "Failed to get pending jobs") from None
 
 
 @app.post("/api/hitl/{job_id}/decide", response_model=HITLDecisionResponse)
@@ -821,7 +824,7 @@ async def submit_hitl_decision(
         raise
     except Exception as e:
         logger.error(f"Failed to process HITL decision for job {job_id}: {e}", exc_info=True)
-        raise HTTPException(500, "Failed to process decision")
+        raise HTTPException(500, "Failed to process decision") from None
 
 
 @app.get("/api/hitl/history", response_model=list[ApplicationHistoryItem])
@@ -855,7 +858,7 @@ async def get_application_history(
 
     except Exception as e:
         logger.error(f"Failed to get application history: {e}", exc_info=True)
-        raise HTTPException(500, "Failed to get history")
+        raise HTTPException(500, "Failed to get history") from None
 
 
 # =============================================================================
@@ -896,7 +899,7 @@ async def trigger_linkedin_search(
                     )
             except Exception:
                 logger.exception("Failed to initialize LinkedIn search components")
-                raise HTTPException(500, "Failed to initialize LinkedIn search components")
+                raise HTTPException(500, "Failed to initialize LinkedIn search components") from None
 
     async def _run_search():
         try:
@@ -944,10 +947,10 @@ async def get_linkedin_search_status():
 
 @app.delete("/api/jobs/cleanup")
 async def cleanup_jobs(
-    older_than_days: int = Query(90, ge=1, description="Delete jobs older than this many days"),
-    statuses: list[str] = Query(
-        ["declined", "failed"], description="Only delete jobs with these statuses"
-    ),
+    older_than_days: Annotated[int, Query(ge=1, description="Delete jobs older than this many days")] = 90,
+    statuses: Annotated[
+        list[str], Query(description="Only delete jobs with these statuses")
+    ] = ("declined", "failed"),
 ) -> dict:
     """Delete old jobs to prevent database bloat.
 
@@ -961,28 +964,28 @@ async def cleanup_jobs(
     Returns:
         {"deleted": int, "message": str}
     """
-    DELETABLE_STATUSES = {"declined", "failed", "completed"}
+    deletable_statuses = {"declined", "failed", "completed"}
     try:
         if not statuses:
             raise HTTPException(400, "At least one status must be provided")
 
-        invalid = set(statuses) - DELETABLE_STATUSES
+        invalid = set(statuses) - deletable_statuses
         if invalid:
             raise HTTPException(
                 400,
                 f"Cannot delete jobs with status: {', '.join(sorted(invalid))}. "
-                f"Allowed: {', '.join(sorted(DELETABLE_STATUSES))}",
+                f"Allowed: {', '.join(sorted(deletable_statuses))}",
             )
 
         deleted = await job_repository.cleanup(older_than_days, statuses)
         return {"deleted": deleted, "message": f"Deleted {deleted} jobs"}
 
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, str(e)) from None
 
     except Exception as e:
         logger.error(f"Failed to cleanup jobs: {e}", exc_info=True)
-        raise HTTPException(500, "Failed to cleanup jobs")
+        raise HTTPException(500, "Failed to cleanup jobs") from None
 
 
 # =============================================================================

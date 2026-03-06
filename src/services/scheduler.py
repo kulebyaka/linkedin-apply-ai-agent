@@ -4,6 +4,7 @@ Wraps APScheduler's AsyncIOScheduler to run LinkedIn scraping at configurable
 intervals, feeding results into the async job queue for workflow processing.
 """
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 
@@ -30,6 +31,7 @@ class LinkedInSearchScheduler:
         self.scraper = scraper
         self.queue = queue
         self._scheduler = AsyncIOScheduler()
+        self._search_lock = asyncio.Lock()
         self._last_run_time: datetime | None = None
         self._last_run_jobs: int = 0
         self._running = False
@@ -40,8 +42,20 @@ class LinkedInSearchScheduler:
         Returns the number of jobs enqueued. Never raises — all exceptions
         are caught and logged so the scheduler keeps running.
         """
+        if self._search_lock.locked():
+            logger.warning("Search already in progress, skipping")
+            return 0
+
+        async with self._search_lock:
+            return await self._do_search()
+
+    async def _do_search(self) -> int:
+        """Internal search implementation."""
         try:
             logger.info("Starting LinkedIn search cycle")
+
+            # Reset dedup state so returning jobs from previous cycles are not skipped
+            self.scraper.reset_seen()
 
             # Ensure authenticated
             await self.scraper.browser.ensure_authenticated()
