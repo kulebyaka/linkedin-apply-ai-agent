@@ -1,0 +1,621 @@
+"""Tests for LinkedInJobScraper with mocked Playwright page elements."""
+
+from datetime import datetime, timedelta
+from unittest.mock import AsyncMock, MagicMock, PropertyMock
+
+import pytest
+
+from src.services.linkedin_scraper import (
+    LinkedInJobScraper,
+    _extract_job_id_from_url,
+    _parse_relative_time,
+)
+
+pytestmark = pytest.mark.asyncio
+
+
+# ---------------------------------------------------------------------------
+# Helper utilities
+# ---------------------------------------------------------------------------
+
+def _make_mock_settings():
+    s = MagicMock()
+    s.linkedin_min_delay = 0.0
+    s.linkedin_max_delay = 0.0
+    s.linkedin_page_delay_min = 0.0
+    s.linkedin_page_delay_max = 0.0
+    s.linkedin_search_max_jobs = 50
+    return s
+
+
+def _make_mock_browser(page=None):
+    browser = MagicMock()
+    browser.page = page or AsyncMock()
+    browser._random_delay = AsyncMock()
+    browser._human_scroll = AsyncMock()
+    browser.page_delay_min = 0.0
+    browser.page_delay_max = 0.0
+    return browser
+
+
+def _make_locator_mock(count=0, items=None):
+    """Create a mock that behaves like a Playwright Locator.
+
+    count: number of matched elements
+    items: list of dicts, each with keys text_content, get_attribute, inner_count.
+    """
+    loc = MagicMock()
+    loc.count = AsyncMock(return_value=count)
+
+    if items:
+        def nth_factory(index):
+            item = items[index] if index < len(items) else {}
+            m = MagicMock()
+            m.text_content = AsyncMock(return_value=item.get("text_content", ""))
+            m.get_attribute = AsyncMock(return_value=item.get("get_attribute", ""))
+            m.count = AsyncMock(return_value=item.get("inner_count", 0))
+            # For nested locator calls
+            inner = MagicMock()
+            inner.count = AsyncMock(return_value=item.get("inner_count", 0))
+            inner.first = m
+            m.locator = MagicMock(return_value=inner)
+            return m
+
+        loc.nth = MagicMock(side_effect=nth_factory)
+    else:
+        loc.nth = MagicMock(return_value=MagicMock(
+            text_content=AsyncMock(return_value=""),
+            get_attribute=AsyncMock(return_value=""),
+        ))
+
+    if items and len(items) > 0:
+        first_item = items[0]
+        loc.first = MagicMock()
+        loc.first.text_content = AsyncMock(return_value=first_item.get("text_content", ""))
+        loc.first.get_attribute = AsyncMock(return_value=first_item.get("get_attribute", ""))
+    else:
+        loc.first = MagicMock()
+        loc.first.text_content = AsyncMock(return_value="")
+        loc.first.get_attribute = AsyncMock(return_value="")
+
+    return loc
+
+
+# ---------------------------------------------------------------------------
+# Unit tests for helper functions
+# ---------------------------------------------------------------------------
+
+class TestExtractJobIdFromUrl:
+    def test_view_url(self):
+        assert _extract_job_id_from_url("/jobs/view/1234567890/") == "1234567890"
+
+    def test_current_job_id_param(self):
+        assert _extract_job_id_from_url("?currentJobId=9876543210") == "9876543210"
+
+    def test_fallback_long_number(self):
+        assert _extract_job_id_from_url("/jobs/collections/12345678") == "12345678"
+
+    def test_no_match(self):
+        assert _extract_job_id_from_url("/about") is None
+
+    def test_full_url(self):
+        url = "https://www.linkedin.com/jobs/view/3987654321/?trackingId=abc"
+        assert _extract_job_id_from_url(url) == "3987654321"
+
+
+class TestParseRelativeTime:
+    def test_days_ago(self):
+        result = _parse_relative_time("2 days ago")
+        assert result is not None
+        # Should be approximately 2 days ago
+        expected = datetime.now() - timedelta(days=2)
+        assert abs((result - expected).total_seconds()) < 5
+
+    def test_hours_ago(self):
+        result = _parse_relative_time("5 hours ago")
+        assert result is not None
+        expected = datetime.now() - timedelta(hours=5)
+        assert abs((result - expected).total_seconds()) < 5
+
+    def test_week_ago(self):
+        result = _parse_relative_time("1 week ago")
+        assert result is not None
+        expected = datetime.now() - timedelta(weeks=1)
+        assert abs((result - expected).total_seconds()) < 5
+
+    def test_invalid_string(self):
+        assert _parse_relative_time("posted recently") is None
+
+    def test_empty_string(self):
+        assert _parse_relative_time("") is None
+
+
+# ---------------------------------------------------------------------------
+# _parse_job_card tests
+# ---------------------------------------------------------------------------
+
+class TestParseJobCard:
+    @pytest.fixture
+    def scraper(self):
+        return LinkedInJobScraper(_make_mock_browser(), _make_mock_settings())
+
+    async def test_parses_complete_card(self, scraper):
+        """Test parsing a job card with all fields present."""
+        card = MagicMock()
+
+        # Title locator
+        title_loc = MagicMock()
+        title_loc.first = MagicMock()
+        title_loc.first.text_content = AsyncMock(return_value="  Senior Python Developer  ")
+        title_loc.first.get_attribute = AsyncMock(return_value="/jobs/view/1234567890/?refId=abc")
+
+        # Company locator
+        company_loc = MagicMock()
+        company_loc.first = MagicMock()
+        company_loc.first.text_content = AsyncMock(return_value="  Acme Corp  ")
+
+        # Location locator
+        location_loc = MagicMock()
+        location_loc.first = MagicMock()
+        location_loc.first.text_content = AsyncMock(return_value="  Remote  ")
+
+        # Easy apply locator
+        easy_apply_loc = MagicMock()
+        easy_apply_loc.count = AsyncMock(return_value=1)
+
+        # Posted date locator
+        posted_loc = MagicMock()
+        posted_loc.first = MagicMock()
+        posted_loc.first.text_content = AsyncMock(return_value="3 days ago")
+
+        def locator_side_effect(selector):
+            from src.services.linkedin_scraper import SELECTORS
+            mapping = {
+                SELECTORS["job_card_title"]: title_loc,
+                SELECTORS["job_card_company"]: company_loc,
+                SELECTORS["job_card_location"]: location_loc,
+                SELECTORS["job_card_easy_apply"]: easy_apply_loc,
+                SELECTORS["job_card_posted"]: posted_loc,
+            }
+            return mapping.get(selector, MagicMock(first=MagicMock(
+                text_content=AsyncMock(return_value=""),
+                get_attribute=AsyncMock(return_value=""),
+            ), count=AsyncMock(return_value=0)))
+
+        card.locator = MagicMock(side_effect=locator_side_effect)
+
+        result = await scraper._parse_job_card(card)
+
+        assert result is not None
+        assert result["job_id"] == "1234567890"
+        assert result["title"] == "Senior Python Developer"
+        assert result["company"] == "Acme Corp"
+        assert result["location"] == "Remote"
+        assert result["easy_apply"] is True
+        assert result["url"] == "https://www.linkedin.com/jobs/view/1234567890/"
+        assert result["posted_date"] is not None
+
+    async def test_returns_none_on_error(self, scraper):
+        """Card that raises an exception returns None."""
+        card = MagicMock()
+        card.locator = MagicMock(side_effect=Exception("Element not found"))
+
+        result = await scraper._parse_job_card(card)
+        assert result is None
+
+    async def test_no_easy_apply_badge(self, scraper):
+        """Card without Easy Apply badge sets easy_apply=False."""
+        card = MagicMock()
+
+        title_loc = MagicMock()
+        title_loc.first = MagicMock()
+        title_loc.first.text_content = AsyncMock(return_value="Developer")
+        title_loc.first.get_attribute = AsyncMock(return_value="/jobs/view/99999999/")
+
+        default_loc = MagicMock()
+        default_loc.first = MagicMock()
+        default_loc.first.text_content = AsyncMock(return_value="")
+
+        easy_apply_loc = MagicMock()
+        easy_apply_loc.count = AsyncMock(return_value=0)
+
+        posted_loc = MagicMock()
+        posted_loc.first = MagicMock()
+        posted_loc.first.text_content = AsyncMock(return_value="")
+
+        def locator_side_effect(selector):
+            from src.services.linkedin_scraper import SELECTORS
+            if selector == SELECTORS["job_card_title"]:
+                return title_loc
+            if selector == SELECTORS["job_card_easy_apply"]:
+                return easy_apply_loc
+            if selector == SELECTORS["job_card_posted"]:
+                return posted_loc
+            return default_loc
+
+        card.locator = MagicMock(side_effect=locator_side_effect)
+
+        result = await scraper._parse_job_card(card)
+        assert result is not None
+        assert result["easy_apply"] is False
+
+
+# ---------------------------------------------------------------------------
+# _parse_job_detail_page tests
+# ---------------------------------------------------------------------------
+
+class TestParseJobDetailPage:
+    @pytest.fixture
+    def scraper(self):
+        return LinkedInJobScraper(_make_mock_browser(), _make_mock_settings())
+
+    async def test_parses_description(self, scraper):
+        page = MagicMock()
+
+        desc_loc = MagicMock()
+        desc_loc.count = AsyncMock(return_value=1)
+        desc_loc.first = MagicMock()
+        desc_loc.first.text_content = AsyncMock(return_value="  We are looking for a Python developer.  ")
+
+        criteria_loc = MagicMock()
+        criteria_loc.count = AsyncMock(return_value=0)
+
+        salary_loc = MagicMock()
+        salary_loc.count = AsyncMock(return_value=0)
+
+        def locator_side_effect(selector):
+            from src.services.linkedin_scraper import SELECTORS
+            if selector == SELECTORS["detail_description"]:
+                return desc_loc
+            if selector == SELECTORS["detail_criteria"]:
+                return criteria_loc
+            if selector == SELECTORS["detail_salary"]:
+                return salary_loc
+            return MagicMock(count=AsyncMock(return_value=0))
+
+        page.locator = MagicMock(side_effect=locator_side_effect)
+
+        result = await scraper._parse_job_detail_page(page)
+        assert result["description"] == "We are looking for a Python developer."
+
+    async def test_parses_criteria(self, scraper):
+        page = MagicMock()
+
+        desc_loc = MagicMock()
+        desc_loc.count = AsyncMock(return_value=0)
+        desc_loc.first = MagicMock()
+        desc_loc.first.text_content = AsyncMock(return_value="")
+
+        # Two criteria items
+        criteria_item_1 = MagicMock()
+        criteria_item_1.text_content = AsyncMock(return_value="Mid-Senior level")
+        criteria_item_2 = MagicMock()
+        criteria_item_2.text_content = AsyncMock(return_value="Full-time")
+
+        criteria_loc = MagicMock()
+        criteria_loc.count = AsyncMock(return_value=2)
+        criteria_loc.nth = MagicMock(side_effect=lambda i: [criteria_item_1, criteria_item_2][i])
+
+        salary_loc = MagicMock()
+        salary_loc.count = AsyncMock(return_value=0)
+
+        def locator_side_effect(selector):
+            from src.services.linkedin_scraper import SELECTORS
+            if selector == SELECTORS["detail_description"]:
+                return desc_loc
+            if selector == SELECTORS["detail_criteria"]:
+                return criteria_loc
+            if selector == SELECTORS["detail_salary"]:
+                return salary_loc
+            return MagicMock(count=AsyncMock(return_value=0))
+
+        page.locator = MagicMock(side_effect=locator_side_effect)
+
+        result = await scraper._parse_job_detail_page(page)
+        assert "mid-senior" in result["experience_level"]
+        assert "full-time" in result["job_type"]
+
+    async def test_parses_salary(self, scraper):
+        page = MagicMock()
+
+        desc_loc = MagicMock()
+        desc_loc.count = AsyncMock(return_value=0)
+        desc_loc.first = MagicMock()
+        desc_loc.first.text_content = AsyncMock(return_value="")
+
+        criteria_loc = MagicMock()
+        criteria_loc.count = AsyncMock(return_value=0)
+
+        salary_loc = MagicMock()
+        salary_loc.count = AsyncMock(return_value=1)
+        salary_loc.first = MagicMock()
+        salary_loc.first.text_content = AsyncMock(return_value="$120,000 - $160,000")
+
+        def locator_side_effect(selector):
+            from src.services.linkedin_scraper import SELECTORS
+            if selector == SELECTORS["detail_description"]:
+                return desc_loc
+            if selector == SELECTORS["detail_criteria"]:
+                return criteria_loc
+            if selector == SELECTORS["detail_salary"]:
+                return salary_loc
+            return MagicMock(count=AsyncMock(return_value=0))
+
+        page.locator = MagicMock(side_effect=locator_side_effect)
+
+        result = await scraper._parse_job_detail_page(page)
+        assert result["salary_range"] == "$120,000 - $160,000"
+
+    async def test_handles_missing_elements(self, scraper):
+        page = MagicMock()
+
+        empty_loc = MagicMock()
+        empty_loc.count = AsyncMock(return_value=0)
+        empty_loc.first = MagicMock()
+        empty_loc.first.text_content = AsyncMock(return_value="")
+
+        page.locator = MagicMock(return_value=empty_loc)
+
+        result = await scraper._parse_job_detail_page(page)
+        assert result["description"] == ""
+        assert result["salary_range"] is None
+        assert result["job_type"] is None
+        assert result["experience_level"] is None
+
+
+# ---------------------------------------------------------------------------
+# Dedup logic tests
+# ---------------------------------------------------------------------------
+
+class TestDedupLogic:
+    @pytest.fixture
+    def scraper(self):
+        return LinkedInJobScraper(_make_mock_browser(), _make_mock_settings())
+
+    def test_seen_ids_starts_empty(self, scraper):
+        assert len(scraper._seen_job_ids) == 0
+
+    def test_reset_seen_clears(self, scraper):
+        scraper._seen_job_ids.add("123")
+        scraper._seen_job_ids.add("456")
+        scraper.reset_seen()
+        assert len(scraper._seen_job_ids) == 0
+
+    async def test_dedup_skips_already_seen(self, scraper):
+        """scrape_search_results should skip jobs with IDs already in _seen_job_ids."""
+        scraper._seen_job_ids.add("1234567890")
+
+        # Build a page mock with one card that has the duplicate job ID
+        card = MagicMock()
+        title_loc = MagicMock()
+        title_loc.first = MagicMock()
+        title_loc.first.text_content = AsyncMock(return_value="Developer")
+        title_loc.first.get_attribute = AsyncMock(return_value="/jobs/view/1234567890/")
+
+        default_loc = MagicMock()
+        default_loc.first = MagicMock()
+        default_loc.first.text_content = AsyncMock(return_value="Company")
+
+        easy_loc = MagicMock()
+        easy_loc.count = AsyncMock(return_value=0)
+
+        posted_loc = MagicMock()
+        posted_loc.first = MagicMock()
+        posted_loc.first.text_content = AsyncMock(return_value="")
+
+        def card_locator(selector):
+            from src.services.linkedin_scraper import SELECTORS
+            if selector == SELECTORS["job_card_title"]:
+                return title_loc
+            if selector == SELECTORS["job_card_easy_apply"]:
+                return easy_loc
+            if selector == SELECTORS["job_card_posted"]:
+                return posted_loc
+            return default_loc
+
+        card.locator = MagicMock(side_effect=card_locator)
+
+        # Page mock
+        no_results_loc = MagicMock()
+        no_results_loc.count = AsyncMock(return_value=0)
+
+        cards_loc = MagicMock()
+        cards_loc.count = AsyncMock(return_value=1)
+        cards_loc.nth = MagicMock(return_value=card)
+
+        page = AsyncMock()
+        page.goto = AsyncMock()
+
+        call_count = 0
+
+        def page_locator(selector):
+            nonlocal call_count
+            from src.services.linkedin_scraper import SELECTORS
+            if selector == SELECTORS["no_results"]:
+                return no_results_loc
+            if selector == SELECTORS["job_card"]:
+                # Return cards only on first call, then empty to stop pagination
+                call_count += 1
+                if call_count <= 1:
+                    return cards_loc
+                empty = MagicMock()
+                empty.count = AsyncMock(return_value=0)
+                return empty
+            return MagicMock(count=AsyncMock(return_value=0))
+
+        page.locator = MagicMock(side_effect=page_locator)
+        scraper.browser.page = page
+
+        from src.services.linkedin_search import LinkedInSearchParams
+        params = LinkedInSearchParams(keywords="python", max_jobs=10)
+        results = await scraper.scrape_search_results(params)
+
+        # The duplicate should have been skipped
+        assert len(results) == 0
+
+
+# ---------------------------------------------------------------------------
+# Max jobs limit tests
+# ---------------------------------------------------------------------------
+
+class TestMaxJobsLimit:
+    async def test_stops_at_max_jobs(self):
+        """Pagination should stop once max_jobs is reached."""
+        settings = _make_mock_settings()
+        browser = _make_mock_browser()
+
+        scraper = LinkedInJobScraper(browser, settings)
+
+        # Create 3 distinct job cards
+        def make_card(job_id):
+            card = MagicMock()
+            title_loc = MagicMock()
+            title_loc.first = MagicMock()
+            title_loc.first.text_content = AsyncMock(return_value=f"Job {job_id}")
+            title_loc.first.get_attribute = AsyncMock(return_value=f"/jobs/view/{job_id}/")
+
+            default_loc = MagicMock()
+            default_loc.first = MagicMock()
+            default_loc.first.text_content = AsyncMock(return_value="Company")
+
+            easy_loc = MagicMock()
+            easy_loc.count = AsyncMock(return_value=0)
+
+            posted_loc = MagicMock()
+            posted_loc.first = MagicMock()
+            posted_loc.first.text_content = AsyncMock(return_value="")
+
+            def card_locator(selector):
+                from src.services.linkedin_scraper import SELECTORS
+                if selector == SELECTORS["job_card_title"]:
+                    return title_loc
+                if selector == SELECTORS["job_card_easy_apply"]:
+                    return easy_loc
+                if selector == SELECTORS["job_card_posted"]:
+                    return posted_loc
+                return default_loc
+
+            card.locator = MagicMock(side_effect=card_locator)
+            return card
+
+        cards = [make_card(f"10000000{i}") for i in range(3)]
+
+        no_results_loc = MagicMock()
+        no_results_loc.count = AsyncMock(return_value=0)
+
+        cards_loc = MagicMock()
+        cards_loc.count = AsyncMock(return_value=3)
+        cards_loc.nth = MagicMock(side_effect=lambda i: cards[i])
+
+        page = AsyncMock()
+        page.goto = AsyncMock()
+
+        def page_locator(selector):
+            from src.services.linkedin_scraper import SELECTORS
+            if selector == SELECTORS["no_results"]:
+                return no_results_loc
+            if selector == SELECTORS["job_card"]:
+                return cards_loc
+            return MagicMock(count=AsyncMock(return_value=0))
+
+        page.locator = MagicMock(side_effect=page_locator)
+        browser.page = page
+
+        from src.services.linkedin_search import LinkedInSearchParams
+        params = LinkedInSearchParams(keywords="python", max_jobs=2)
+        results = await scraper.scrape_search_results(params)
+
+        # Should stop at 2 even though 3 cards available
+        assert len(results) == 2
+
+
+# ---------------------------------------------------------------------------
+# scrape_and_enrich tests
+# ---------------------------------------------------------------------------
+
+class TestScrapeAndEnrich:
+    async def test_enriches_jobs_with_details(self):
+        settings = _make_mock_settings()
+        browser = _make_mock_browser()
+        scraper = LinkedInJobScraper(browser, settings)
+
+        # Mock scrape_search_results to return pre-made jobs
+        scraper.scrape_search_results = AsyncMock(return_value=[
+            {"job_id": "111", "title": "Dev", "url": "https://www.linkedin.com/jobs/view/111/"},
+            {"job_id": "222", "title": "Eng", "url": "https://www.linkedin.com/jobs/view/222/"},
+        ])
+
+        # Mock scrape_job_details
+        scraper.scrape_job_details = AsyncMock(side_effect=[
+            {"description": "Detail for 111", "salary_range": "$100k"},
+            {"description": "Detail for 222", "salary_range": None},
+        ])
+
+        from src.services.linkedin_search import LinkedInSearchParams
+        params = LinkedInSearchParams(keywords="python")
+        results = await scraper.scrape_and_enrich(params)
+
+        assert len(results) == 2
+        assert results[0]["description"] == "Detail for 111"
+        assert results[0]["salary_range"] == "$100k"
+        assert results[1]["description"] == "Detail for 222"
+
+    async def test_handles_enrichment_failure(self):
+        settings = _make_mock_settings()
+        browser = _make_mock_browser()
+        scraper = LinkedInJobScraper(browser, settings)
+
+        scraper.scrape_search_results = AsyncMock(return_value=[
+            {"job_id": "333", "title": "Dev", "url": "https://www.linkedin.com/jobs/view/333/"},
+        ])
+        scraper.scrape_job_details = AsyncMock(side_effect=Exception("Page crashed"))
+
+        from src.services.linkedin_search import LinkedInSearchParams
+        params = LinkedInSearchParams(keywords="python")
+        results = await scraper.scrape_and_enrich(params)
+
+        # Should still include the job even if enrichment failed
+        assert len(results) == 1
+        assert results[0]["job_id"] == "333"
+
+    async def test_skips_enrichment_without_url(self):
+        settings = _make_mock_settings()
+        browser = _make_mock_browser()
+        scraper = LinkedInJobScraper(browser, settings)
+
+        scraper.scrape_search_results = AsyncMock(return_value=[
+            {"job_id": "444", "title": "Dev"},  # No url key
+        ])
+        scraper.scrape_job_details = AsyncMock()
+
+        from src.services.linkedin_search import LinkedInSearchParams
+        params = LinkedInSearchParams(keywords="python")
+        results = await scraper.scrape_and_enrich(params)
+
+        assert len(results) == 1
+        scraper.scrape_job_details.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# scrape_search_results no-results tests
+# ---------------------------------------------------------------------------
+
+class TestNoResults:
+    async def test_returns_empty_on_no_results(self):
+        settings = _make_mock_settings()
+        browser = _make_mock_browser()
+        scraper = LinkedInJobScraper(browser, settings)
+
+        no_results_loc = MagicMock()
+        no_results_loc.count = AsyncMock(return_value=1)  # No results banner present
+
+        page = AsyncMock()
+        page.goto = AsyncMock()
+        page.locator = MagicMock(return_value=no_results_loc)
+        browser.page = page
+
+        from src.services.linkedin_search import LinkedInSearchParams
+        params = LinkedInSearchParams(keywords="nonexistent")
+        results = await scraper.scrape_search_results(params)
+
+        assert results == []

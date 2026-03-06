@@ -97,7 +97,7 @@ Implement a LinkedIn Job Source Adapter that scrapes job listings from LinkedIn 
 - Create: `src/services/linkedin_scraper.py`
 - Create: `tests/test_linkedin_scraper.py`
 
-- [ ] Create `src/services/linkedin_scraper.py` with class `LinkedInJobScraper`:
+- [x] Create `src/services/linkedin_scraper.py` with class `LinkedInJobScraper`:
   - `__init__(self, browser: LinkedInAutomation, settings: Settings)` — store browser and settings references
   - `async scrape_search_results(self, search_params: LinkedInSearchParams) -> list[dict]` — main entry point:
     1. Build search URL via `LinkedInSearchURLBuilder`
@@ -111,9 +111,9 @@ Implement a LinkedIn Job Source Adapter that scrapes job listings from LinkedIn 
   - `async scrape_and_enrich(self, search_params: LinkedInSearchParams) -> list[dict]` — call `scrape_search_results`, then for each job call `scrape_job_details` to get full description. Returns list of enriched job dicts matching `JobPosting` field structure.
   - Internal: `_parse_job_card(self, card_element) -> dict` — extract data from a single job card DOM element
   - Internal: `_parse_job_detail_page(self, page) -> dict` — extract full details from job detail page
-- [ ] Add dedup logic: track seen job IDs within a session, skip already-scraped jobs
-- [ ] Write tests with mocked page HTML: test `_parse_job_card` with sample HTML fixture, test `_parse_job_detail_page` with sample fixture, test dedup logic, test max_jobs limit stops pagination
-- [ ] Run project test suite - must pass before task 4
+- [x] Add dedup logic: track seen job IDs within a session, skip already-scraped jobs
+- [x] Write tests with mocked page HTML: test `_parse_job_card` with sample HTML fixture, test `_parse_job_detail_page` with sample fixture, test dedup logic, test max_jobs limit stops pagination
+- [x] Run project test suite - must pass before task 4
 
 ### Task 4: Async job queue with workflow integration
 
