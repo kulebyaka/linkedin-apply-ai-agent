@@ -41,6 +41,9 @@ class LinkedInSearchScheduler:
 
         Returns the number of jobs enqueued. Never raises — all exceptions
         are caught and logged so the scheduler keeps running.
+
+        The locked() check and acquire are not separated by an await,
+        so no other coroutine can interleave in the single-threaded event loop.
         """
         if self._search_lock.locked():
             logger.warning("Search already in progress, skipping")

@@ -157,7 +157,7 @@ class LinkedInAutomation:
             logger.info("Login successful")
             await self._save_cookies()
         else:
-            logger.warning("Login may have failed — current URL: %s", current_url)
+            raise RuntimeError(f"LinkedIn login failed — current URL: {current_url}")
 
     async def ensure_authenticated(self) -> None:
         """Authenticate using cookies first, falling back to login."""

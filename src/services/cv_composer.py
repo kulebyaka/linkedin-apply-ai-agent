@@ -10,7 +10,6 @@ from typing import Any
 from src.config.settings import Settings
 from src.llm.provider import BaseLLMClient
 from src.models.cv import (
-    CV,
     ContactInfo,
     CVLLMOutput,
     Interests,

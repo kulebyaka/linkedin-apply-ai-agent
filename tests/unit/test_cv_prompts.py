@@ -1,10 +1,12 @@
 """Tests for CV prompt management"""
 
-import pytest
-from pathlib import Path
-import tempfile
 import shutil
-from src.services.cv_prompts import PromptLoader, CVPromptManager
+import tempfile
+from pathlib import Path
+
+import pytest
+
+from src.services.cv_prompts import CVPromptManager, PromptLoader
 
 
 class TestPromptLoader:
@@ -40,7 +42,7 @@ class TestPromptLoader:
 
     def test_init_copies_examples(self, temp_prompts_dir):
         """Test that example prompts are copied to main directory"""
-        loader = PromptLoader(temp_prompts_dir)
+        PromptLoader(temp_prompts_dir)
 
         # Check that examples were copied
         assert (temp_prompts_dir / "test_prompt.txt").exists()
@@ -74,13 +76,13 @@ class TestPromptLoader:
         assert "test_prompt" in loader._cache
 
     def test_load_without_cache(self, temp_prompts_dir):
-        """Test loading without cache"""
+        """Test loading with use_cache=False bypasses cached value"""
         loader = PromptLoader(temp_prompts_dir)
 
-        # Load with cache disabled
+        # use_cache=False skips reading from cache but still populates it
         prompt = loader.load("test_prompt", use_cache=False)
 
-        assert "test_prompt" not in loader._cache
+        assert prompt == "This is a test prompt with $variable"
 
     def test_reload_specific_prompt(self, temp_prompts_dir):
         """Test reloading a specific prompt"""

@@ -109,16 +109,48 @@ async def log_requests(request: Request, call_next):
     return response
 
 
+_consumer_restart_count = 0
+_MAX_CONSUMER_RESTARTS = 5
+_CONSUMER_BACKOFF_BASE = 2.0  # seconds
+_CONSUMER_STABLE_THRESHOLD = 60.0  # seconds: reset counter if consumer ran this long
+_consumer_restart_handle: asyncio.TimerHandle | None = None
+_shutting_down = False
+
+
 def _start_queue_consumer(queue) -> asyncio.Task:
-    """Create a queue consumer task with automatic restart on failure."""
+    """Create a queue consumer task with automatic restart on failure (with backoff)."""
+    started_at = time.monotonic()
+
     def _on_consumer_done(task: asyncio.Task) -> None:
-        global _queue_consumer_task
-        if task.cancelled():
+        global _queue_consumer_task, _consumer_restart_count, _consumer_restart_handle
+        if task.cancelled() or _shutting_down:
             return
         exc = task.exception()
         if exc is not None:
-            logger.error("Queue consumer crashed: %s — restarting", exc)
-            _queue_consumer_task = _start_queue_consumer(queue)
+            # If consumer ran long enough, treat as intermittent — reset counter
+            uptime = time.monotonic() - started_at
+            if uptime >= _CONSUMER_STABLE_THRESHOLD:
+                _consumer_restart_count = 0
+
+            _consumer_restart_count += 1
+            if _consumer_restart_count > _MAX_CONSUMER_RESTARTS:
+                logger.error(
+                    "Queue consumer crashed %d times, giving up: %s",
+                    _consumer_restart_count, exc,
+                )
+                return
+            delay = _CONSUMER_BACKOFF_BASE * (2 ** (_consumer_restart_count - 1))
+            logger.error(
+                "Queue consumer crashed (%d/%d): %s — restarting in %.1fs",
+                _consumer_restart_count, _MAX_CONSUMER_RESTARTS, exc, delay,
+            )
+            loop = asyncio.get_event_loop()
+            if _consumer_restart_handle is not None:
+                _consumer_restart_handle.cancel()
+            _consumer_restart_handle = loop.call_later(delay, _restart_consumer, queue)
+        else:
+            # Successful exit resets the counter
+            _consumer_restart_count = 0
 
     task = asyncio.create_task(
         process_queue(queue, job_repository=job_repository, delay_between_jobs=2.0)
@@ -127,10 +159,30 @@ def _start_queue_consumer(queue) -> asyncio.Task:
     return task
 
 
+def _restart_consumer(queue) -> None:
+    """Restart the queue consumer (called from call_later).
+
+    Guards against duplicate consumers by checking if one is already running.
+    """
+    global _queue_consumer_task, _consumer_restart_handle, _consumer_restart_count
+    _consumer_restart_handle = None
+    if _shutting_down:
+        return
+    if _queue_consumer_task is not None and not _queue_consumer_task.done():
+        logger.info("Consumer already running, skipping restart")
+        _consumer_restart_count = 0  # Another path started it; reset backoff
+        return
+    _queue_consumer_task = _start_queue_consumer(queue)
+
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize repository and optional LinkedIn scheduler on startup."""
     global _linkedin_scheduler, _linkedin_browser, _queue_consumer_task
+    global _shutting_down, _consumer_restart_count
+
+    _shutting_down = False
+    _consumer_restart_count = 0
 
     logger.info(f"Starting up with repository type: {settings.repo_type}")
     await job_repository.initialize()
@@ -163,6 +215,14 @@ async def startup_event():
 async def shutdown_event():
     """Close repository, scheduler, and browser on shutdown."""
     global _linkedin_scheduler, _linkedin_browser, _queue_consumer_task
+    global _shutting_down, _consumer_restart_handle
+
+    _shutting_down = True
+
+    # Cancel any pending delayed restart
+    if _consumer_restart_handle is not None:
+        _consumer_restart_handle.cancel()
+        _consumer_restart_handle = None
 
     if _linkedin_scheduler:
         _linkedin_scheduler.stop()
@@ -907,13 +967,21 @@ async def trigger_linkedin_search(
                 scraper = LinkedInJobScraper(_linkedin_browser, settings)
                 queue = get_job_queue()
                 _linkedin_scheduler = LinkedInSearchScheduler(settings, scraper, queue)
-
-                # Ensure a queue consumer is running to process scraped jobs
-                if _queue_consumer_task is None or _queue_consumer_task.done():
-                    _queue_consumer_task = _start_queue_consumer(queue)
             except Exception:
                 logger.exception("Failed to initialize LinkedIn search components")
                 raise HTTPException(500, "Failed to initialize LinkedIn search components") from None
+
+        # Ensure a queue consumer is running (whether scheduler was just created or already existed)
+        queue = get_job_queue()
+        if _queue_consumer_task is None or _queue_consumer_task.done():
+            # Cancel any pending delayed restart to avoid orphaned timers
+            global _consumer_restart_handle, _consumer_restart_count
+            if _consumer_restart_handle is not None:
+                _consumer_restart_handle.cancel()
+                _consumer_restart_handle = None
+            # Reset circuit breaker so the manually started consumer gets full retry budget
+            _consumer_restart_count = 0
+            _queue_consumer_task = _start_queue_consumer(queue)
 
     async def _run_search():
         try:

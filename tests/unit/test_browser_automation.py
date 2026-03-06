@@ -269,5 +269,6 @@ class TestLogin:
         automation.context.cookies = AsyncMock(return_value=[])
         automation.random_delay = AsyncMock()
 
-        # Should not raise, just log warning
-        await automation.login()
+        # Should raise RuntimeError on failed login (security challenge URL)
+        with pytest.raises(RuntimeError, match="LinkedIn login failed"):
+            await automation.login()

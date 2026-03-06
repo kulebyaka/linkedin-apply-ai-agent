@@ -9,6 +9,7 @@ IMPLEMENTATION STATUS: Interface/skeleton only - method bodies raise NotImplemen
 Actual implementation will use HTTP + LLM structured output extraction.
 """
 
+import re
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -190,12 +191,23 @@ class LinkedInJobAdapter(JobSourceAdapter):
         # Unwrap legacy envelope if present
         data = raw_input.get("raw_data", raw_input)
 
-        job_id = str(
+        # Extract job_id from fields or from linkedin_url
+        job_id_raw = (
             raw_input.get("job_id")
             or data.get("job_id")
             or data.get("id")
-            or "unknown"
         )
+        linkedin_url_raw = raw_input.get("linkedin_url") or data.get("linkedin_url")
+        if not job_id_raw and linkedin_url_raw:
+            url = linkedin_url_raw
+            if not isinstance(url, str):
+                url = str(url)
+            m = re.search(r"/jobs/view/(\d+)", url)
+            if not m:
+                m = re.search(r"currentJobId=(\d+)", url)
+            if m:
+                job_id_raw = m.group(1)
+        job_id = str(job_id_raw or "unknown")
 
         location = data.get("location", "")
         is_remote = bool(
@@ -213,7 +225,8 @@ class LinkedInJobAdapter(JobSourceAdapter):
             except (ValueError, TypeError):
                 posted_date = None
 
-        url = data.get("url") or data.get("job_url") or ""
+        raw_url = data.get("url") or data.get("job_url") or linkedin_url_raw or ""
+        url = str(raw_url) if raw_url else ""
         if not url and job_id != "unknown":
             url = f"https://www.linkedin.com/jobs/view/{job_id}/"
 

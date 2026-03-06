@@ -1,0 +1,10 @@
+{
+  "id": "123",
+  "title": "Senior Software Engineer",
+  "company": "Acme Corp",
+  "location": "Remote",
+  "description": "We are looking for a Senior Software Engineer to join our team. You will be working on our cloud-based microservices platform using Python and Django. Experience with AWS and Docker is required.",
+  "requirements": "5+ years of experience with Python, Django, AWS, and Docker. Bachelor's degree in Computer Science or related field.",
+  "is_remote": true,
+  "url": "https://acme.com/jobs/123"
+}

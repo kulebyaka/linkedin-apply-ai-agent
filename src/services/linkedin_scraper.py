@@ -98,6 +98,8 @@ class LinkedInJobScraper:
         all_jobs: list[dict] = []
         page_num = 0
         max_jobs = search_params.max_jobs
+        max_stale_pages = 3  # Stop after this many consecutive pages with no new jobs
+        stale_pages = 0
 
         while len(all_jobs) < max_jobs:
             url = LinkedInSearchURLBuilder.build_url(search_params, page=page_num)
@@ -123,6 +125,8 @@ class LinkedInJobScraper:
 
             logger.info("Found %d job cards on page %d", card_count, page_num)
 
+            jobs_before = len(all_jobs)
+
             for i in range(card_count):
                 if len(all_jobs) >= max_jobs:
                     break
@@ -140,6 +144,19 @@ class LinkedInJobScraper:
 
                 self._seen_job_ids.add(job_data["job_id"])
                 all_jobs.append(job_data)
+
+            # Track stale pages (cards found but no new jobs added)
+            if len(all_jobs) == jobs_before:
+                stale_pages += 1
+                logger.info(
+                    "No new jobs on page %d (%d/%d stale pages)",
+                    page_num, stale_pages, max_stale_pages,
+                )
+                if stale_pages >= max_stale_pages:
+                    logger.info("Stopping pagination: %d consecutive stale pages", stale_pages)
+                    break
+            else:
+                stale_pages = 0
 
             page_num += 1
 

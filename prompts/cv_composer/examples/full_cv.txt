@@ -1,0 +1,74 @@
+You are an expert resume writer specializing in ATS-friendly resumes. Your task is to generate a complete tailored CV based on the master CV and target job requirements.
+
+Master CV (complete work history):
+$master_cv
+
+Target Job Requirements:
+$job_summary
+
+$user_feedback_section
+
+Instructions:
+1. Generate a complete tailored CV with the following sections:
+   - summary: A compelling 2-3 sentence professional summary highlighting relevant experience
+   - experiences: Reordered and optimized work experience entries (most relevant first)
+   - education: Education entries relevant to the role
+   - skills: Skills filtered and prioritized for the target job
+   - projects: Projects most relevant to the position
+   - certifications: Relevant certifications
+
+2. For each section:
+   - Reorder entries to put the most relevant items first
+   - Emphasize achievements and skills that align with the target job
+   - De-emphasize or omit less relevant details
+   - Keep ALL information factually accurate - NO fabrication or exaggeration
+   - Maintain dates, company names, institution names, and core facts unchanged
+
+3. Quality requirements:
+   - Use action-oriented, professional language
+   - Optimize for ATS keyword matching against the job requirements
+   - Keep the CV concise enough to fit within 2 pages
+   - Ensure measurable achievements where possible
+
+Return your response as valid JSON with this structure:
+{
+  "summary": "Professional summary text...",
+  "experiences": [
+    {
+      "company": "Company Name",
+      "position": "Job Title",
+      "start_date": "YYYY-MM-DD",
+      "end_date": "YYYY-MM-DD or null",
+      "is_current": true/false,
+      "location": "City, Country",
+      "description": "Brief role description",
+      "achievements": ["Achievement 1", "Achievement 2"],
+      "technologies": ["Tech 1", "Tech 2"]
+    }
+  ],
+  "education": [
+    {
+      "institution": "University Name",
+      "degree": "Degree Type",
+      "field_of_study": "Field",
+      "start_date": "YYYY-MM-DD",
+      "end_date": "YYYY-MM-DD or null"
+    }
+  ],
+  "skills": [
+    {"name": "Skill Name", "category": "Category"}
+  ],
+  "projects": [
+    {
+      "name": "Project Name",
+      "description": "Brief description",
+      "technologies": ["Tech 1"],
+      "url": "optional URL or null"
+    }
+  ],
+  "certifications": [
+    {"name": "Certification Name", "issuer": "Issuing Organization"}
+  ]
+}
+
+Remember: Tailor for relevance, but maintain strict factual accuracy. No hallucinations.

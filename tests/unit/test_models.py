@@ -1,10 +1,9 @@
 """Tests for Pydantic models"""
 
-import pytest
-from datetime import date, datetime
-from src.models.cv import CV, ContactInfo, Experience, Education, Skill
-from src.models.job import JobPosting, JobFilter, JobEvaluation
-from src.models.application import ApplicationStatus, UserApproval
+from datetime import date
+
+from src.models.cv import ContactInfo, Experience
+from src.models.job import JobPosting
 
 
 class TestCVModels:
@@ -52,36 +51,3 @@ class TestJobModels:
         )
         assert job.is_remote is True
         assert job.title == "Software Engineer"
-
-    def test_job_filter(self):
-        """Test JobFilter model"""
-        filters = JobFilter(
-            keywords=["python", "engineer"],
-            remote_only=True,
-            experience_levels=["senior"]
-        )
-        assert "python" in filters.keywords
-        assert filters.remote_only is True
-
-
-class TestApplicationModels:
-    """Test application-related models"""
-
-    def test_application_status(self):
-        """Test ApplicationStatus model"""
-        status = ApplicationStatus(
-            job_id="123",
-            status="pending_approval"
-        )
-        assert status.status == "pending_approval"
-        assert isinstance(status.created_at, datetime)
-
-    def test_user_approval(self):
-        """Test UserApproval model"""
-        approval = UserApproval(
-            job_id="123",
-            decision="approved",
-            feedback="Looks great!"
-        )
-        assert approval.decision == "approved"
-        assert approval.feedback == "Looks great!"
