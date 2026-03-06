@@ -153,8 +153,8 @@ class JobRecord(BaseModel):
 class JobStatusResponse(BaseModel):
     """Comprehensive job status response."""
     job_id: str
-    source: Literal["url", "manual", "linkedin"]
-    mode: Literal["mvp", "full"]
+    source: Literal["url", "manual", "linkedin"] | None = None
+    mode: Literal["mvp", "full"] | None = None
     status: str
     job_posting: dict | None = None
     cv_json: dict | None = None

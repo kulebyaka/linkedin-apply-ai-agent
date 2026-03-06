@@ -974,8 +974,9 @@ async def trigger_linkedin_search(
                 from src.services.scheduler import LinkedInSearchScheduler
 
                 if _linkedin_browser is None:
-                    _linkedin_browser = LinkedInAutomation(settings)
-                    await _linkedin_browser.initialize()
+                    browser = LinkedInAutomation(settings)
+                    await browser.initialize()
+                    _linkedin_browser = browser
 
                 scraper = LinkedInJobScraper(_linkedin_browser, settings)
                 queue = get_job_queue()

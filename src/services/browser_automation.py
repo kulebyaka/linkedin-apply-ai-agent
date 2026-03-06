@@ -206,11 +206,15 @@ class LinkedInAutomation:
                 await self._save_cookies()
             except Exception as exc:
                 logger.warning("Failed to save cookies during close: %s", exc)
-        if self.browser:
-            await self.browser.close()
+        try:
+            if self.browser:
+                await self.browser.close()
+        except Exception as exc:
+            logger.warning("Failed to close browser: %s", exc)
+        finally:
             self.browser = None
-        self.page = None
-        self.context = None
+            self.page = None
+            self.context = None
         if self._playwright:
             await self._playwright.stop()
             self._playwright = None
