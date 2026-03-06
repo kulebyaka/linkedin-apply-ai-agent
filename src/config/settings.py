@@ -13,9 +13,9 @@ class Settings(BaseSettings):
     debug: bool = False
     log_level: str = "INFO"
 
-    # LinkedIn Credentials
-    linkedin_email: str
-    linkedin_password: str
+    # LinkedIn Credentials (optional — only needed for LinkedIn search features)
+    linkedin_email: str = ""
+    linkedin_password: str = ""
     linkedin_api_key: str | None = None
 
     # LLM Configuration

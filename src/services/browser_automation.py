@@ -148,7 +148,7 @@ class LinkedInAutomation:
         current_url = self.page.url
 
         # Verify login success
-        if ("/feed" in current_url or "/mynetwork" in current_url or "linkedin.com" in current_url) and "/login" not in current_url:
+        if ("/feed" in current_url or "/mynetwork" in current_url or "/in/" in current_url) and "/login" not in current_url:
             logger.info("Login successful")
             await self._save_cookies()
         else:
@@ -201,6 +201,8 @@ class LinkedInAutomation:
         if self.browser:
             await self.browser.close()
             self.browser = None
+        self.page = None
+        self.context = None
         if self._playwright:
             await self._playwright.stop()
             self._playwright = None

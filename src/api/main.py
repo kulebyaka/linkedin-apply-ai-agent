@@ -320,7 +320,7 @@ async def download_cv(job_id: str):
 
         pdf_path = Path(status.pdf_path).resolve()
         allowed_dir = Path(settings.generated_cvs_dir).resolve()
-        if not str(pdf_path).startswith(str(allowed_dir)):
+        if not pdf_path.is_relative_to(allowed_dir):
             raise HTTPException(403, "Access denied")
 
         if not pdf_path.exists():
@@ -571,7 +571,7 @@ async def download_job_pdf(job_id: str):
 
         pdf_path = Path(status.pdf_path).resolve()
         allowed_dir = Path(settings.generated_cvs_dir).resolve()
-        if not str(pdf_path).startswith(str(allowed_dir)):
+        if not pdf_path.is_relative_to(allowed_dir):
             raise HTTPException(403, "Access denied")
 
         if not pdf_path.exists():
