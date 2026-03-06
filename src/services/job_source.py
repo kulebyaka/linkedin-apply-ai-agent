@@ -12,8 +12,6 @@ Actual implementation will use HTTP + LLM structured output extraction.
 from abc import ABC, abstractmethod
 from typing import Any
 
-from ..models.job import JobPosting
-
 
 class JobSourceAdapter(ABC):
     """Abstract base class for job source adapters.
@@ -244,6 +242,9 @@ class LinkedInJobAdapter(JobSourceAdapter):
         if "job_id" in raw_input and "raw_data" in raw_input:
             return True
         if "linkedin_url" in raw_input:
+            return True
+        # Flat dicts from LinkedInJobScraper have job_id + title
+        if "job_id" in raw_input and "title" in raw_input:
             return True
         return False
 

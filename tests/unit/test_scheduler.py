@@ -142,22 +142,6 @@ class TestSchedulerLifecycle:
 
 
 # ---------------------------------------------------------------------------
-# trigger_now
-# ---------------------------------------------------------------------------
-
-
-class TestTriggerNow:
-    async def test_trigger_now_calls_run_search(self):
-        jobs = [{"job_id": "manual"}]
-        scheduler, _, _, queue = _make_scheduler(scrape_result=jobs)
-
-        count = await scheduler.trigger_now()
-
-        assert count == 1
-        assert queue.size() == 1
-
-
-# ---------------------------------------------------------------------------
 # API endpoint tests
 # ---------------------------------------------------------------------------
 

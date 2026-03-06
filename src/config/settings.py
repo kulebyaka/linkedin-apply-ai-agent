@@ -1,8 +1,8 @@
 """Configuration settings"""
 
-from typing import Optional, Dict
+from functools import lru_cache
+
 from pydantic_settings import BaseSettings
-from pydantic import Field
 
 
 class Settings(BaseSettings):
@@ -16,26 +16,26 @@ class Settings(BaseSettings):
     # LinkedIn Credentials
     linkedin_email: str
     linkedin_password: str
-    linkedin_api_key: Optional[str] = None
+    linkedin_api_key: str | None = None
 
     # LLM Configuration
     primary_llm_provider: str = "openai"  # openai, deepseek, grok, anthropic
-    fallback_llm_provider: Optional[str] = "deepseek"
+    fallback_llm_provider: str | None = "deepseek"
 
     # OpenAI - Use gpt-4o or newer for strict JSON Schema support
-    openai_api_key: Optional[str] = None
+    openai_api_key: str | None = None
     openai_model: str = "gpt-4o"  # gpt-4o supports structured outputs with 100% schema adherence
 
     # DeepSeek - Supports json_object mode only (not strict schemas)
-    deepseek_api_key: Optional[str] = None
+    deepseek_api_key: str | None = None
     deepseek_model: str = "deepseek-chat"
 
     # Grok - Use grok-2-1212 or newer for structured output support
-    grok_api_key: Optional[str] = None
+    grok_api_key: str | None = None
     grok_model: str = "grok-2-1212"  # First version with structured outputs
 
     # Anthropic - Use Claude Sonnet 4.5+ for structured output support
-    anthropic_api_key: Optional[str] = None
+    anthropic_api_key: str | None = None
     anthropic_model: str = "claude-sonnet-4.5"  # Supports structured outputs (beta)
 
     # Paths
@@ -57,10 +57,10 @@ class Settings(BaseSettings):
     # LinkedIn Search Settings
     linkedin_search_keywords: str = ""
     linkedin_search_location: str = ""
-    linkedin_search_remote_filter: Optional[str] = None  # "remote", "on-site", "hybrid"
-    linkedin_search_date_posted: Optional[str] = None  # "24h", "week", "month"
-    linkedin_search_experience_level: Optional[list[str]] = None  # "entry", "associate", "mid-senior", "director", "executive"
-    linkedin_search_job_type: Optional[list[str]] = None  # "full-time", "part-time", "contract", "temporary", "internship"
+    linkedin_search_remote_filter: str | None = None  # "remote", "on-site", "hybrid"
+    linkedin_search_date_posted: str | None = None  # "24h", "week", "month"
+    linkedin_search_experience_level: list[str] | None = None  # "entry", "associate", "mid-senior", "director", "executive"
+    linkedin_search_job_type: list[str] | None = None  # "full-time", "part-time", "contract", "temporary", "internship"
     linkedin_search_easy_apply_only: bool = False
     linkedin_search_max_jobs: int = 50
     linkedin_session_cookie_path: str = "./data/linkedin_cookies.json"
@@ -84,7 +84,7 @@ class Settings(BaseSettings):
     cv_composer_temperature_sections: float = 0.4  # Balanced for CV sections
     cv_composer_max_retries: int = 3  # Max retries for JSON generation
     cv_composer_enable_hallucination_checks: bool = True  # Validate against master CV
-    cv_composer_model_override: Optional[str] = None  # Override LLM model for CV composition
+    cv_composer_model_override: str | None = None  # Override LLM model for CV composition
 
     # CV Length Limits (for 2-page target)
     cv_max_experiences: int = 4  # Maximum work experiences to include
@@ -95,8 +95,8 @@ class Settings(BaseSettings):
     cv_target_pages: int = 2  # Target page count for generated CV
 
     # Notifications
-    webhook_url: Optional[str] = None
-    notification_email: Optional[str] = None
+    webhook_url: str | None = None
+    notification_email: str | None = None
 
     # API Server (for HITL UI)
     api_host: str = "0.0.0.0"
@@ -108,6 +108,7 @@ class Settings(BaseSettings):
         env_file_encoding = "utf-8"
 
 
+@lru_cache
 def get_settings() -> Settings:
-    """Get application settings singleton"""
+    """Get application settings singleton."""
     return Settings()

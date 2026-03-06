@@ -144,8 +144,11 @@ class LinkedInAutomation:
                 current_url,
             )
 
+        # Re-read URL in case challenge was resolved manually
+        current_url = self.page.url
+
         # Verify login success
-        if "/feed" in current_url or "/mynetwork" in current_url or "linkedin.com" in current_url and "/login" not in current_url:
+        if ("/feed" in current_url or "/mynetwork" in current_url or "linkedin.com" in current_url) and "/login" not in current_url:
             logger.info("Login successful")
             await self._save_cookies()
         else:
@@ -162,7 +165,6 @@ class LinkedInAutomation:
 
         logger.info("Cookie session invalid or missing, performing login")
         await self.login()
-        await self._save_cookies()
 
     async def _random_delay(self, min_s: float | None = None, max_s: float | None = None) -> None:
         """Sleep for a random duration between min and max seconds."""

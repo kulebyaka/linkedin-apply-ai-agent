@@ -102,10 +102,6 @@ class LinkedInSearchScheduler:
         self._running = False
         logger.info("LinkedIn search scheduler stopped")
 
-    async def trigger_now(self) -> int:
-        """Manually trigger a search cycle. Returns job count."""
-        return await self.run_search()
-
     @property
     def is_running(self) -> bool:
         return self._running

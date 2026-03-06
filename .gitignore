@@ -79,6 +79,7 @@ Thumbs.db
 data/cv/*.json
 data/jobs/
 data/generated_cvs/
+data/linkedin_cookies.json
 !data/cv/master_cv.example.json
 scripts/test_job.json
 

@@ -145,18 +145,15 @@ class TestEnsureAuthenticated:
         automation._load_cookies = AsyncMock(return_value=True)
         automation._validate_session = AsyncMock(return_value=False)
         automation.login = AsyncMock()
-        automation._save_cookies = AsyncMock()
 
         await automation.ensure_authenticated()
 
         automation.login.assert_awaited_once()
-        automation._save_cookies.assert_awaited_once()
 
     async def test_falls_back_to_login_when_no_cookies(self, automation):
         automation._load_cookies = AsyncMock(return_value=False)
         automation._validate_session = AsyncMock()
         automation.login = AsyncMock()
-        automation._save_cookies = AsyncMock()
 
         await automation.ensure_authenticated()
 

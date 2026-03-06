@@ -250,7 +250,7 @@ async def generate_cv(
 
     except Exception as e:
         logger.error(f"Failed to submit job: {e}", exc_info=True)
-        raise HTTPException(500, f"Failed to submit job: {str(e)}")
+        raise HTTPException(500, "Failed to submit job")
 
 
 @app.get("/api/cv/status/{job_id}", response_model=CVGenerationStatus)
@@ -292,7 +292,7 @@ async def get_cv_status(job_id: str) -> CVGenerationStatus:
         raise
     except Exception as e:
         logger.error(f"Failed to get status for job {job_id}: {e}", exc_info=True)
-        raise HTTPException(500, f"Failed to get job status: {str(e)}")
+        raise HTTPException(500, "Failed to get job status")
 
 
 @app.get("/api/cv/download/{job_id}")
@@ -318,9 +318,13 @@ async def download_cv(job_id: str):
         if not status.pdf_path:
             raise HTTPException(404, "PDF path not set in job state")
 
-        pdf_path = Path(status.pdf_path)
+        pdf_path = Path(status.pdf_path).resolve()
+        allowed_dir = Path(settings.generated_cvs_dir).resolve()
+        if not str(pdf_path).startswith(str(allowed_dir)):
+            raise HTTPException(403, "Access denied")
+
         if not pdf_path.exists():
-            raise HTTPException(404, f"PDF file not found: {pdf_path}")
+            raise HTTPException(404, "PDF file not found")
 
         # Return file
         return FileResponse(
@@ -334,7 +338,7 @@ async def download_cv(job_id: str):
         raise
     except Exception as e:
         logger.error(f"Failed to download CV for job {job_id}: {e}", exc_info=True)
-        raise HTTPException(500, f"Failed to download CV: {str(e)}")
+        raise HTTPException(500, "Failed to download CV")
 
 
 # =============================================================================
@@ -468,7 +472,7 @@ async def submit_job(
         raise
     except Exception as e:
         logger.error(f"Failed to submit job: {e}", exc_info=True)
-        raise HTTPException(500, f"Failed to submit job: {str(e)}")
+        raise HTTPException(500, "Failed to submit job")
 
 
 @app.get("/api/jobs/{job_id}/status", response_model=JobStatusResponse)
@@ -539,7 +543,7 @@ async def get_job_status(job_id: str) -> JobStatusResponse:
         raise
     except Exception as e:
         logger.error(f"Failed to get status for job {job_id}: {e}", exc_info=True)
-        raise HTTPException(500, f"Failed to get job status: {str(e)}")
+        raise HTTPException(500, "Failed to get job status")
 
 
 @app.get("/api/jobs/{job_id}/pdf")
@@ -565,9 +569,13 @@ async def download_job_pdf(job_id: str):
         if not status.pdf_path:
             raise HTTPException(404, "PDF path not set in job state")
 
-        pdf_path = Path(status.pdf_path)
+        pdf_path = Path(status.pdf_path).resolve()
+        allowed_dir = Path(settings.generated_cvs_dir).resolve()
+        if not str(pdf_path).startswith(str(allowed_dir)):
+            raise HTTPException(403, "Access denied")
+
         if not pdf_path.exists():
-            raise HTTPException(404, f"PDF file not found: {pdf_path}")
+            raise HTTPException(404, "PDF file not found")
 
         # Return file
         return FileResponse(
@@ -581,7 +589,7 @@ async def download_job_pdf(job_id: str):
         raise
     except Exception as e:
         logger.error(f"Failed to download PDF for job {job_id}: {e}", exc_info=True)
-        raise HTTPException(500, f"Failed to download PDF: {str(e)}")
+        raise HTTPException(500, "Failed to download PDF")
 
 
 @app.get("/api/jobs/{job_id}/html", response_class=HTMLResponse)
@@ -629,7 +637,7 @@ async def get_job_cv_html(job_id: str) -> HTMLResponse:
         raise
     except Exception as e:
         logger.error(f"Failed to get CV HTML for job {job_id}: {e}", exc_info=True)
-        raise HTTPException(500, f"Failed to get CV HTML: {str(e)}")
+        raise HTTPException(500, "Failed to get CV HTML")
 
 
 # =============================================================================
@@ -695,7 +703,7 @@ async def get_hitl_pending() -> list[PendingApproval]:
 
     except Exception as e:
         logger.error(f"Failed to get pending jobs: {e}", exc_info=True)
-        raise HTTPException(500, f"Failed to get pending jobs: {str(e)}")
+        raise HTTPException(500, "Failed to get pending jobs")
 
 
 @app.post("/api/hitl/{job_id}/decide", response_model=HITLDecisionResponse)
@@ -809,7 +817,7 @@ async def submit_hitl_decision(
         raise
     except Exception as e:
         logger.error(f"Failed to process HITL decision for job {job_id}: {e}", exc_info=True)
-        raise HTTPException(500, f"Failed to process decision: {str(e)}")
+        raise HTTPException(500, "Failed to process decision")
 
 
 @app.get("/api/hitl/history", response_model=list[ApplicationHistoryItem])
@@ -843,7 +851,7 @@ async def get_application_history(
 
     except Exception as e:
         logger.error(f"Failed to get application history: {e}", exc_info=True)
-        raise HTTPException(500, f"Failed to get history: {str(e)}")
+        raise HTTPException(500, "Failed to get history")
 
 
 # =============================================================================
@@ -854,23 +862,22 @@ async def get_application_history(
 @app.post("/api/jobs/linkedin-search")
 async def trigger_linkedin_search(
     background_tasks: BackgroundTasks,
-    body: dict | None = None,
 ):
     """Trigger a LinkedIn search manually.
 
-    Accepts optional JSON body with search param overrides (keywords, location, etc.).
     Runs search in background and returns immediately.
     """
-    global _linkedin_scheduler
+    global _linkedin_scheduler, _linkedin_browser, _queue_consumer_task
 
     if _linkedin_scheduler is None:
         # Create a temporary scheduler for one-off search
         try:
+            import asyncio
+
             from src.services.browser_automation import LinkedInAutomation
             from src.services.linkedin_scraper import LinkedInJobScraper
             from src.services.scheduler import LinkedInSearchScheduler
 
-            global _linkedin_browser
             if _linkedin_browser is None:
                 _linkedin_browser = LinkedInAutomation(settings)
                 await _linkedin_browser.initialize()
@@ -878,9 +885,15 @@ async def trigger_linkedin_search(
             scraper = LinkedInJobScraper(_linkedin_browser, settings)
             queue = get_job_queue()
             _linkedin_scheduler = LinkedInSearchScheduler(settings, scraper, queue)
-        except Exception as e:
+
+            # Ensure a queue consumer is running to process scraped jobs
+            if _queue_consumer_task is None or _queue_consumer_task.done():
+                _queue_consumer_task = asyncio.create_task(
+                    process_queue(queue, delay_between_jobs=2.0)
+                )
+        except Exception:
             logger.exception("Failed to initialize LinkedIn search components")
-            raise HTTPException(500, f"Failed to initialize search: {str(e)}")
+            raise HTTPException(500, "Failed to initialize LinkedIn search components")
 
     async def _run_search():
         try:
@@ -957,7 +970,7 @@ async def cleanup_jobs(
 
     except Exception as e:
         logger.error(f"Failed to cleanup jobs: {e}", exc_info=True)
-        raise HTTPException(500, f"Failed to cleanup jobs: {str(e)}")
+        raise HTTPException(500, "Failed to cleanup jobs")
 
 
 # =============================================================================

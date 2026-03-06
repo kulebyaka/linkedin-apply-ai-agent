@@ -111,25 +111,3 @@ class LinkedInSearchURLBuilder:
 
         return LINKEDIN_JOBS_SEARCH_BASE + "?" + urlencode(query)
 
-    @classmethod
-    def build_url_from_settings(cls, settings, page: int = 0) -> str:
-        """Build URL directly from application Settings object.
-
-        Args:
-            settings: Application Settings instance.
-            page: Zero-based page index.
-
-        Returns:
-            LinkedIn search URL string.
-        """
-        params = LinkedInSearchParams(
-            keywords=settings.linkedin_search_keywords,
-            location=settings.linkedin_search_location,
-            remote_filter=settings.linkedin_search_remote_filter,
-            date_posted=settings.linkedin_search_date_posted,
-            experience_level=settings.linkedin_search_experience_level,
-            job_type=settings.linkedin_search_job_type,
-            easy_apply_only=settings.linkedin_search_easy_apply_only,
-            max_jobs=settings.linkedin_search_max_jobs,
-        )
-        return cls.build_url(params, page)
