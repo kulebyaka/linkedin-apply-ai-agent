@@ -42,7 +42,11 @@ src/
 │   ├── cv_composer.py          # LLM-powered CV tailoring
 │   ├── cv_prompts.py           # CV composition prompts
 │   ├── pdf_generator.py        # PDF generation from JSON (WeasyPrint)
-│   ├── browser_automation.py   # Playwright LinkedIn automation (skeleton)
+│   ├── browser_automation.py   # Playwright stealth browser with cookie auth
+│   ├── linkedin_scraper.py     # LinkedIn job search results scraper
+│   ├── linkedin_search.py      # LinkedIn search URL builder + filters
+│   ├── job_queue.py            # Async job queue for workflow integration
+│   ├── scheduler.py            # APScheduler-based LinkedIn search scheduler
 │   └── notification.py         # Webhook/email notifications (skeleton)
 ├── models/                     # Pydantic data models
 │   ├── job.py                  # Job posting models
@@ -189,6 +193,8 @@ See `src/llm/provider.py` module documentation for detailed implementation.
 | GET | `/api/hitl/pending` | Get all jobs pending HITL review |
 | POST | `/api/hitl/{job_id}/decide` | Submit HITL decision (approve/decline/retry) |
 | GET | `/api/hitl/history` | Get application history |
+| POST | `/api/jobs/linkedin-search` | Trigger LinkedIn job search manually |
+| GET | `/api/jobs/linkedin-search/status` | Get scheduler state and last run info |
 
 ### Legacy Endpoints (Backward Compatible)
 
@@ -224,12 +230,15 @@ Defined in `src/models/unified.py`:
 | **HITL API Endpoints** | ✅ Complete | `src/api/main.py` |
 | **Unified Data Models** | ✅ Complete | `src/models/unified.py` |
 | **Job Repository (DAL)** | ✅ Complete | `src/services/job_repository.py` (in-memory + SQLite via Piccolo ORM) |
-| **Job Source Adapters** | 🟡 Interface | `src/services/job_source.py` - interface only |
+| **Job Source Adapters** | ✅ Complete | `src/services/job_source.py` - LinkedIn adapter with field mapping |
+| **Browser Automation** | ✅ Complete | `src/services/browser_automation.py` - stealth Playwright with cookie auth |
+| **LinkedIn Job Scraper** | ✅ Complete | `src/services/linkedin_scraper.py` - search results parser with dedup |
+| **LinkedIn Search Builder** | ✅ Complete | `src/services/linkedin_search.py` - URL builder with filter models |
+| **Async Job Queue** | ✅ Complete | `src/services/job_queue.py` - queue with workflow consumer |
+| **LinkedIn Search Scheduler** | ✅ Complete | `src/services/scheduler.py` - APScheduler with API endpoints |
 | **Application Workflow** | 🟡 Stubs | `src/agents/application_workflow.py` - stubs only |
 | **Job Filter (LLM)** | 🔴 Pending | `src/services/job_filter.py` skeleton |
-| **Browser Automation** | 🔴 Pending | `src/services/browser_automation.py` skeleton |
 | **HITL Frontend UI** | 🔴 Pending | Tinder-like React/Vue interface |
-| **LinkedIn Integration** | 🔴 Pending | Job fetching and Easy Apply |
 
 ## Development Guidelines
 
@@ -252,6 +261,12 @@ All settings in `.env`:
 - **Repository Configuration:**
   - `REPO_TYPE=memory` (default) or `REPO_TYPE=sqlite` for persistent storage
   - `DB_PATH=./data/jobs.db` (SQLite database path)
+- **LinkedIn Search Configuration:**
+  - `LINKEDIN_SEARCH_KEYWORDS`, `LINKEDIN_SEARCH_LOCATION` - search filters
+  - `LINKEDIN_SEARCH_REMOTE_FILTER` - "remote", "on-site", "hybrid"
+  - `LINKEDIN_SEARCH_SCHEDULE_ENABLED=false` - enable hourly scheduled searches
+  - `LINKEDIN_SEARCH_INTERVAL_HOURS=1` - search frequency
+  - `LINKEDIN_SESSION_COOKIE_PATH=./data/linkedin_cookies.json` - cookie persistence
 
 **Never commit `.env` or real CV data to git!**
 
@@ -294,12 +309,10 @@ All settings in `.env`:
 
 ## Next Steps
 
-1. **Implement Job Source Adapters** - URL extraction using HTTP + LLM, manual input processing
-2. **Build HITL Frontend** - Tinder-like React/Vue UI for batch review
-3. **Implement Application Workflow** - Deep agent with Playwright MCP for browser automation
-4. **Add Job Filter Logic** - LLM-based job suitability evaluation
-5. **LinkedIn Integration** - Job fetching and Easy Apply automation
-6. **Database Persistence** - SQLite or PostgreSQL for job records
+1. **Build HITL Frontend** - Tinder-like React/Vue UI for batch review
+2. **Implement Application Workflow** - Deep agent with Playwright MCP for browser automation
+3. **Add Job Filter Logic** - LLM-based job suitability evaluation
+4. **LinkedIn Easy Apply** - Automated application submission via browser automation
 
 ## Reference Implementations
 
