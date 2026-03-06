@@ -202,7 +202,10 @@ class LinkedInAutomation:
     async def close(self) -> None:
         """Save cookies and close the browser."""
         if self.context:
-            await self._save_cookies()
+            try:
+                await self._save_cookies()
+            except Exception as exc:
+                logger.warning("Failed to save cookies during close: %s", exc)
         if self.browser:
             await self.browser.close()
             self.browser = None

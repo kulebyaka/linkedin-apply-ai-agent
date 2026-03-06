@@ -83,7 +83,7 @@ class PendingApproval(BaseModel):
     job_id: str
     job_posting: dict = Field(..., description="Normalized job posting data")
     cv_json: dict = Field(..., description="Generated tailored CV as JSON")
-    pdf_path: str = Field(..., description="Path to generated PDF file")
+    pdf_path: str | None = Field(None, description="Path to generated PDF file")
     retry_count: int = Field(0, description="Number of retry attempts")
     created_at: datetime
     source: Literal["url", "manual", "linkedin"]

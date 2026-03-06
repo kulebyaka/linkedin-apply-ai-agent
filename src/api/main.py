@@ -109,6 +109,24 @@ async def log_requests(request: Request, call_next):
     return response
 
 
+def _start_queue_consumer(queue) -> asyncio.Task:
+    """Create a queue consumer task with automatic restart on failure."""
+    def _on_consumer_done(task: asyncio.Task) -> None:
+        global _queue_consumer_task
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.error("Queue consumer crashed: %s — restarting", exc)
+            _queue_consumer_task = _start_queue_consumer(queue)
+
+    task = asyncio.create_task(
+        process_queue(queue, job_repository=job_repository, delay_between_jobs=2.0)
+    )
+    task.add_done_callback(_on_consumer_done)
+    return task
+
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize repository and optional LinkedIn scheduler on startup."""
@@ -134,9 +152,7 @@ async def startup_event():
             _linkedin_scheduler.start()
 
             # Start queue consumer in background
-            _queue_consumer_task = asyncio.create_task(
-                process_queue(queue, delay_between_jobs=2.0)
-            )
+            _queue_consumer_task = _start_queue_consumer(queue)
 
             logger.info("LinkedIn search scheduler started")
         except Exception:
@@ -894,9 +910,7 @@ async def trigger_linkedin_search(
 
                 # Ensure a queue consumer is running to process scraped jobs
                 if _queue_consumer_task is None or _queue_consumer_task.done():
-                    _queue_consumer_task = asyncio.create_task(
-                        process_queue(queue, delay_between_jobs=2.0)
-                    )
+                    _queue_consumer_task = _start_queue_consumer(queue)
             except Exception:
                 logger.exception("Failed to initialize LinkedIn search components")
                 raise HTTPException(500, "Failed to initialize LinkedIn search components") from None

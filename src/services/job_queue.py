@@ -83,6 +83,7 @@ async def process_queue(
     *,
     workflow: Any | None = None,
     master_cv_loader: Any | None = None,
+    job_repository: Any | None = None,
     delay_between_jobs: float = 2.0,
     stop_event: asyncio.Event | None = None,
 ) -> int:
@@ -97,6 +98,9 @@ async def process_queue(
         is called (requires WeasyPrint system libs).
     master_cv_loader:
         Callable returning a master-CV dict. Defaults to ``load_master_cv``.
+    job_repository:
+        Optional repository for cross-cycle dedup. If provided, jobs that already
+        exist in the repository are skipped.
     delay_between_jobs:
         Seconds to wait between successive workflow runs (avoids LLM rate-limits).
     stop_event:
@@ -134,6 +138,16 @@ async def process_queue(
 
         job_id = job_data.get("job_id") or job_data.get("id") or "unknown"
         logger.info("Processing queued job %s", job_id)
+
+        # Cross-cycle dedup: skip jobs already in the repository
+        if job_repository is not None:
+            try:
+                existing = await job_repository.get(str(job_id))
+                if existing is not None:
+                    logger.info("Skipping already-processed job %s (status: %s)", job_id, existing.status)
+                    continue
+            except Exception:
+                logger.debug("Dedup check failed for job %s, proceeding", job_id)
 
         try:
             master_cv = master_cv_loader()
