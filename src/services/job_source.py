@@ -224,7 +224,7 @@ class LinkedInJobAdapter(JobSourceAdapter):
             "location": location,
             "description": data.get("description", ""),
             "requirements": data.get("requirements"),
-            "salary_range": data.get("salary"),
+            "salary_range": data.get("salary_range") or data.get("salary"),
             "is_remote": is_remote,
             "experience_level": data.get("experience_level"),
             "job_type": data.get("job_type"),

@@ -71,6 +71,7 @@ unified_threads: dict[str, dict] = {}  # job_id -> {thread_id, workflow_type, cr
 _linkedin_scheduler = None
 _linkedin_browser = None
 _queue_consumer_task = None
+_linkedin_init_lock = asyncio.Lock()
 
 app = FastAPI(
     title="LinkedIn Job Application Agent API",
@@ -872,29 +873,30 @@ async def trigger_linkedin_search(
     """
     global _linkedin_scheduler, _linkedin_browser, _queue_consumer_task
 
-    if _linkedin_scheduler is None:
-        # Create a temporary scheduler for one-off search
-        try:
-            from src.services.browser_automation import LinkedInAutomation
-            from src.services.linkedin_scraper import LinkedInJobScraper
-            from src.services.scheduler import LinkedInSearchScheduler
+    async with _linkedin_init_lock:
+        if _linkedin_scheduler is None:
+            # Create a temporary scheduler for one-off search
+            try:
+                from src.services.browser_automation import LinkedInAutomation
+                from src.services.linkedin_scraper import LinkedInJobScraper
+                from src.services.scheduler import LinkedInSearchScheduler
 
-            if _linkedin_browser is None:
-                _linkedin_browser = LinkedInAutomation(settings)
-                await _linkedin_browser.initialize()
+                if _linkedin_browser is None:
+                    _linkedin_browser = LinkedInAutomation(settings)
+                    await _linkedin_browser.initialize()
 
-            scraper = LinkedInJobScraper(_linkedin_browser, settings)
-            queue = get_job_queue()
-            _linkedin_scheduler = LinkedInSearchScheduler(settings, scraper, queue)
+                scraper = LinkedInJobScraper(_linkedin_browser, settings)
+                queue = get_job_queue()
+                _linkedin_scheduler = LinkedInSearchScheduler(settings, scraper, queue)
 
-            # Ensure a queue consumer is running to process scraped jobs
-            if _queue_consumer_task is None or _queue_consumer_task.done():
-                _queue_consumer_task = asyncio.create_task(
-                    process_queue(queue, delay_between_jobs=2.0)
-                )
-        except Exception:
-            logger.exception("Failed to initialize LinkedIn search components")
-            raise HTTPException(500, "Failed to initialize LinkedIn search components")
+                # Ensure a queue consumer is running to process scraped jobs
+                if _queue_consumer_task is None or _queue_consumer_task.done():
+                    _queue_consumer_task = asyncio.create_task(
+                        process_queue(queue, delay_between_jobs=2.0)
+                    )
+            except Exception:
+                logger.exception("Failed to initialize LinkedIn search components")
+                raise HTTPException(500, "Failed to initialize LinkedIn search components")
 
     async def _run_search():
         try:
@@ -959,9 +961,18 @@ async def cleanup_jobs(
     Returns:
         {"deleted": int, "message": str}
     """
+    DELETABLE_STATUSES = {"declined", "failed", "completed"}
     try:
         if not statuses:
             raise HTTPException(400, "At least one status must be provided")
+
+        invalid = set(statuses) - DELETABLE_STATUSES
+        if invalid:
+            raise HTTPException(
+                400,
+                f"Cannot delete jobs with status: {', '.join(sorted(invalid))}. "
+                f"Allowed: {', '.join(sorted(DELETABLE_STATUSES))}",
+            )
 
         deleted = await job_repository.cleanup(older_than_days, statuses)
         return {"deleted": deleted, "message": f"Deleted {deleted} jobs"}

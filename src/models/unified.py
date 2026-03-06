@@ -71,7 +71,7 @@ class HITLDecision(BaseModel):
 class HITLDecisionResponse(BaseModel):
     """Response after HITL decision submission."""
     job_id: str
-    status: Literal["applying", "declined", "retrying"]
+    status: Literal["approved", "applying", "declined", "retrying"]
     message: str
 
 
