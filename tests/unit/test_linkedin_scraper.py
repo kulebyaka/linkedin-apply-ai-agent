@@ -142,12 +142,13 @@ class TestParseJobCard:
     async def test_parses_complete_card(self, scraper):
         """Test parsing a job card with all fields present."""
         card = MagicMock()
+        card.get_attribute = AsyncMock(return_value="1234567890")
 
         # Title locator
         title_loc = MagicMock()
         title_loc.first = MagicMock()
+        title_loc.first.get_attribute = AsyncMock(side_effect=lambda attr: "Senior Python Developer" if attr == "aria-label" else "/jobs/view/1234567890/?refId=abc")
         title_loc.first.text_content = AsyncMock(return_value="  Senior Python Developer  ")
-        title_loc.first.get_attribute = AsyncMock(return_value="/jobs/view/1234567890/?refId=abc")
 
         # Company locator
         company_loc = MagicMock()
@@ -206,11 +207,12 @@ class TestParseJobCard:
     async def test_no_easy_apply_badge(self, scraper):
         """Card without Easy Apply badge sets easy_apply=False."""
         card = MagicMock()
+        card.get_attribute = AsyncMock(return_value="99999999")
 
         title_loc = MagicMock()
         title_loc.first = MagicMock()
+        title_loc.first.get_attribute = AsyncMock(side_effect=lambda attr: "Developer" if attr == "aria-label" else "/jobs/view/99999999/")
         title_loc.first.text_content = AsyncMock(return_value="Developer")
-        title_loc.first.get_attribute = AsyncMock(return_value="/jobs/view/99999999/")
 
         default_loc = MagicMock()
         default_loc.first = MagicMock()
@@ -238,6 +240,47 @@ class TestParseJobCard:
         result = await scraper._parse_job_card(card)
         assert result is not None
         assert result["easy_apply"] is False
+
+    async def test_strips_verification_badge_from_title(self, scraper):
+        """'with verification' suffix from LinkedIn badge is stripped from title."""
+        card = MagicMock()
+        card.get_attribute = AsyncMock(return_value="1111111111")
+
+        title_loc = MagicMock()
+        title_loc.first = MagicMock()
+        title_loc.first.get_attribute = AsyncMock(
+            side_effect=lambda attr: "AI Engineer, Entry Level with verification"
+            if attr == "aria-label"
+            else "/jobs/view/1111111111/"
+        )
+        title_loc.first.text_content = AsyncMock(return_value="AI Engineer, Entry Level")
+
+        default_loc = MagicMock()
+        default_loc.first = MagicMock()
+        default_loc.first.text_content = AsyncMock(return_value="")
+
+        easy_apply_loc = MagicMock()
+        easy_apply_loc.count = AsyncMock(return_value=0)
+
+        posted_loc = MagicMock()
+        posted_loc.first = MagicMock()
+        posted_loc.first.text_content = AsyncMock(return_value="")
+
+        def locator_side_effect(selector):
+            from src.services.linkedin_scraper import SELECTORS
+            if selector == SELECTORS["job_card_title"]:
+                return title_loc
+            if selector == SELECTORS["job_card_easy_apply"]:
+                return easy_apply_loc
+            if selector == SELECTORS["job_card_posted"]:
+                return posted_loc
+            return default_loc
+
+        card.locator = MagicMock(side_effect=locator_side_effect)
+
+        result = await scraper._parse_job_card(card)
+        assert result is not None
+        assert result["title"] == "AI Engineer, Entry Level"
 
 
 # ---------------------------------------------------------------------------
@@ -469,10 +512,11 @@ class TestMaxJobsLimit:
         # Create 3 distinct job cards
         def make_card(job_id):
             card = MagicMock()
+            card.get_attribute = AsyncMock(return_value=str(job_id))
             title_loc = MagicMock()
             title_loc.first = MagicMock()
             title_loc.first.text_content = AsyncMock(return_value=f"Job {job_id}")
-            title_loc.first.get_attribute = AsyncMock(return_value=f"/jobs/view/{job_id}/")
+            title_loc.first.get_attribute = AsyncMock(side_effect=lambda attr: f"Job {job_id}" if attr == "aria-label" else f"/jobs/view/{job_id}/")
 
             default_loc = MagicMock()
             default_loc.first = MagicMock()

@@ -19,10 +19,10 @@ logger = logging.getLogger(__name__)
 # These target the current LinkedIn DOM structure and may need updating
 # if LinkedIn changes their markup.
 SELECTORS = {
-    "job_card": "div.job-card-container, li.jobs-search-results__list-item",
-    "job_card_title": "a.job-card-list__title, a.job-card-container__link",
-    "job_card_company": "span.job-card-container__primary-description, span.artdeco-entity-lockup__subtitle",
-    "job_card_location": "li.job-card-container__metadata-item, span.artdeco-entity-lockup__caption",
+    "job_card": "div.job-card-container",
+    "job_card_title": "a.job-card-container__link, a.job-card-list__title--link",
+    "job_card_company": "div.artdeco-entity-lockup__subtitle span, span.job-card-container__primary-description",
+    "job_card_location": "div.artdeco-entity-lockup__caption li span, li.job-card-container__metadata-item",
     "job_card_easy_apply": "li-icon[type='linkedin-bug'], span.job-card-container__apply-method",
     "job_card_posted": "time, span.job-card-container__listed-time",
     "detail_description": "div.jobs-description__content, div#job-details",
@@ -222,21 +222,32 @@ class LinkedInJobScraper:
         posted_date, easy_apply, url.
         """
         try:
+            # Job ID from data attribute (most reliable) or from link href
+            job_id = await card_element.get_attribute("data-job-id")
+
             # Title and URL from the link element
             title_el = card_element.locator(SELECTORS["job_card_title"]).first
-            title = (await title_el.text_content() or "").strip()
+            # Use aria-label first (clean single title), fall back to text_content
+            title = await title_el.get_attribute("aria-label") or ""
+            if not title:
+                title = (await title_el.text_content() or "").strip()
+            title = " ".join(title.split())  # collapse whitespace
+            # Strip LinkedIn verification badge text that bleeds into aria-label
+            if title.endswith(" with verification"):
+                title = title[: -len(" with verification")]
             href = await title_el.get_attribute("href") or ""
 
-            job_id = _extract_job_id_from_url(href)
+            if not job_id:
+                job_id = _extract_job_id_from_url(href)
             url = f"https://www.linkedin.com/jobs/view/{job_id}/" if job_id else href
 
             # Company
             company_el = card_element.locator(SELECTORS["job_card_company"]).first
-            company = (await company_el.text_content() or "").strip()
+            company = " ".join((await company_el.text_content() or "").split())
 
             # Location
             location_el = card_element.locator(SELECTORS["job_card_location"]).first
-            location = (await location_el.text_content() or "").strip()
+            location = " ".join((await location_el.text_content() or "").split())
 
             # Easy Apply badge
             easy_apply_count = await card_element.locator(

@@ -569,6 +569,93 @@ async def submit_job(
         raise HTTPException(500, "Failed to submit job") from None
 
 
+# =============================================================================
+# LinkedIn Search Endpoints
+# (must be defined BEFORE /api/jobs/{job_id} wildcard routes)
+# =============================================================================
+
+
+@app.post("/api/jobs/linkedin-search")
+async def trigger_linkedin_search(
+    background_tasks: BackgroundTasks,
+):
+    """Trigger a LinkedIn search manually.
+
+    Runs search in background and returns immediately.
+    """
+    global _linkedin_scheduler, _linkedin_browser, _queue_consumer_task
+
+    async with _linkedin_init_lock:
+        if _linkedin_scheduler is None:
+            # Create a temporary scheduler for one-off search
+            try:
+                from src.services.browser_automation import LinkedInAutomation
+                from src.services.linkedin_scraper import LinkedInJobScraper
+                from src.services.scheduler import LinkedInSearchScheduler
+
+                if _linkedin_browser is None:
+                    browser = LinkedInAutomation(settings)
+                    await browser.initialize()
+                    _linkedin_browser = browser
+
+                scraper = LinkedInJobScraper(_linkedin_browser, settings)
+                queue = get_job_queue()
+                _linkedin_scheduler = LinkedInSearchScheduler(settings, scraper, queue)
+            except Exception:
+                logger.exception("Failed to initialize LinkedIn search components")
+                raise HTTPException(500, "Failed to initialize LinkedIn search components") from None
+
+        # Ensure a queue consumer is running (whether scheduler was just created or already existed)
+        queue = get_job_queue()
+        if _queue_consumer_task is None or _queue_consumer_task.done():
+            # Cancel any pending delayed restart to avoid orphaned timers
+            global _consumer_restart_handle, _consumer_restart_count
+            if _consumer_restart_handle is not None:
+                _consumer_restart_handle.cancel()
+                _consumer_restart_handle = None
+            # Reset circuit breaker so the manually started consumer gets full retry budget
+            _consumer_restart_count = 0
+            _queue_consumer_task = _start_queue_consumer(queue)
+
+    async def _run_search():
+        try:
+            count = await _linkedin_scheduler.run_search()
+            logger.info("Manual LinkedIn search completed: %d jobs found", count)
+        except Exception:
+            logger.exception("Manual LinkedIn search failed")
+
+    background_tasks.add_task(_run_search)
+
+    return {"status": "started", "message": "LinkedIn search triggered"}
+
+
+@app.get("/api/jobs/linkedin-search/status")
+async def get_linkedin_search_status():
+    """Return current scheduler state."""
+    if _linkedin_scheduler is None:
+        return {
+            "enabled": settings.linkedin_search_schedule_enabled,
+            "running": False,
+            "last_run_time": None,
+            "last_run_jobs": 0,
+            "next_run_time": None,
+            "queue_size": get_job_queue().size(),
+        }
+
+    return {
+        "enabled": settings.linkedin_search_schedule_enabled,
+        "running": _linkedin_scheduler.is_running,
+        "last_run_time": _linkedin_scheduler.last_run_time.isoformat()
+        if _linkedin_scheduler.last_run_time
+        else None,
+        "last_run_jobs": _linkedin_scheduler.last_run_jobs,
+        "next_run_time": _linkedin_scheduler.next_run_time.isoformat()
+        if _linkedin_scheduler.next_run_time
+        else None,
+        "queue_size": get_job_queue().size(),
+    }
+
+
 @app.get("/api/jobs/{job_id}/status", response_model=JobStatusResponse)
 async def get_job_status(job_id: str) -> JobStatusResponse:
     """
@@ -949,91 +1036,6 @@ async def get_application_history(
         logger.error(f"Failed to get application history: {e}", exc_info=True)
         raise HTTPException(500, "Failed to get history") from None
 
-
-# =============================================================================
-# LinkedIn Search Endpoints
-# =============================================================================
-
-
-@app.post("/api/jobs/linkedin-search")
-async def trigger_linkedin_search(
-    background_tasks: BackgroundTasks,
-):
-    """Trigger a LinkedIn search manually.
-
-    Runs search in background and returns immediately.
-    """
-    global _linkedin_scheduler, _linkedin_browser, _queue_consumer_task
-
-    async with _linkedin_init_lock:
-        if _linkedin_scheduler is None:
-            # Create a temporary scheduler for one-off search
-            try:
-                from src.services.browser_automation import LinkedInAutomation
-                from src.services.linkedin_scraper import LinkedInJobScraper
-                from src.services.scheduler import LinkedInSearchScheduler
-
-                if _linkedin_browser is None:
-                    browser = LinkedInAutomation(settings)
-                    await browser.initialize()
-                    _linkedin_browser = browser
-
-                scraper = LinkedInJobScraper(_linkedin_browser, settings)
-                queue = get_job_queue()
-                _linkedin_scheduler = LinkedInSearchScheduler(settings, scraper, queue)
-            except Exception:
-                logger.exception("Failed to initialize LinkedIn search components")
-                raise HTTPException(500, "Failed to initialize LinkedIn search components") from None
-
-        # Ensure a queue consumer is running (whether scheduler was just created or already existed)
-        queue = get_job_queue()
-        if _queue_consumer_task is None or _queue_consumer_task.done():
-            # Cancel any pending delayed restart to avoid orphaned timers
-            global _consumer_restart_handle, _consumer_restart_count
-            if _consumer_restart_handle is not None:
-                _consumer_restart_handle.cancel()
-                _consumer_restart_handle = None
-            # Reset circuit breaker so the manually started consumer gets full retry budget
-            _consumer_restart_count = 0
-            _queue_consumer_task = _start_queue_consumer(queue)
-
-    async def _run_search():
-        try:
-            count = await _linkedin_scheduler.run_search()
-            logger.info("Manual LinkedIn search completed: %d jobs found", count)
-        except Exception:
-            logger.exception("Manual LinkedIn search failed")
-
-    background_tasks.add_task(_run_search)
-
-    return {"status": "started", "message": "LinkedIn search triggered"}
-
-
-@app.get("/api/jobs/linkedin-search/status")
-async def get_linkedin_search_status():
-    """Return current scheduler state."""
-    if _linkedin_scheduler is None:
-        return {
-            "enabled": settings.linkedin_search_schedule_enabled,
-            "running": False,
-            "last_run_time": None,
-            "last_run_jobs": 0,
-            "next_run_time": None,
-            "queue_size": get_job_queue().size(),
-        }
-
-    return {
-        "enabled": settings.linkedin_search_schedule_enabled,
-        "running": _linkedin_scheduler.is_running,
-        "last_run_time": _linkedin_scheduler.last_run_time.isoformat()
-        if _linkedin_scheduler.last_run_time
-        else None,
-        "last_run_jobs": _linkedin_scheduler.last_run_jobs,
-        "next_run_time": _linkedin_scheduler.next_run_time.isoformat()
-        if _linkedin_scheduler.next_run_time
-        else None,
-        "queue_size": get_job_queue().size(),
-    }
 
 
 # =============================================================================
