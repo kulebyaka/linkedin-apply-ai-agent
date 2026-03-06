@@ -69,6 +69,10 @@ class Settings(BaseSettings):
     linkedin_page_delay_min: float = 2.0
     linkedin_page_delay_max: float = 5.0
 
+    # LinkedIn Search Scheduler
+    linkedin_search_schedule_enabled: bool = False
+    linkedin_search_interval_hours: int = 1
+
     # Workflow
     job_fetch_interval_hours: int = 1
     max_concurrent_applications: int = 3

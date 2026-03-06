@@ -151,20 +151,20 @@ Implement a LinkedIn Job Source Adapter that scrapes job listings from LinkedIn 
 - Modify: `src/config/settings.py`
 - Create: `tests/test_scheduler.py`
 
-- [ ] Add to `Settings`: `linkedin_search_schedule_enabled: bool = False`, `linkedin_search_interval_hours: int = 1`
-- [ ] Create `src/services/scheduler.py`:
+- [x] Add to `Settings`: `linkedin_search_schedule_enabled: bool = False`, `linkedin_search_interval_hours: int = 1`
+- [x] Create `src/services/scheduler.py`:
   - `LinkedInSearchScheduler` class wrapping APScheduler `AsyncIOScheduler`
   - `__init__(self, settings, scraper, queue)` — store dependencies
   - `async run_search(self) -> int` — orchestrate one search cycle: call `browser.ensure_authenticated()`, call `scraper.scrape_and_enrich(params)`, enqueue results via `queue.put_batch(jobs)`, return job count. Catch and log all exceptions (never crash the scheduler).
   - `start(self) -> None` — add interval job to APScheduler based on `linkedin_search_interval_hours`, start scheduler
   - `stop(self) -> None` — shutdown scheduler gracefully
   - `async trigger_now(self) -> int` — manually trigger a search, return job count
-- [ ] Add API endpoint in `src/api/main.py`:
+- [x] Add API endpoint in `src/api/main.py`:
   - `POST /api/jobs/linkedin-search` — trigger a LinkedIn search manually. Accept optional JSON body with search param overrides. Return `{"status": "started", "message": "LinkedIn search triggered"}` immediately (run search in background task). On completion, log results.
   - `GET /api/jobs/linkedin-search/status` — return current scheduler state: enabled/disabled, last run time, jobs found in last run, next scheduled run
-- [ ] Wire up scheduler startup in FastAPI `lifespan` event: if `linkedin_search_schedule_enabled`, initialize browser, scraper, queue, scheduler, and start. On shutdown, stop scheduler and close browser.
-- [ ] Write tests: test scheduler `run_search` with mocked scraper, test API endpoint returns correct response, test scheduler start/stop lifecycle
-- [ ] Run project test suite - must pass before task 6
+- [x] Wire up scheduler startup in FastAPI `lifespan` event: if `linkedin_search_schedule_enabled`, initialize browser, scraper, queue, scheduler, and start. On shutdown, stop scheduler and close browser.
+- [x] Write tests: test scheduler `run_search` with mocked scraper, test API endpoint returns correct response, test scheduler start/stop lifecycle
+- [x] Run project test suite - must pass before task 6
 
 ### Task 6: Verify acceptance criteria
 

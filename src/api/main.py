@@ -39,6 +39,7 @@ from src.models.unified import (
     JobSubmitResponse,
     PendingApproval,
 )
+from src.services.job_queue import get_job_queue, process_queue
 from src.services.job_repository import JobRepository, get_repository
 from src.utils.logger import setup_api_logger
 
@@ -64,6 +65,11 @@ workflow_created_at: dict[str, datetime] = {}  # Track creation time
 
 # Unified workflow thread tracking
 unified_threads: dict[str, dict] = {}  # job_id -> {thread_id, workflow_type, created_at}
+
+# LinkedIn search scheduler (initialized on startup if enabled)
+_linkedin_scheduler = None
+_linkedin_browser = None
+_queue_consumer_task = None
 
 app = FastAPI(
     title="LinkedIn Job Application Agent API",
@@ -102,15 +108,57 @@ async def log_requests(request: Request, call_next):
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize repository on startup."""
+    """Initialize repository and optional LinkedIn scheduler on startup."""
+    global _linkedin_scheduler, _linkedin_browser, _queue_consumer_task
+
     logger.info(f"Starting up with repository type: {settings.repo_type}")
     await job_repository.initialize()
     logger.info("Repository initialized successfully")
 
+    if settings.linkedin_search_schedule_enabled:
+        try:
+            import asyncio
+
+            from src.services.browser_automation import LinkedInAutomation
+            from src.services.linkedin_scraper import LinkedInJobScraper
+            from src.services.scheduler import LinkedInSearchScheduler
+
+            _linkedin_browser = LinkedInAutomation(settings)
+            await _linkedin_browser.initialize()
+
+            scraper = LinkedInJobScraper(_linkedin_browser, settings)
+            queue = get_job_queue()
+
+            _linkedin_scheduler = LinkedInSearchScheduler(settings, scraper, queue)
+            _linkedin_scheduler.start()
+
+            # Start queue consumer in background
+            _queue_consumer_task = asyncio.create_task(
+                process_queue(queue, delay_between_jobs=2.0)
+            )
+
+            logger.info("LinkedIn search scheduler started")
+        except Exception:
+            logger.exception("Failed to start LinkedIn search scheduler")
+
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Close repository on shutdown."""
+    """Close repository, scheduler, and browser on shutdown."""
+    global _linkedin_scheduler, _linkedin_browser, _queue_consumer_task
+
+    if _linkedin_scheduler:
+        _linkedin_scheduler.stop()
+        _linkedin_scheduler = None
+
+    if _queue_consumer_task:
+        _queue_consumer_task.cancel()
+        _queue_consumer_task = None
+
+    if _linkedin_browser:
+        await _linkedin_browser.close()
+        _linkedin_browser = None
+
     logger.info("Shutting down repository...")
     await job_repository.close()
     logger.info("Repository closed")
@@ -796,6 +844,81 @@ async def get_application_history(
     except Exception as e:
         logger.error(f"Failed to get application history: {e}", exc_info=True)
         raise HTTPException(500, f"Failed to get history: {str(e)}")
+
+
+# =============================================================================
+# LinkedIn Search Endpoints
+# =============================================================================
+
+
+@app.post("/api/jobs/linkedin-search")
+async def trigger_linkedin_search(
+    background_tasks: BackgroundTasks,
+    body: dict | None = None,
+):
+    """Trigger a LinkedIn search manually.
+
+    Accepts optional JSON body with search param overrides (keywords, location, etc.).
+    Runs search in background and returns immediately.
+    """
+    global _linkedin_scheduler
+
+    if _linkedin_scheduler is None:
+        # Create a temporary scheduler for one-off search
+        try:
+            from src.services.browser_automation import LinkedInAutomation
+            from src.services.linkedin_scraper import LinkedInJobScraper
+            from src.services.scheduler import LinkedInSearchScheduler
+
+            global _linkedin_browser
+            if _linkedin_browser is None:
+                _linkedin_browser = LinkedInAutomation(settings)
+                await _linkedin_browser.initialize()
+
+            scraper = LinkedInJobScraper(_linkedin_browser, settings)
+            queue = get_job_queue()
+            _linkedin_scheduler = LinkedInSearchScheduler(settings, scraper, queue)
+        except Exception as e:
+            logger.exception("Failed to initialize LinkedIn search components")
+            raise HTTPException(500, f"Failed to initialize search: {str(e)}")
+
+    async def _run_search():
+        try:
+            count = await _linkedin_scheduler.run_search()
+            logger.info("Manual LinkedIn search completed: %d jobs found", count)
+        except Exception:
+            logger.exception("Manual LinkedIn search failed")
+
+    background_tasks.add_task(_run_search)
+
+    return {"status": "started", "message": "LinkedIn search triggered"}
+
+
+@app.get("/api/jobs/linkedin-search/status")
+async def get_linkedin_search_status():
+    """Return current scheduler state."""
+    if _linkedin_scheduler is None:
+        return {
+            "enabled": settings.linkedin_search_schedule_enabled,
+            "running": False,
+            "last_run_time": None,
+            "last_run_jobs": 0,
+            "next_run_time": None,
+            "queue_size": get_job_queue().size(),
+        }
+
+    return {
+        "enabled": settings.linkedin_search_schedule_enabled,
+        "running": _linkedin_scheduler.is_running,
+        "last_run_time": _linkedin_scheduler.last_run_time.isoformat()
+        if _linkedin_scheduler.last_run_time
+        else None,
+        "last_run_jobs": _linkedin_scheduler.last_run_jobs,
+        "next_run_time": _linkedin_scheduler.next_run_time.isoformat()
+        if _linkedin_scheduler.next_run_time
+        else None,
+        "queue_size": get_job_queue().size(),
+    }
 
 
 # =============================================================================
