@@ -48,7 +48,7 @@ Implement a LinkedIn Job Source Adapter that scrapes job listings from LinkedIn 
 - Modify: `src/config/settings.py`
 - Create: `tests/test_linkedin_search.py`
 
-- [ ] Add LinkedIn search settings to `Settings` in `src/config/settings.py`:
+- [x] Add LinkedIn search settings to `Settings` in `src/config/settings.py`:
   - `linkedin_search_keywords: str = ""` — search keywords
   - `linkedin_search_location: str = ""` — location filter
   - `linkedin_search_remote_filter: Optional[str] = None` — "remote", "on-site", "hybrid"
@@ -62,12 +62,12 @@ Implement a LinkedIn Job Source Adapter that scrapes job listings from LinkedIn 
   - `linkedin_max_delay: float = 8.0` — max delay between actions (seconds)
   - `linkedin_page_delay_min: float = 2.0` — min delay between pages
   - `linkedin_page_delay_max: float = 5.0` — max delay between pages
-- [ ] Create `src/services/linkedin_search.py` with:
+- [x] Create `src/services/linkedin_search.py` with:
   - `LinkedInSearchParams` Pydantic model encapsulating all search filters
   - `LinkedInSearchURLBuilder` class with `build_url(params: LinkedInSearchParams, page: int = 0) -> str` that constructs LinkedIn job search URLs with proper query parameters (keywords, location, f_TPR for date, f_WT for remote, f_E for experience, f_JT for job type, f_AL for Easy Apply)
   - `LinkedInSearchURLBuilder.build_url_from_settings(settings, page: int = 0) -> str` convenience method
-- [ ] Write unit tests for URL builder: verify correct query parameter encoding for each filter combination, edge cases (empty filters, multiple experience levels)
-- [ ] Run project test suite - must pass before task 2
+- [x] Write unit tests for URL builder: verify correct query parameter encoding for each filter combination, edge cases (empty filters, multiple experience levels)
+- [x] Run project test suite - must pass before task 2
 
 ### Task 2: Stealth browser manager with cookie-based auth
 

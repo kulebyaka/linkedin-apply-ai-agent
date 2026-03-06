@@ -54,6 +54,21 @@ class Settings(BaseSettings):
     cv_template_dir: str = "src/templates/cv"
     cv_template_name: str = "compact"  # Template theme: modern, compact (2-column), classic, minimal, profile-card (LinkedIn-style)
 
+    # LinkedIn Search Settings
+    linkedin_search_keywords: str = ""
+    linkedin_search_location: str = ""
+    linkedin_search_remote_filter: Optional[str] = None  # "remote", "on-site", "hybrid"
+    linkedin_search_date_posted: Optional[str] = None  # "24h", "week", "month"
+    linkedin_search_experience_level: Optional[list[str]] = None  # "entry", "associate", "mid-senior", "director", "executive"
+    linkedin_search_job_type: Optional[list[str]] = None  # "full-time", "part-time", "contract", "temporary", "internship"
+    linkedin_search_easy_apply_only: bool = False
+    linkedin_search_max_jobs: int = 50
+    linkedin_session_cookie_path: str = "./data/linkedin_cookies.json"
+    linkedin_min_delay: float = 3.0
+    linkedin_max_delay: float = 8.0
+    linkedin_page_delay_min: float = 2.0
+    linkedin_page_delay_max: float = 5.0
+
     # Workflow
     job_fetch_interval_hours: int = 1
     max_concurrent_applications: int = 3
