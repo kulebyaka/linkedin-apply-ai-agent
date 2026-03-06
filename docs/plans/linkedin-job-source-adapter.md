@@ -123,7 +123,7 @@ Implement a LinkedIn Job Source Adapter that scrapes job listings from LinkedIn 
 - Modify: `src/agents/preparation_workflow.py`
 - Create: `tests/test_job_queue.py`
 
-- [ ] Create `src/services/job_queue.py` with class `JobQueue`:
+- [x] Create `src/services/job_queue.py` with class `JobQueue`:
   - `__init__(self, max_size: int = 100)` — create `asyncio.Queue` with max size
   - `async put(self, job_data: dict) -> None` — enqueue a scraped job dict
   - `async get(self) -> dict` — dequeue next job
@@ -131,17 +131,17 @@ Implement a LinkedIn Job Source Adapter that scrapes job listings from LinkedIn 
   - `def size(self) -> int` — current queue size
   - `def is_empty(self) -> bool`
   - Global singleton: `_job_queue: JobQueue | None` with `get_job_queue() -> JobQueue` and `set_job_queue(queue)`
-- [ ] Update `LinkedInJobAdapter` in `src/services/job_source.py`:
+- [x] Update `LinkedInJobAdapter` in `src/services/job_source.py`:
   - Implement `extract(self, raw_input)` — normalize LinkedIn raw data dict into `JobPosting`-compatible dict. Map fields: `job_id` -> `id`, parse `posted_date`, set `url` to LinkedIn job URL, set `is_remote` based on location/remote flag, store original data in `raw_data`
   - Update `can_handle` to also accept `{"linkedin_url": str}` format
-- [ ] Add a `process_queue` async function (in `job_queue.py` or a new consumer module) that:
+- [x] Add a `process_queue` async function (in `job_queue.py` or a new consumer module) that:
   1. Pulls jobs from queue one at a time
   2. For each job, creates a `PreparationWorkflowState` with `source="linkedin"`, `mode="full"`
   3. Runs the preparation workflow (extract -> filter -> compose CV -> PDF -> save to DB as pending)
   4. Logs success/failure per job
   5. Respects delay between workflow runs to avoid LLM rate limits
-- [ ] Write tests: test queue put/get ordering, test batch enqueue, test `LinkedInJobAdapter.extract` field mapping, test queue consumer processes jobs in order
-- [ ] Run project test suite - must pass before task 5
+- [x] Write tests: test queue put/get ordering, test batch enqueue, test `LinkedInJobAdapter.extract` field mapping, test queue consumer processes jobs in order
+- [x] Run project test suite - must pass before task 5
 
 ### Task 5: Scheduler and API endpoint for LinkedIn search
 

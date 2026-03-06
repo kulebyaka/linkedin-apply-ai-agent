@@ -175,30 +175,77 @@ class ManualJobAdapter(JobSourceAdapter):
 class LinkedInJobAdapter(JobSourceAdapter):
     """Adapter for LinkedIn job postings.
 
-    Used by the LinkedIn cron job integration (future feature).
-    Extracts job details from LinkedIn's job posting data structure.
+    Normalises raw dicts produced by LinkedInJobScraper into the
+    JobPosting-compatible structure expected by the preparation workflow.
     """
 
     async def extract(self, raw_input: dict[str, Any]) -> dict[str, Any]:
-        """Extract job posting from LinkedIn data.
+        """Normalise a scraped LinkedIn job dict into a JobPosting-compatible dict.
 
-        Args:
-            raw_input: {"job_id": str, "raw_data": dict} - LinkedIn job data.
+        Accepts either the legacy ``{"job_id": ..., "raw_data": {...}}`` envelope
+        or a flat dict coming straight from the scraper (keys: job_id, title,
+        company, location, description, etc.).
 
         Returns:
-            Normalized job posting dict.
-
-        Raises:
-            NotImplementedError: Method not yet implemented.
+            Normalised dict whose keys match ``JobPosting`` fields.
         """
-        raise NotImplementedError(
-            "LinkedIn job extraction not yet implemented. "
-            "Future feature for cron job integration."
+        # Unwrap legacy envelope if present
+        data = raw_input.get("raw_data", raw_input)
+
+        job_id = str(
+            raw_input.get("job_id")
+            or data.get("job_id")
+            or data.get("id")
+            or "unknown"
         )
 
+        location = data.get("location", "")
+        is_remote = bool(
+            data.get("is_remote")
+            or (isinstance(location, str) and "remote" in location.lower())
+            or data.get("remote_filter") == "remote"
+        )
+
+        posted_date = data.get("posted_date")
+        if isinstance(posted_date, str):
+            try:
+                from datetime import datetime
+
+                posted_date = datetime.fromisoformat(posted_date)
+            except (ValueError, TypeError):
+                posted_date = None
+
+        url = data.get("url") or data.get("job_url") or ""
+        if not url and job_id != "unknown":
+            url = f"https://www.linkedin.com/jobs/view/{job_id}/"
+
+        return {
+            "id": job_id,
+            "title": data.get("title", ""),
+            "company": data.get("company", ""),
+            "location": location,
+            "description": data.get("description", ""),
+            "requirements": data.get("requirements"),
+            "salary_range": data.get("salary"),
+            "is_remote": is_remote,
+            "experience_level": data.get("experience_level"),
+            "job_type": data.get("job_type"),
+            "posted_date": posted_date,
+            "url": url,
+            "raw_data": data,
+        }
+
     def can_handle(self, raw_input: dict[str, Any]) -> bool:
-        """Check if input contains LinkedIn job data."""
-        return "job_id" in raw_input and "raw_data" in raw_input
+        """Check if input contains LinkedIn job data.
+
+        Accepts the legacy ``{"job_id": ..., "raw_data": ...}`` format as well
+        as ``{"linkedin_url": ...}`` shortcuts.
+        """
+        if "job_id" in raw_input and "raw_data" in raw_input:
+            return True
+        if "linkedin_url" in raw_input:
+            return True
+        return False
 
 
 class JobSourceFactory:
