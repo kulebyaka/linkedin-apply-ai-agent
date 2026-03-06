@@ -1046,7 +1046,7 @@ async def cleanup_jobs(
     older_than_days: Annotated[int, Query(ge=1, description="Delete jobs older than this many days")] = 90,
     statuses: Annotated[
         list[str], Query(description="Only delete jobs with these statuses")
-    ] = ("declined", "failed"),
+    ] = ["declined", "failed"],
 ) -> dict:
     """Delete old jobs to prevent database bloat.
 

@@ -165,7 +165,7 @@ class LinkedInJobScraper:
                 self.browser.page_delay_min, self.browser.page_delay_max
             )
 
-        logger.info("Scraped %d jobs total across %d pages", len(all_jobs), page_num)
+        logger.info("Scraped %d jobs total across %d pages", len(all_jobs), page_num + 1)
         return all_jobs
 
     async def scrape_job_details(self, job_url: str) -> dict:
