@@ -2,13 +2,21 @@
 
 Tests verify the full user journey through the Tinder-like review interface:
 job submission, pending display, approve/decline/retry flows, PDF download,
-and job description rendering.
+CV HTML preview, and job description rendering.
 
 Run with:
     pytest tests/e2e/test_hitl_review.py -v -m e2e
 
-Requires: Playwright browsers installed (npx playwright install chromium).
-Servers are auto-started by session fixtures in conftest.py.
+Prerequisites:
+    - Playwright browsers installed: npx playwright install chromium
+    - Node modules installed in ui/: cd ui && npm install
+
+Servers (FastAPI backend + Vite UI dev server) are auto-started by session-scoped
+fixtures in conftest.py. LLM calls are mocked — no API keys required.
+
+Environment variables (optional):
+    API_PORT  — override the FastAPI server port (default: random free port)
+    UI_PORT   — override the Vite dev server port (default: random free port)
 """
 
 import re
