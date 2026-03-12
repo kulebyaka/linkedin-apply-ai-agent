@@ -114,8 +114,8 @@ Add Playwright E2E tests for the HITL review UI using a TDD approach: write fail
 
 ### Task 7: Verify acceptance criteria
 
-- [ ] Run all HITL E2E tests: `pytest tests/e2e/test_hitl_review.py -v`
-- [ ] Verify all 8+ tests pass:
+- [x] Run all HITL E2E tests: `pytest tests/e2e/test_hitl_review.py -v`
+- [x] Verify all 8+ tests pass:
   - Smoke test (page loads)
   - Pending jobs displayed
   - Navigation between jobs
@@ -124,8 +124,8 @@ Add Playwright E2E tests for the HITL review UI using a TDD approach: write fail
   - PDF download
   - Job description not truncated
   - Retry/regenerate flow
-- [ ] Run full test suite: `pytest tests/ -v --ignore=tests/eval`
-- [ ] Run linter: `black --check src/ tests/`
+- [x] Run full test suite: `pytest tests/ -v --ignore=tests/eval`
+- [x] Run linter: `black --check src/ tests/`
 
 ### Task 8: Update documentation
 
