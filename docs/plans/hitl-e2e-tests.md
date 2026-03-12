@@ -107,10 +107,10 @@ Add Playwright E2E tests for the HITL review UI using a TDD approach: write fail
 - Modify: `src/agents/retry_workflow.py` (retry workflow fix if needed)
 - Modify: `ui/src/routes/+page.svelte` or `ui/src/lib/stores/reviewQueue.svelte.ts` (if UI-side issue)
 
-- [ ] Investigate retry failure: check if the `/api/hitl/{id}/decide` endpoint with `decision=retry` returns an error, if the retry workflow fails to start, or if the UI doesn't handle the response correctly.
-- [ ] Fix the root cause (likely: retry workflow can't load job from repository, or state management issue in the store after retry).
-- [ ] Verify `test_retry_regenerates_cv` now passes.
-- [ ] Run project test suite: `pytest tests/ -v --ignore=tests/eval` — must pass before task 7.
+- [x] Investigate retry failure: check if the `/api/hitl/{id}/decide` endpoint with `decision=retry` returns an error, if the retry workflow fails to start, or if the UI doesn't handle the response correctly.
+- [x] Fix the root cause (likely: retry workflow can't load job from repository, or state management issue in the store after retry).
+- [x] Verify `test_retry_regenerates_cv` now passes.
+- [x] Run project test suite: `pytest tests/ -v --ignore=tests/eval` — must pass before task 7.
 
 ### Task 7: Verify acceptance criteria
 

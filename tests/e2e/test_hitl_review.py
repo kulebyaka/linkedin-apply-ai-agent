@@ -109,19 +109,16 @@ class TestApproveDeclineFlows:
         # Verify toast appears with success message
         expect(page.get_by_text("Application Approved")).to_be_visible(timeout=10_000)
 
-        # BUG: approve endpoint doesn't update repository status, so job
-        # remains in pending list. This will be fixed in a later task.
-        # For now, verify via API that the job's status changed.
+        # Verify the approved job is no longer in the pending list
         pending_ids = [
             j["job_id"]
             for j in httpx.get(
                 f"{mock_llm_and_api_server}/api/hitl/pending", timeout=10
             ).json()
         ]
-        if job_id in pending_ids:
-            pytest.xfail(
-                "Known bug: approve endpoint doesn't update repository status"
-            )
+        assert job_id not in pending_ids, (
+            f"Approved job {job_id} should not appear in pending list"
+        )
 
     def test_decline_job(
         self,

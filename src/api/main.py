@@ -943,6 +943,12 @@ async def submit_hitl_decision(
             # For now, just update status to "approved"
             logger.info(f"Job {job_id} approved for application (workflow not implemented)")
 
+            # Update status in repository
+            try:
+                await job_repository.update(job_id, {"status": "approved"})
+            except NotImplementedError:
+                pass
+
             # Update tracking
             unified_threads[job_id]["workflow_type"] = "application"
 
@@ -969,6 +975,12 @@ async def submit_hitl_decision(
 
         elif decision.decision == "retry":
             logger.info(f"Job {job_id} queued for retry with feedback: {decision.feedback}")
+
+            # Update repository status to "retrying" so job leaves pending queue
+            try:
+                await job_repository.update(job_id, {"status": "retrying"})
+            except NotImplementedError:
+                pass
 
             # Create new thread for retry workflow
             retry_thread_id = str(uuid.uuid4())
