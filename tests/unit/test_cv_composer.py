@@ -1,13 +1,14 @@
 """Tests for CV Composer service"""
 
-import pytest
 import json
 from pathlib import Path
-from unittest.mock import Mock, MagicMock, patch
-from src.services.cv_composer import CVComposer
-from src.models.cv import CV, JobSummary
-from src.llm.provider import BaseLLMClient
+from unittest.mock import patch
 
+import pytest
+
+from src.llm.provider import BaseLLMClient
+from src.models.cv import CVLLMOutput, JobSummary
+from src.services.cv_composer import CVComposer, CVCompositionError
 
 # Test fixtures directory
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -145,190 +146,207 @@ class TestJobSummarization:
         assert result["soft_skills"] == []
 
 
-class TestSectionComposers:
-    """Test individual section composition methods"""
+class TestComposeCVIntegration:
+    """Test compose_cv() end-to-end flow"""
 
-    @pytest.fixture
-    def job_summary(self):
-        """Sample job summary"""
-        return {
-            "technical_skills": ["Python", "Django", "AWS"],
-            "soft_skills": ["Communication", "Leadership"],
-            "education_reqs": ["Bachelor's"],
+    def test_compose_cv_end_to_end(self, cv_composer, mock_llm_client, master_cv, job_posting):
+        """Test that compose_cv orchestrates summarize -> compose -> validate correctly"""
+        # Master CV needs 'contact' key for pass-through validation
+        master_cv_with_contact = {
+            **master_cv,
+            "contact": master_cv.get("contact_info", {
+                "full_name": "John Doe",
+                "email": "john@example.com",
+            }),
+        }
+
+        # Mock response for job summary (triggered by "job description" in prompt)
+        mock_llm_client.set_response("job description", {
+            "technical_skills": ["Python", "Django", "AWS", "Docker"],
+            "soft_skills": ["Communication"],
+            "education_reqs": ["Bachelor's degree"],
             "experience_reqs": {"years": 5, "level": "senior"},
-            "responsibilities": ["Build APIs", "Design systems"],
-            "nice_to_have": ["Docker"]
+            "responsibilities": ["Design microservices"],
+            "nice_to_have": ["Kubernetes"],
+        })
+
+        # Mock response for full CV generation (triggered by "master cv" in prompt)
+        mock_llm_client.set_response("master cv", {
+            "summary": "Senior Software Engineer with 8+ years of experience",
+            "experiences": [
+                {
+                    "company": "Tech Corp",
+                    "position": "Senior Software Engineer",
+                    "start_date": "2020-01-15",
+                    "end_date": None,
+                    "is_current": True,
+                    "location": "San Francisco, CA",
+                    "description": "Lead development of cloud-based microservices platform",
+                    "achievements": [
+                        "Architected microservices platform serving 1M+ users",
+                        "Reduced deployment time by 60%",
+                    ],
+                    "technologies": ["Python", "Django", "AWS", "Docker"],
+                }
+            ],
+            "education": [
+                {
+                    "institution": "Stanford University",
+                    "degree": "Bachelor of Science",
+                    "field_of_study": "Computer Science",
+                    "start_date": "2011-09-01",
+                    "end_date": "2015-06-15",
+                }
+            ],
+            "skills": [
+                {"name": "Python", "category": "Programming"},
+                {"name": "AWS", "category": "Cloud"},
+            ],
+            "projects": [],
+            "certifications": [],
+        })
+
+        result = cv_composer.compose_cv(master_cv_with_contact, job_posting)
+
+        assert isinstance(result, CVLLMOutput)
+        assert len(result.experiences) == 1
+        assert result.experiences[0].company == "Tech Corp"
+        assert result.summary == "Senior Software Engineer with 8+ years of experience"
+        assert result.contact is not None
+        assert result.contact.full_name == "John Doe"
+        # Verify both LLM calls were made (summary + full CV)
+        assert mock_llm_client.call_count == 2
+
+    def test_compose_cv_applies_length_limits(self, mock_llm_client, master_cv, job_posting):
+        """Test that compose_cv enforces length limits from settings"""
+        from src.services.cv_composer import CVComposerSettings
+
+        settings = CVComposerSettings(cv_max_experiences=1, cv_max_skills=1)
+        composer = CVComposer(llm_client=mock_llm_client, settings=settings)
+
+        master_cv_with_contact = {
+            **master_cv,
+            "contact": master_cv.get("contact_info", {
+                "full_name": "John Doe",
+                "email": "john@example.com",
+            }),
         }
 
-    def test_compose_summary(self, cv_composer, mock_llm_client, master_cv, job_summary):
-        """Test professional summary composition"""
-        mock_response = {
-            "summary": "Senior Software Engineer with 8+ years specializing in Python and Django. Proven track record in building scalable cloud-based solutions on AWS."
-        }
-        mock_llm_client.set_response("professional summary", mock_response)
+        mock_llm_client.set_response("job description", {
+            "technical_skills": ["Python"],
+            "soft_skills": [],
+            "education_reqs": [],
+            "experience_reqs": {"years": None, "level": None},
+            "responsibilities": [],
+            "nice_to_have": [],
+        })
 
-        result = cv_composer._compose_summary(master_cv, job_summary)
+        mock_llm_client.set_response("master cv", {
+            "summary": "Engineer",
+            "experiences": [
+                {
+                    "company": "Tech Corp",
+                    "position": "Engineer",
+                    "start_date": "2020-01-01",
+                    "end_date": None,
+                    "is_current": True,
+                    "location": "SF",
+                    "description": "Dev",
+                    "achievements": [],
+                    "technologies": [],
+                },
+                {
+                    "company": "Tech Corp",
+                    "position": "Junior Engineer",
+                    "start_date": "2018-01-01",
+                    "end_date": "2019-12-31",
+                    "is_current": False,
+                    "location": "SF",
+                    "description": "Dev",
+                    "achievements": [],
+                    "technologies": [],
+                },
+            ],
+            "education": [],
+            "skills": [
+                {"name": "Python", "category": "Programming"},
+                {"name": "Go", "category": "Programming"},
+            ],
+            "projects": [],
+            "certifications": [],
+        })
 
-        assert isinstance(result, str)
-        assert "Python" in result or "Django" in result or len(result) > 0
+        result = composer.compose_cv(master_cv_with_contact, job_posting)
 
-    def test_compose_experiences(self, cv_composer, mock_llm_client, master_cv, job_summary):
-        """Test experience section composition"""
-        mock_response = [
-            {
-                "company": "Tech Corp",
-                "position": "Senior Software Engineer",
-                "start_date": "2020-01-15",
-                "end_date": None,
-                "is_current": True,
-                "location": "San Francisco, CA",
-                "description": "Lead development of cloud-based microservices platform",
-                "achievements": [
-                    "Architected microservices platform with Python and Django",
-                    "Deployed on AWS with Docker containers"
-                ],
-                "technologies": ["Python", "Django", "AWS", "Docker"]
-            }
-        ]
-        mock_llm_client.set_response("experience", mock_response)
-
-        result = cv_composer._compose_experiences(master_cv, job_summary)
-
-        assert isinstance(result, list)
-        assert len(result) > 0
-        assert result[0]["company"] == "Tech Corp"
-
-    def test_compose_experiences_empty(self, cv_composer, mock_llm_client, job_summary):
-        """Test experience composition with no experiences"""
-        empty_cv = {"experiences": []}
-
-        result = cv_composer._compose_experiences(empty_cv, job_summary)
-
-        assert result == []
-
-    def test_compose_education(self, cv_composer, mock_llm_client, master_cv, job_summary):
-        """Test education section composition"""
-        mock_response = [
-            {
-                "institution": "Stanford University",
-                "degree": "Bachelor of Science",
-                "field_of_study": "Computer Science",
-                "start_date": "2011-09-01",
-                "end_date": "2015-06-15",
-                "is_current": False,
-                "location": None,
-                "grade": "3.8",
-                "achievements": ["Dean's List", "CS Club President"]
-            }
-        ]
-        mock_llm_client.set_response("education", mock_response)
-
-        result = cv_composer._compose_education(master_cv, job_summary)
-
-        assert isinstance(result, list)
-        assert len(result) > 0
-
-    def test_compose_skills(self, cv_composer, mock_llm_client, master_cv, job_summary):
-        """Test skills section composition"""
-        mock_response = [
-            {
-                "category": "Programming Languages",
-                "skills": [
-                    {"name": "Python", "proficiency": "expert"},
-                    {"name": "JavaScript", "proficiency": "advanced"}
-                ]
-            },
-            {
-                "category": "Frameworks",
-                "skills": [
-                    {"name": "Django", "proficiency": "expert"}
-                ]
-            }
-        ]
-        mock_llm_client.set_response("skills", mock_response)
-
-        result = cv_composer._compose_skills(master_cv, job_summary)
-
-        assert isinstance(result, list)
-        assert len(result) > 0
-        assert "category" in result[0]
-        assert "skills" in result[0]
-
-    def test_compose_projects(self, cv_composer, mock_llm_client, master_cv, job_summary):
-        """Test projects section composition"""
-        mock_response = [
-            {
-                "name": "OpenSource ML Library",
-                "description": "Machine learning library for time-series prediction using Python",
-                "role": None,
-                "start_date": None,
-                "end_date": None,
-                "technologies": ["Python", "TensorFlow"],
-                "achievements": ["1000+ stars"],
-                "url": "https://github.com/johndoe/ml-lib"
-            }
-        ]
-        mock_llm_client.set_response("projects", mock_response)
-
-        result = cv_composer._compose_projects(master_cv, job_summary)
-
-        assert isinstance(result, list)
-        assert len(result) > 0
-
-    def test_compose_certifications(self, cv_composer, mock_llm_client, master_cv, job_summary):
-        """Test certifications composition"""
-        mock_response = [
-            "AWS Certified Solutions Architect - Associate (2022)",
-            "Certified Kubernetes Administrator (2021)"
-        ]
-        mock_llm_client.set_response("certifications", mock_response)
-
-        result = cv_composer._compose_certifications(master_cv, job_summary)
-
-        assert isinstance(result, list)
+        assert len(result.experiences) == 1
+        assert len(result.skills) == 1
 
 
 class TestValidation:
     """Test CV validation and hallucination detection"""
 
-    def test_validate_output_success(self, cv_composer, master_cv):
-        """Test successful validation"""
-        # Create valid tailored CV (same as master for this test)
-        tailored_cv = master_cv.copy()
+    @pytest.fixture
+    def valid_tailored_cv(self, master_cv):
+        """Build a tailored CV dict that matches CVLLMOutput schema."""
+        return {
+            "summary": master_cv["summary"],
+            "experiences": [
+                {
+                    "company": "Tech Corp",
+                    "position": "Senior Software Engineer",
+                    "start_date": "2020-01-15",
+                    "end_date": None,
+                    "is_current": True,
+                    "location": "San Francisco, CA",
+                    "description": "Lead development of cloud-based microservices platform",
+                    "achievements": [
+                        "Architected microservices platform serving 1M+ users",
+                        "Reduced deployment time by 60%",
+                    ],
+                    "technologies": ["Python", "Django", "AWS", "Docker"],
+                }
+            ],
+            "education": [
+                {
+                    "institution": "Stanford University",
+                    "degree": "Bachelor of Science",
+                    "field_of_study": "Computer Science",
+                    "start_date": "2011-09-01",
+                    "end_date": "2015-06-15",
+                    "is_current": False,
+                }
+            ],
+            "skills": [
+                {"name": "Python", "category": "Programming"},
+                {"name": "AWS", "category": "Cloud"},
+            ],
+            "projects": [],
+            "certifications": [],
+        }
 
-        result = cv_composer._validate_output(tailored_cv, master_cv)
+    def test_validate_output_success(self, cv_composer, master_cv, valid_tailored_cv):
+        """Test successful validation returns CVLLMOutput"""
+        result = cv_composer._validate_output(valid_tailored_cv, master_cv)
+        assert isinstance(result, CVLLMOutput)
+        assert len(result.experiences) > 0
+        assert result.summary == master_cv["summary"]
 
-        assert isinstance(result, dict)
-        assert "contact" in result
-        assert "experiences" in result
-
-    def test_validate_output_schema_validation(self, cv_composer, master_cv):
+    def test_validate_output_schema_validation(self, cv_composer, master_cv, valid_tailored_cv):
         """Test that Pydantic schema validation works"""
-        tailored_cv = master_cv.copy()
-
-        # Should not raise
-        result = cv_composer._validate_output(tailored_cv, master_cv)
-
-        # Validate it matches CV model
-        cv = CV(**result)
-        assert cv.contact.full_name == "John Doe"
+        result = cv_composer._validate_output(valid_tailored_cv, master_cv)
+        assert isinstance(result, CVLLMOutput)
+        assert result.experiences[0].company == "Tech Corp"
 
     def test_validate_output_invalid_schema(self, cv_composer, master_cv):
         """Test validation fails with invalid schema"""
-        # Create invalid CV (missing required fields)
-        invalid_cv = {"contact": {}}  # Missing required contact fields
+        invalid_cv = {"contact": {}}  # Missing required 'summary' field
 
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(CVCompositionError, match="(?i)schema"):
             cv_composer._validate_output(invalid_cv, master_cv)
 
-        assert "schema" in str(exc_info.value).lower()
-
-    def test_validate_detects_hallucinated_companies(self, cv_composer, master_cv):
+    def test_validate_detects_hallucinated_companies(self, cv_composer, master_cv, valid_tailored_cv):
         """Test that hallucinated companies are detected"""
-        tailored_cv = master_cv.copy()
-
-        # Add fake company
-        tailored_cv["experiences"].append({
+        valid_tailored_cv["experiences"].append({
             "company": "Fake Corp",
             "position": "Engineer",
             "start_date": "2020-01-01",
@@ -337,233 +355,23 @@ class TestValidation:
             "location": "Nowhere",
             "description": "Fake job",
             "achievements": [],
-            "technologies": []
+            "technologies": [],
         })
 
-        # Should log warning but still validate
-        # (current implementation logs warning, doesn't raise)
-        with patch('src.services.cv_composer.logger') as mock_logger:
-            result = cv_composer._validate_output(tailored_cv, master_cv)
+        with patch("src.services.cv_composer.logger") as mock_logger:
+            cv_composer._validate_output(valid_tailored_cv, master_cv)
             mock_logger.warning.assert_called()
 
-    def test_validate_detects_hallucinated_institutions(self, cv_composer, master_cv):
+    def test_validate_detects_hallucinated_institutions(self, cv_composer, master_cv, valid_tailored_cv):
         """Test that hallucinated educational institutions are detected"""
-        tailored_cv = master_cv.copy()
-
-        # Add fake institution
-        tailored_cv["education"].append({
+        valid_tailored_cv["education"].append({
             "institution": "Fake University",
             "degree": "PhD",
             "field_of_study": "Computer Science",
             "start_date": "2015-09-01",
             "end_date": "2019-06-01",
-            "gpa": None,
-            "achievements": []
         })
 
-        with patch('src.services.cv_composer.logger') as mock_logger:
-            result = cv_composer._validate_output(tailored_cv, master_cv)
+        with patch("src.services.cv_composer.logger") as mock_logger:
+            cv_composer._validate_output(valid_tailored_cv, master_cv)
             mock_logger.warning.assert_called()
-
-
-class TestFullCVComposition:
-    """Integration tests for full CV composition"""
-
-    def test_compose_cv_full_workflow(self, cv_composer, mock_llm_client, master_cv, job_posting):
-        """Test complete CV composition workflow"""
-        # Set up all mock responses
-        mock_llm_client.set_response("job description", {
-            "technical_skills": ["Python", "Django", "AWS"],
-            "soft_skills": ["Communication"],
-            "education_reqs": ["Bachelor's"],
-            "experience_reqs": {"years": 5, "level": "senior"},
-            "responsibilities": ["Build systems"],
-            "nice_to_have": []
-        })
-
-        mock_llm_client.set_response("professional summary", {
-            "summary": "Experienced Python engineer"
-        })
-
-        mock_llm_client.set_response("experience", [{
-            "company": "Tech Corp",
-            "position": "Senior Software Engineer",
-            "start_date": "2020-01-15",
-            "end_date": None,
-            "is_current": True,
-            "location": "San Francisco, CA",
-            "description": "Lead development",
-            "achievements": ["Built platform"],
-            "technologies": ["Python", "Django"]
-        }])
-
-        mock_llm_client.set_response("education", [{
-            "institution": "Stanford University",
-            "degree": "Bachelor of Science",
-            "field_of_study": "Computer Science",
-            "start_date": "2011-09-01",
-            "end_date": "2015-06-15",
-            "is_current": False,
-            "location": None,
-            "grade": "3.8",
-            "achievements": []
-        }])
-
-        mock_llm_client.set_response("skills", [{
-            "category": "Programming Languages",
-            "skills": [{"name": "Python", "proficiency": "expert"}]
-        }])
-
-        mock_llm_client.set_response("projects", [{
-            "name": "ML Library",
-            "description": "Machine learning",
-            "role": None,
-            "start_date": None,
-            "end_date": None,
-            "technologies": ["Python"],
-            "achievements": [],
-            "url": None
-        }])
-
-        mock_llm_client.set_response("certifications", [
-            "AWS Certified Solutions Architect - Associate (2022)"
-        ])
-
-        # Execute
-        result = cv_composer.compose_cv(master_cv, job_posting)
-
-        # Validate
-        assert isinstance(result, dict)
-        assert "contact" in result
-        assert "summary" in result
-        assert "experiences" in result
-        assert "education" in result
-        assert "skills" in result
-        assert "projects" in result
-        assert "certifications" in result
-
-        # Contact should be unchanged
-        assert result["contact"] == master_cv["contact"]
-
-        # Languages should be unchanged
-        assert result["languages"] == master_cv["languages"]
-
-    def test_compose_cv_preserves_contact_info(self, cv_composer, mock_llm_client, master_cv, job_posting):
-        """Test that contact information is preserved unchanged"""
-        # Set minimal mock responses
-        mock_llm_client.set_response("job", {
-            "technical_skills": [],
-            "soft_skills": [],
-            "education_reqs": [],
-            "experience_reqs": {"years": None, "level": None},
-            "responsibilities": [],
-            "nice_to_have": []
-        })
-        mock_llm_client.set_response("summary", {"summary": "Test"})
-        mock_llm_client.set_response("experience", [])
-        mock_llm_client.set_response("education", [])
-        mock_llm_client.set_response("skills", [])
-        mock_llm_client.set_response("projects", [])
-        mock_llm_client.set_response("certifications", [])
-
-        result = cv_composer.compose_cv(master_cv, job_posting)
-
-        # Contact info should be exactly the same
-        assert result["contact"] == master_cv["contact"]
-        assert result["contact"]["full_name"] == "John Doe"
-        assert result["contact"]["email"] == "john.doe@example.com"
-
-    def test_compose_cv_calls_all_sections(self, cv_composer, mock_llm_client, master_cv, job_posting):
-        """Test that all composition methods are called"""
-        # Set up basic responses
-        mock_llm_client.set_response("job", {
-            "technical_skills": [], "soft_skills": [], "education_reqs": [],
-            "experience_reqs": {"years": None, "level": None},
-            "responsibilities": [], "nice_to_have": []
-        })
-        mock_llm_client.set_response("summary", {"summary": "Test"})
-        mock_llm_client.set_response("experience", [])
-        mock_llm_client.set_response("education", [])
-        mock_llm_client.set_response("skills", [])
-        mock_llm_client.set_response("projects", [])
-        mock_llm_client.set_response("certifications", [])
-
-        with patch.object(cv_composer, '_compose_summary', return_value="Test") as mock_summary, \
-             patch.object(cv_composer, '_compose_experiences', return_value=[]) as mock_exp, \
-             patch.object(cv_composer, '_compose_education', return_value=[]) as mock_edu, \
-             patch.object(cv_composer, '_compose_skills', return_value=[]) as mock_skills, \
-             patch.object(cv_composer, '_compose_projects', return_value=[]) as mock_proj, \
-             patch.object(cv_composer, '_compose_certifications', return_value=[]) as mock_cert:
-
-            cv_composer.compose_cv(master_cv, job_posting)
-
-            # Verify all methods were called
-            mock_summary.assert_called_once()
-            mock_exp.assert_called_once()
-            mock_edu.assert_called_once()
-            mock_skills.assert_called_once()
-            mock_proj.assert_called_once()
-            mock_cert.assert_called_once()
-
-
-class TestEdgeCases:
-    """Test edge cases and error handling"""
-
-    def test_empty_cv(self, cv_composer, mock_llm_client, job_posting):
-        """Test with minimal/empty CV"""
-        empty_cv = {
-            "contact": {
-                "full_name": "Test User",
-                "email": "test@example.com",
-                "phone": None,
-                "location": None,
-                "linkedin_url": None,
-                "github_url": None,
-                "portfolio_url": None
-            },
-            "summary": "",
-            "experiences": [],
-            "education": [],
-            "skills": [],
-            "projects": [],
-            "certifications": [],
-            "languages": []
-        }
-
-        # Set up responses
-        mock_llm_client.set_response("job", {
-            "technical_skills": [], "soft_skills": [], "education_reqs": [],
-            "experience_reqs": {"years": None, "level": None},
-            "responsibilities": [], "nice_to_have": []
-        })
-        mock_llm_client.set_response("summary", {"summary": "Entry-level professional"})
-
-        result = cv_composer.compose_cv(empty_cv, job_posting)
-
-        assert result["experiences"] == []
-        assert result["education"] == []
-
-    def test_minimal_job_posting(self, cv_composer, mock_llm_client, master_cv):
-        """Test with minimal job posting"""
-        minimal_job = {
-            "title": "Developer",
-            "company": "Company",
-            "description": "",
-            "requirements": ""
-        }
-
-        mock_llm_client.set_response("job", {
-            "technical_skills": [], "soft_skills": [], "education_reqs": [],
-            "experience_reqs": {"years": None, "level": None},
-            "responsibilities": [], "nice_to_have": []
-        })
-        mock_llm_client.set_response("summary", {"summary": "Test"})
-        mock_llm_client.set_response("experience", master_cv["experiences"])
-        mock_llm_client.set_response("education", master_cv["education"])
-        mock_llm_client.set_response("skills", [])
-        mock_llm_client.set_response("projects", [])
-        mock_llm_client.set_response("certifications", [])
-
-        result = cv_composer.compose_cv(master_cv, minimal_job)
-
-        assert isinstance(result, dict)

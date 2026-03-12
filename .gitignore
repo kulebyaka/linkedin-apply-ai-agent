@@ -79,6 +79,7 @@ Thumbs.db
 data/cv/*.json
 data/jobs/
 data/generated_cvs/
+data/linkedin_cookies.json
 !data/cv/master_cv.example.json
 scripts/test_job.json
 
@@ -113,3 +114,7 @@ Obsolete/
 nul
 omnara-windows-x64.exe
 scripts/test_job.json
+
+# ralphex progress logs
+.ralphex/progress/
+settings.local.json

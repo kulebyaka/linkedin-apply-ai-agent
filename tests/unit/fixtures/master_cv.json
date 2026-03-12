@@ -1,0 +1,41 @@
+{
+  "contact_info": {
+    "full_name": "John Doe",
+    "email": "john@example.com",
+    "phone": "+1234567890",
+    "location": "San Francisco, CA"
+  },
+  "summary": "Senior Software Engineer with 8+ years of experience",
+  "experiences": [
+    {
+      "company": "Tech Corp",
+      "position": "Senior Software Engineer",
+      "start_date": "2020-01-15",
+      "end_date": null,
+      "is_current": true,
+      "location": "San Francisco, CA",
+      "description": "Lead development of cloud-based microservices platform",
+      "achievements": [
+        "Architected microservices platform serving 1M+ users",
+        "Reduced deployment time by 60%"
+      ],
+      "technologies": ["Python", "Django", "AWS", "Docker"]
+    }
+  ],
+  "education": [
+    {
+      "institution": "Stanford University",
+      "degree": "Bachelor of Science",
+      "field_of_study": "Computer Science",
+      "start_date": "2011-09-01",
+      "end_date": "2015-06-15",
+      "is_current": false
+    }
+  ],
+  "skills": [
+    {"category": "Programming", "items": ["Python", "JavaScript", "Go"]},
+    {"category": "Cloud", "items": ["AWS", "Docker", "Kubernetes"]}
+  ],
+  "projects": [],
+  "certifications": []
+}

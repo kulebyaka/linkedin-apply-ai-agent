@@ -5,10 +5,13 @@ Provides two sets of endpoints:
 2. Unified endpoints (/api/jobs/*, /api/hitl/*) - new two-workflow pipeline
 """
 
+import asyncio
+import logging
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,11 +42,23 @@ from src.models.unified import (
     JobSubmitResponse,
     PendingApproval,
 )
+from src.services.job_queue import get_job_queue, process_queue
 from src.services.job_repository import JobRepository, get_repository
 from src.utils.logger import setup_api_logger
 
 settings = get_settings()
 logger = setup_api_logger(level="INFO")
+
+# Ensure all src.* loggers propagate to a handler (scheduler, scraper, etc.)
+_src_logger = logging.getLogger("src")
+if not _src_logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter(
+        "[%(asctime)s] %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    ))
+    _src_logger.addHandler(_handler)
+    _src_logger.setLevel(logging.INFO)
 
 # Initialize LangGraph workflows (singletons)
 preparation_workflow = create_preparation_workflow()
@@ -64,6 +79,12 @@ workflow_created_at: dict[str, datetime] = {}  # Track creation time
 
 # Unified workflow thread tracking
 unified_threads: dict[str, dict] = {}  # job_id -> {thread_id, workflow_type, created_at}
+
+# LinkedIn search scheduler (initialized on startup if enabled)
+_linkedin_scheduler = None
+_linkedin_browser = None
+_queue_consumer_task = None
+_linkedin_init_lock = asyncio.Lock()
 
 app = FastAPI(
     title="LinkedIn Job Application Agent API",
@@ -100,17 +121,150 @@ async def log_requests(request: Request, call_next):
     return response
 
 
+_consumer_restart_count = 0
+_MAX_CONSUMER_RESTARTS = 5
+_CONSUMER_BACKOFF_BASE = 2.0  # seconds
+_CONSUMER_STABLE_THRESHOLD = 60.0  # seconds: reset counter if consumer ran this long
+_consumer_restart_handle: asyncio.TimerHandle | None = None
+_shutting_down = False
+
+
+def _start_queue_consumer(queue) -> asyncio.Task:
+    """Create a queue consumer task with automatic restart on failure (with backoff)."""
+    started_at = time.monotonic()
+
+    def _on_consumer_done(task: asyncio.Task) -> None:
+        global _queue_consumer_task, _consumer_restart_count, _consumer_restart_handle
+        if task.cancelled() or _shutting_down:
+            return
+        exc = task.exception()
+        if exc is not None:
+            # If consumer ran long enough, treat as intermittent — reset counter
+            uptime = time.monotonic() - started_at
+            if uptime >= _CONSUMER_STABLE_THRESHOLD:
+                _consumer_restart_count = 0
+
+            _consumer_restart_count += 1
+            if _consumer_restart_count > _MAX_CONSUMER_RESTARTS:
+                logger.error(
+                    "Queue consumer crashed %d times, giving up: %s",
+                    _consumer_restart_count, exc,
+                )
+                return
+            delay = _CONSUMER_BACKOFF_BASE * (2 ** (_consumer_restart_count - 1))
+            logger.error(
+                "Queue consumer crashed (%d/%d): %s — restarting in %.1fs",
+                _consumer_restart_count, _MAX_CONSUMER_RESTARTS, exc, delay,
+            )
+            loop = asyncio.get_running_loop()
+            if _consumer_restart_handle is not None:
+                _consumer_restart_handle.cancel()
+            _consumer_restart_handle = loop.call_later(delay, _restart_consumer, queue)
+        else:
+            # Successful exit resets the counter
+            _consumer_restart_count = 0
+
+    def _register_linkedin_job(job_id: str, thread_id: str) -> None:
+        """Register a LinkedIn-sourced job in unified_threads for HITL tracking."""
+        unified_threads[job_id] = {
+            "thread_id": thread_id,
+            "workflow_type": "preparation",
+            "created_at": datetime.now(tz=timezone.utc),
+        }
+
+    task = asyncio.create_task(
+        process_queue(
+            queue,
+            job_repository=job_repository,
+            delay_between_jobs=2.0,
+            on_job_processed=_register_linkedin_job,
+        )
+    )
+    task.add_done_callback(_on_consumer_done)
+    return task
+
+
+def _restart_consumer(queue) -> None:
+    """Restart the queue consumer (called from call_later).
+
+    Guards against duplicate consumers by checking if one is already running.
+    """
+    global _queue_consumer_task, _consumer_restart_handle, _consumer_restart_count
+    _consumer_restart_handle = None
+    if _shutting_down:
+        return
+    if _queue_consumer_task is not None and not _queue_consumer_task.done():
+        logger.info("Consumer already running, skipping restart")
+        _consumer_restart_count = 0  # Another path started it; reset backoff
+        return
+    _queue_consumer_task = _start_queue_consumer(queue)
+
+
 @app.on_event("startup")
 async def startup_event():
-    """Initialize repository on startup."""
+    """Initialize repository and optional LinkedIn scheduler on startup."""
+    global _linkedin_scheduler, _linkedin_browser, _queue_consumer_task
+    global _shutting_down, _consumer_restart_count
+
+    _shutting_down = False
+    _consumer_restart_count = 0
+
     logger.info(f"Starting up with repository type: {settings.repo_type}")
     await job_repository.initialize()
     logger.info("Repository initialized successfully")
 
+    if settings.linkedin_search_schedule_enabled:
+        try:
+            from src.services.browser_automation import LinkedInAutomation
+            from src.services.linkedin_scraper import LinkedInJobScraper
+            from src.services.scheduler import LinkedInSearchScheduler
+
+            _linkedin_browser = LinkedInAutomation(settings)
+            await _linkedin_browser.initialize()
+
+            scraper = LinkedInJobScraper(_linkedin_browser, settings)
+            queue = get_job_queue()
+
+            _linkedin_scheduler = LinkedInSearchScheduler(settings, scraper, queue)
+            _linkedin_scheduler.start()
+
+            # Start queue consumer in background
+            _queue_consumer_task = _start_queue_consumer(queue)
+
+            logger.info("LinkedIn search scheduler started")
+        except Exception:
+            logger.exception("Failed to start LinkedIn search scheduler")
+
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Close repository on shutdown."""
+    """Close repository, scheduler, and browser on shutdown."""
+    global _linkedin_scheduler, _linkedin_browser, _queue_consumer_task
+    global _shutting_down, _consumer_restart_handle
+
+    _shutting_down = True
+
+    # Cancel any pending delayed restart
+    if _consumer_restart_handle is not None:
+        _consumer_restart_handle.cancel()
+        _consumer_restart_handle = None
+
+    if _linkedin_scheduler:
+        _linkedin_scheduler.stop()
+        _linkedin_scheduler = None
+
+    if _queue_consumer_task:
+        _queue_consumer_task.cancel()
+        try:
+            await _queue_consumer_task
+        except asyncio.CancelledError:
+            pass
+        _queue_consumer_task = None
+
+    if _linkedin_browser:
+        await _linkedin_browser.close()
+        _linkedin_browser = None
+
     logger.info("Shutting down repository...")
     await job_repository.close()
     logger.info("Repository closed")
@@ -156,7 +310,7 @@ async def generate_cv(
 
         # Store thread mapping
         workflow_threads[job_id] = thread_id
-        workflow_created_at[job_id] = datetime.now()
+        workflow_created_at[job_id] = datetime.now(tz=timezone.utc)
 
         # Load master CV
         master_cv = load_master_cv()
@@ -202,7 +356,7 @@ async def generate_cv(
 
     except Exception as e:
         logger.error(f"Failed to submit job: {e}", exc_info=True)
-        raise HTTPException(500, f"Failed to submit job: {str(e)}")
+        raise HTTPException(500, "Failed to submit job") from None
 
 
 @app.get("/api/cv/status/{job_id}", response_model=CVGenerationStatus)
@@ -232,8 +386,8 @@ async def get_cv_status(job_id: str) -> CVGenerationStatus:
         return CVGenerationStatus(
             job_id=job_id,
             status=state_values.get("current_step", "queued"),
-            created_at=workflow_created_at.get(job_id, datetime.now()),
-            completed_at=datetime.now()
+            created_at=workflow_created_at.get(job_id, datetime.now(tz=timezone.utc)),
+            completed_at=datetime.now(tz=timezone.utc)
             if state_values.get("current_step") in ["completed", "failed"]
             else None,
             error_message=state_values.get("error_message"),
@@ -244,7 +398,7 @@ async def get_cv_status(job_id: str) -> CVGenerationStatus:
         raise
     except Exception as e:
         logger.error(f"Failed to get status for job {job_id}: {e}", exc_info=True)
-        raise HTTPException(500, f"Failed to get job status: {str(e)}")
+        raise HTTPException(500, "Failed to get job status") from None
 
 
 @app.get("/api/cv/download/{job_id}")
@@ -270,9 +424,13 @@ async def download_cv(job_id: str):
         if not status.pdf_path:
             raise HTTPException(404, "PDF path not set in job state")
 
-        pdf_path = Path(status.pdf_path)
+        pdf_path = Path(status.pdf_path).resolve()
+        allowed_dir = Path(settings.generated_cvs_dir).resolve()
+        if not pdf_path.is_relative_to(allowed_dir):
+            raise HTTPException(403, "Access denied")
+
         if not pdf_path.exists():
-            raise HTTPException(404, f"PDF file not found: {pdf_path}")
+            raise HTTPException(404, "PDF file not found")
 
         # Return file
         return FileResponse(
@@ -286,7 +444,7 @@ async def download_cv(job_id: str):
         raise
     except Exception as e:
         logger.error(f"Failed to download CV for job {job_id}: {e}", exc_info=True)
-        raise HTTPException(500, f"Failed to download CV: {str(e)}")
+        raise HTTPException(500, "Failed to download CV") from None
 
 
 # =============================================================================
@@ -397,7 +555,7 @@ async def submit_job(
         unified_threads[job_id] = {
             "thread_id": thread_id,
             "workflow_type": "preparation",
-            "created_at": datetime.now(),
+            "created_at": datetime.now(tz=timezone.utc),
         }
 
         # Run workflow in background
@@ -420,7 +578,92 @@ async def submit_job(
         raise
     except Exception as e:
         logger.error(f"Failed to submit job: {e}", exc_info=True)
-        raise HTTPException(500, f"Failed to submit job: {str(e)}")
+        raise HTTPException(500, "Failed to submit job") from None
+
+
+# =============================================================================
+# LinkedIn Search Endpoints
+# (must be defined BEFORE /api/jobs/{job_id} wildcard routes)
+# =============================================================================
+
+
+@app.post("/api/jobs/linkedin-search")
+async def trigger_linkedin_search():
+    """Trigger a LinkedIn search manually.
+
+    Runs search in background and returns immediately.
+    """
+    global _linkedin_scheduler, _linkedin_browser, _queue_consumer_task
+
+    async with _linkedin_init_lock:
+        if _linkedin_scheduler is None:
+            # Create a temporary scheduler for one-off search
+            try:
+                from src.services.browser_automation import LinkedInAutomation
+                from src.services.linkedin_scraper import LinkedInJobScraper
+                from src.services.scheduler import LinkedInSearchScheduler
+
+                if _linkedin_browser is None:
+                    browser = LinkedInAutomation(settings)
+                    await browser.initialize()
+                    _linkedin_browser = browser
+
+                scraper = LinkedInJobScraper(_linkedin_browser, settings)
+                queue = get_job_queue()
+                _linkedin_scheduler = LinkedInSearchScheduler(settings, scraper, queue)
+            except Exception:
+                logger.exception("Failed to initialize LinkedIn search components")
+                raise HTTPException(500, "Failed to initialize LinkedIn search components") from None
+
+        # Ensure a queue consumer is running (whether scheduler was just created or already existed)
+        queue = get_job_queue()
+        if _queue_consumer_task is None or _queue_consumer_task.done():
+            # Cancel any pending delayed restart to avoid orphaned timers
+            global _consumer_restart_handle, _consumer_restart_count
+            if _consumer_restart_handle is not None:
+                _consumer_restart_handle.cancel()
+                _consumer_restart_handle = None
+            # Reset circuit breaker so the manually started consumer gets full retry budget
+            _consumer_restart_count = 0
+            _queue_consumer_task = _start_queue_consumer(queue)
+
+    async def _run_search():
+        try:
+            count = await _linkedin_scheduler.run_search()
+            logger.info("Manual LinkedIn search completed: %d jobs found", count)
+        except Exception:
+            logger.exception("Manual LinkedIn search failed")
+
+    asyncio.create_task(_run_search())
+
+    return {"status": "started", "message": "LinkedIn search triggered"}
+
+
+@app.get("/api/jobs/linkedin-search/status")
+async def get_linkedin_search_status():
+    """Return current scheduler state."""
+    if _linkedin_scheduler is None:
+        return {
+            "enabled": settings.linkedin_search_schedule_enabled,
+            "running": False,
+            "last_run_time": None,
+            "last_run_jobs": 0,
+            "next_run_time": None,
+            "queue_size": get_job_queue().size(),
+        }
+
+    return {
+        "enabled": settings.linkedin_search_schedule_enabled,
+        "running": _linkedin_scheduler.is_running,
+        "last_run_time": _linkedin_scheduler.last_run_time.isoformat()
+        if _linkedin_scheduler.last_run_time
+        else None,
+        "last_run_jobs": _linkedin_scheduler.last_run_jobs,
+        "next_run_time": _linkedin_scheduler.next_run_time.isoformat()
+        if _linkedin_scheduler.next_run_time
+        else None,
+        "queue_size": get_job_queue().size(),
+    }
 
 
 @app.get("/api/jobs/{job_id}/status", response_model=JobStatusResponse)
@@ -461,7 +704,7 @@ async def get_job_status(job_id: str) -> JobStatusResponse:
                 retry_count=state_values.get("retry_count", 0),
                 error_message=state_values.get("error_message"),
                 created_at=thread_info["created_at"],
-                updated_at=datetime.now(),
+                updated_at=datetime.now(tz=timezone.utc),
             )
 
         # Fallback to legacy MVP threads (now also uses preparation_workflow)
@@ -481,8 +724,8 @@ async def get_job_status(job_id: str) -> JobStatusResponse:
                 pdf_path=state_values.get("tailored_cv_pdf_path"),
                 retry_count=state_values.get("retry_count", 0),
                 error_message=state_values.get("error_message"),
-                created_at=workflow_created_at.get(job_id, datetime.now()),
-                updated_at=datetime.now(),
+                created_at=workflow_created_at.get(job_id, datetime.now(tz=timezone.utc)),
+                updated_at=datetime.now(tz=timezone.utc),
             )
 
         raise HTTPException(404, f"Job {job_id} not found")
@@ -491,7 +734,7 @@ async def get_job_status(job_id: str) -> JobStatusResponse:
         raise
     except Exception as e:
         logger.error(f"Failed to get status for job {job_id}: {e}", exc_info=True)
-        raise HTTPException(500, f"Failed to get job status: {str(e)}")
+        raise HTTPException(500, "Failed to get job status") from None
 
 
 @app.get("/api/jobs/{job_id}/pdf")
@@ -517,9 +760,13 @@ async def download_job_pdf(job_id: str):
         if not status.pdf_path:
             raise HTTPException(404, "PDF path not set in job state")
 
-        pdf_path = Path(status.pdf_path)
+        pdf_path = Path(status.pdf_path).resolve()
+        allowed_dir = Path(settings.generated_cvs_dir).resolve()
+        if not pdf_path.is_relative_to(allowed_dir):
+            raise HTTPException(403, "Access denied")
+
         if not pdf_path.exists():
-            raise HTTPException(404, f"PDF file not found: {pdf_path}")
+            raise HTTPException(404, "PDF file not found")
 
         # Return file
         return FileResponse(
@@ -533,7 +780,7 @@ async def download_job_pdf(job_id: str):
         raise
     except Exception as e:
         logger.error(f"Failed to download PDF for job {job_id}: {e}", exc_info=True)
-        raise HTTPException(500, f"Failed to download PDF: {str(e)}")
+        raise HTTPException(500, "Failed to download PDF") from None
 
 
 @app.get("/api/jobs/{job_id}/html", response_class=HTMLResponse)
@@ -581,7 +828,7 @@ async def get_job_cv_html(job_id: str) -> HTMLResponse:
         raise
     except Exception as e:
         logger.error(f"Failed to get CV HTML for job {job_id}: {e}", exc_info=True)
-        raise HTTPException(500, f"Failed to get CV HTML: {str(e)}")
+        raise HTTPException(500, "Failed to get CV HTML") from None
 
 
 # =============================================================================
@@ -609,6 +856,8 @@ async def get_hitl_pending() -> list[PendingApproval]:
                 pdf_path=job.pdf_path,
                 retry_count=job.retry_count,
                 created_at=job.created_at,
+                source=job.source,
+                application_url=job.application_url or (job.job_posting or {}).get("url"),
             )
             for job in pending_jobs
         ]
@@ -638,6 +887,8 @@ async def get_hitl_pending() -> list[PendingApproval]:
                             pdf_path=state_values.get("tailored_cv_pdf_path"),
                             retry_count=state_values.get("retry_count", 0),
                             created_at=thread_info["created_at"],
+                            source=state_values.get("source", "manual"),
+                            application_url=state_values.get("job_posting", {}).get("url"),
                         )
                     )
             except Exception as e:
@@ -647,7 +898,7 @@ async def get_hitl_pending() -> list[PendingApproval]:
 
     except Exception as e:
         logger.error(f"Failed to get pending jobs: {e}", exc_info=True)
-        raise HTTPException(500, f"Failed to get pending jobs: {str(e)}")
+        raise HTTPException(500, "Failed to get pending jobs") from None
 
 
 @app.post("/api/hitl/{job_id}/decide", response_model=HITLDecisionResponse)
@@ -737,7 +988,7 @@ async def submit_hitl_decision(
             unified_threads[job_id] = {
                 "thread_id": retry_thread_id,
                 "workflow_type": "retry",
-                "created_at": datetime.now(),
+                "created_at": datetime.now(tz=timezone.utc),
             }
 
             # Run retry workflow in background
@@ -761,7 +1012,7 @@ async def submit_hitl_decision(
         raise
     except Exception as e:
         logger.error(f"Failed to process HITL decision for job {job_id}: {e}", exc_info=True)
-        raise HTTPException(500, f"Failed to process decision: {str(e)}")
+        raise HTTPException(500, "Failed to process decision") from None
 
 
 @app.get("/api/hitl/history", response_model=list[ApplicationHistoryItem])
@@ -795,7 +1046,8 @@ async def get_application_history(
 
     except Exception as e:
         logger.error(f"Failed to get application history: {e}", exc_info=True)
-        raise HTTPException(500, f"Failed to get history: {str(e)}")
+        raise HTTPException(500, "Failed to get history") from None
+
 
 
 # =============================================================================
@@ -805,10 +1057,10 @@ async def get_application_history(
 
 @app.delete("/api/jobs/cleanup")
 async def cleanup_jobs(
-    older_than_days: int = Query(90, ge=1, description="Delete jobs older than this many days"),
-    statuses: list[str] = Query(
-        ["declined", "failed"], description="Only delete jobs with these statuses"
-    ),
+    older_than_days: Annotated[int, Query(ge=1, description="Delete jobs older than this many days")] = 90,
+    statuses: Annotated[
+        list[str], Query(description="Only delete jobs with these statuses")
+    ] = None,
 ) -> dict:
     """Delete old jobs to prevent database bloat.
 
@@ -822,19 +1074,31 @@ async def cleanup_jobs(
     Returns:
         {"deleted": int, "message": str}
     """
+    deletable_statuses = {"declined", "failed", "completed"}
     try:
+        if statuses is None:
+            statuses = ["declined", "failed"]
         if not statuses:
             raise HTTPException(400, "At least one status must be provided")
+
+        invalid = set(statuses) - deletable_statuses
+        if invalid:
+            raise HTTPException(
+                400,
+                f"Cannot delete jobs with status: {', '.join(sorted(invalid))}. "
+                f"Allowed: {', '.join(sorted(deletable_statuses))}",
+            )
 
         deleted = await job_repository.cleanup(older_than_days, statuses)
         return {"deleted": deleted, "message": f"Deleted {deleted} jobs"}
 
+    except HTTPException:
+        raise
     except ValueError as e:
-        raise HTTPException(400, str(e))
-
+        raise HTTPException(400, str(e)) from None
     except Exception as e:
         logger.error(f"Failed to cleanup jobs: {e}", exc_info=True)
-        raise HTTPException(500, f"Failed to cleanup jobs: {str(e)}")
+        raise HTTPException(500, "Failed to cleanup jobs") from None
 
 
 # =============================================================================

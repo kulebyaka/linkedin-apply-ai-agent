@@ -7,12 +7,12 @@ This module contains models for:
 - Status responses for API endpoints
 """
 
-from datetime import datetime
-from typing import Optional, Literal, Any
+from datetime import datetime, timezone
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 from .mvp import JobDescriptionInput
-
 
 # =============================================================================
 # Job Submission Models
@@ -31,15 +31,15 @@ class JobSubmitRequest(BaseModel):
         ...,
         description="Workflow mode: 'mvp' (just PDF) or 'full' (PDF + HITL + apply)"
     )
-    url: Optional[str] = Field(
+    url: str | None = Field(
         None,
         description="Job posting URL (required if source='url')"
     )
-    job_description: Optional[JobDescriptionInput] = Field(
+    job_description: JobDescriptionInput | None = Field(
         None,
         description="Manual job description (required if source='manual')"
     )
-    application_url: Optional[str] = Field(
+    application_url: str | None = Field(
         None,
         description="URL to apply (defaults to job URL if not provided)"
     )
@@ -62,7 +62,7 @@ class HITLDecision(BaseModel):
         ...,
         description="User's decision: approve, decline, or retry with feedback"
     )
-    feedback: Optional[str] = Field(
+    feedback: str | None = Field(
         None,
         description="User feedback (required if decision='retry')"
     )
@@ -71,7 +71,7 @@ class HITLDecision(BaseModel):
 class HITLDecisionResponse(BaseModel):
     """Response after HITL decision submission."""
     job_id: str
-    status: Literal["applying", "declined", "retrying"]
+    status: Literal["approved", "applying", "declined", "retrying"]
     message: str
 
 
@@ -83,11 +83,11 @@ class PendingApproval(BaseModel):
     job_id: str
     job_posting: dict = Field(..., description="Normalized job posting data")
     cv_json: dict = Field(..., description="Generated tailored CV as JSON")
-    pdf_path: str = Field(..., description="Path to generated PDF file")
+    pdf_path: str | None = Field(None, description="Path to generated PDF file")
     retry_count: int = Field(0, description="Number of retry attempts")
     created_at: datetime
     source: Literal["url", "manual", "linkedin"]
-    application_url: Optional[str] = None
+    application_url: str | None = None
 
 
 # =============================================================================
@@ -121,29 +121,29 @@ class JobRecord(BaseModel):
     status: str = Field(default="queued")
 
     # Job data
-    job_posting: Optional[dict] = None
-    raw_input: Optional[dict] = None  # Original URL or manual input
+    job_posting: dict | None = None
+    raw_input: dict | None = None  # Original URL or manual input
 
     # CV data
-    cv_json: Optional[dict] = None
-    pdf_path: Optional[str] = None
+    cv_json: dict | None = None
+    pdf_path: str | None = None
 
     # Application data
-    application_url: Optional[str] = None
-    application_type: Optional[Literal["deep_agent", "linkedin", "manual"]] = None
-    application_result: Optional[dict] = None
+    application_url: str | None = None
+    application_type: Literal["deep_agent", "linkedin", "manual"] | None = None
+    application_result: dict | None = None
 
     # HITL data
-    user_feedback: Optional[str] = None
+    user_feedback: str | None = None
     retry_count: int = 0
 
     # Error tracking
-    error_message: Optional[str] = None
+    error_message: str | None = None
 
     # Timestamps
-    created_at: datetime = Field(default_factory=datetime.now)
-    updated_at: datetime = Field(default_factory=datetime.now)
-    applied_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
+    applied_at: datetime | None = None
 
 
 # =============================================================================
@@ -153,25 +153,26 @@ class JobRecord(BaseModel):
 class JobStatusResponse(BaseModel):
     """Comprehensive job status response."""
     job_id: str
-    source: Literal["url", "manual", "linkedin"]
-    mode: Literal["mvp", "full"]
+    source: Literal["url", "manual", "linkedin"] | None = None
+    mode: Literal["mvp", "full"] | None = None
     status: str
-    job_posting: Optional[dict] = None
-    pdf_path: Optional[str] = None
-    application_result: Optional[dict] = None
-    error_message: Optional[str] = None
+    job_posting: dict | None = None
+    cv_json: dict | None = None
+    pdf_path: str | None = None
+    application_result: dict | None = None
+    error_message: str | None = None
     retry_count: int = 0
     created_at: datetime
     updated_at: datetime
-    applied_at: Optional[datetime] = None
+    applied_at: datetime | None = None
 
 
 class ApplicationHistoryItem(BaseModel):
     """Item in application history list."""
     job_id: str
-    job_title: Optional[str] = None
-    company: Optional[str] = None
+    job_title: str | None = None
+    company: str | None = None
     status: str
-    application_type: Optional[str] = None
-    applied_at: Optional[datetime] = None
+    application_type: str | None = None
+    applied_at: datetime | None = None
     created_at: datetime
