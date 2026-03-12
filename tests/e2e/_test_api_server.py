@@ -5,6 +5,7 @@ _init_llm_client in both workflow modules so that no real LLM API calls
 are made, then runs uvicorn on the port passed as the first CLI argument.
 """
 
+import itertools
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -85,10 +86,9 @@ CANNED_CV_SECTIONS = {
 def _make_mock_llm_client():
     """Return a mock BaseLLMClient whose generate_json returns canned data."""
     mock_client = MagicMock()
-    mock_client.generate_json.side_effect = [
-        CANNED_JOB_SUMMARY,
-        CANNED_CV_SECTIONS,
-    ] * 50
+    mock_client.generate_json.side_effect = itertools.cycle(
+        [CANNED_JOB_SUMMARY, CANNED_CV_SECTIONS]
+    )
     return mock_client
 
 
@@ -124,7 +124,7 @@ def main():
     )
     p2 = patch(
         "src.agents.retry_workflow._init_llm_client",
-        return_value=_make_mock_llm_client(),
+        side_effect=lambda *a, **kw: _make_mock_llm_client(),
     )
     p1.start()
     p2.start()

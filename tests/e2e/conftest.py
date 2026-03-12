@@ -86,20 +86,15 @@ def mock_llm_and_api_server():
         [sys.executable, server_script, str(port)],
         cwd=str(PROJECT_ROOT),
         env=_subprocess_env(),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
 
     try:
         wait_for_server(f"{api_url}/api/health", timeout=30)
     except TimeoutError:
         proc.kill()
-        stdout = proc.stdout.read().decode() if proc.stdout else ""
-        stderr = proc.stderr.read().decode() if proc.stderr else ""
-        raise TimeoutError(
-            f"API server failed to start on {api_url}.\n"
-            f"stdout: {stdout[:2000]}\nstderr: {stderr[:2000]}"
-        )
+        raise TimeoutError(f"API server failed to start on {api_url}")
 
     yield api_url
 
@@ -134,20 +129,15 @@ def ui_dev_server(mock_llm_and_api_server):
             NODE_ENV="development",
             VITE_API_BASE_URL=api_url,
         ),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
 
     try:
         wait_for_server(ui_url, timeout=60)
     except TimeoutError:
         proc.kill()
-        stdout = proc.stdout.read().decode() if proc.stdout else ""
-        stderr = proc.stderr.read().decode() if proc.stderr else ""
-        raise TimeoutError(
-            f"Vite dev server failed to start on {ui_url}.\n"
-            f"stdout: {stdout[:2000]}\nstderr: {stderr[:2000]}"
-        )
+        raise TimeoutError(f"Vite dev server failed to start on {ui_url}")
 
     yield ui_url
 

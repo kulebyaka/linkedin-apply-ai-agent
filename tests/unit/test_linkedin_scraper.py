@@ -40,52 +40,6 @@ def _make_mock_browser(page=None):
     return browser
 
 
-def _make_locator_mock(count=0, items=None):
-    """Create a mock that behaves like a Playwright Locator.
-
-    count: number of matched elements
-    items: list of dicts, each with keys text_content, get_attribute, inner_count.
-    """
-    loc = MagicMock()
-    loc.count = AsyncMock(return_value=count)
-
-    if items:
-
-        def nth_factory(index):
-            item = items[index] if index < len(items) else {}
-            m = MagicMock()
-            m.text_content = AsyncMock(return_value=item.get("text_content", ""))
-            m.get_attribute = AsyncMock(return_value=item.get("get_attribute", ""))
-            m.count = AsyncMock(return_value=item.get("inner_count", 0))
-            # For nested locator calls
-            inner = MagicMock()
-            inner.count = AsyncMock(return_value=item.get("inner_count", 0))
-            inner.first = m
-            m.locator = MagicMock(return_value=inner)
-            return m
-
-        loc.nth = MagicMock(side_effect=nth_factory)
-    else:
-        loc.nth = MagicMock(
-            return_value=MagicMock(
-                text_content=AsyncMock(return_value=""),
-                get_attribute=AsyncMock(return_value=""),
-            )
-        )
-
-    if items and len(items) > 0:
-        first_item = items[0]
-        loc.first = MagicMock()
-        loc.first.text_content = AsyncMock(return_value=first_item.get("text_content", ""))
-        loc.first.get_attribute = AsyncMock(return_value=first_item.get("get_attribute", ""))
-    else:
-        loc.first = MagicMock()
-        loc.first.text_content = AsyncMock(return_value="")
-        loc.first.get_attribute = AsyncMock(return_value="")
-
-    return loc
-
-
 # ---------------------------------------------------------------------------
 # Unit tests for helper functions
 # ---------------------------------------------------------------------------
@@ -165,11 +119,13 @@ class TestParseJobCard:
 
         # Company locator
         company_loc = MagicMock()
+        company_loc.count = AsyncMock(return_value=1)
         company_loc.first = MagicMock()
         company_loc.first.text_content = AsyncMock(return_value="  Acme Corp  ")
 
         # Location locator
         location_loc = MagicMock()
+        location_loc.count = AsyncMock(return_value=1)
         location_loc.first = MagicMock()
         location_loc.first.text_content = AsyncMock(return_value="  Remote  ")
 
@@ -179,6 +135,7 @@ class TestParseJobCard:
 
         # Posted date locator
         posted_loc = MagicMock()
+        posted_loc.count = AsyncMock(return_value=1)
         posted_loc.first = MagicMock()
         posted_loc.first.text_content = AsyncMock(return_value="3 days ago")
 
@@ -237,6 +194,7 @@ class TestParseJobCard:
         title_loc.first.text_content = AsyncMock(return_value="Developer")
 
         default_loc = MagicMock()
+        default_loc.count = AsyncMock(return_value=0)
         default_loc.first = MagicMock()
         default_loc.first.text_content = AsyncMock(return_value="")
 
@@ -244,6 +202,7 @@ class TestParseJobCard:
         easy_apply_loc.count = AsyncMock(return_value=0)
 
         posted_loc = MagicMock()
+        posted_loc.count = AsyncMock(return_value=0)
         posted_loc.first = MagicMock()
         posted_loc.first.text_content = AsyncMock(return_value="")
 
@@ -281,6 +240,7 @@ class TestParseJobCard:
         title_loc.first.text_content = AsyncMock(return_value="AI Engineer, Entry Level")
 
         default_loc = MagicMock()
+        default_loc.count = AsyncMock(return_value=0)
         default_loc.first = MagicMock()
         default_loc.first.text_content = AsyncMock(return_value="")
 
@@ -288,6 +248,7 @@ class TestParseJobCard:
         easy_apply_loc.count = AsyncMock(return_value=0)
 
         posted_loc = MagicMock()
+        posted_loc.count = AsyncMock(return_value=0)
         posted_loc.first = MagicMock()
         posted_loc.first.text_content = AsyncMock(return_value="")
 
@@ -478,6 +439,46 @@ class TestParseJobDetailPage:
         result = await scraper._parse_job_detail_page(page)
         assert result["salary_range"] == "$120,000 - $160,000"
 
+    async def test_parses_about_the_job_h2_primary_path(self, scraper):
+        """Verify description is extracted via h2 'About the job' grandparent."""
+        page = MagicMock()
+
+        show_more_loc = _make_show_more_loc(visible=False)
+
+        # h2:has-text('About the job') locator — primary path
+        about_h2_loc = MagicMock()
+        about_h2_loc.count = AsyncMock(return_value=1)
+        container_loc = MagicMock()
+        container_loc.text_content = AsyncMock(
+            return_value="About the job\nWe are hiring a senior Python developer."
+        )
+        about_h2_loc.first = MagicMock()
+        about_h2_loc.first.locator = MagicMock(return_value=container_loc)
+
+        criteria_loc = MagicMock()
+        criteria_loc.count = AsyncMock(return_value=0)
+
+        salary_loc = MagicMock()
+        salary_loc.count = AsyncMock(return_value=0)
+
+        def locator_side_effect(selector):
+            from src.services.linkedin_scraper import SELECTORS
+
+            if selector == SELECTORS["detail_show_more"]:
+                return show_more_loc
+            if selector == "h2:has-text('About the job')":
+                return about_h2_loc
+            if selector == SELECTORS["detail_criteria"]:
+                return criteria_loc
+            if selector == SELECTORS["detail_salary"]:
+                return salary_loc
+            return MagicMock(count=AsyncMock(return_value=0))
+
+        page.locator = MagicMock(side_effect=locator_side_effect)
+
+        result = await scraper._parse_job_detail_page(page)
+        assert result["description"] == "We are hiring a senior Python developer."
+
     async def test_handles_missing_elements(self, scraper):
         page = MagicMock()
 
@@ -529,12 +530,16 @@ class TestDedupLogic:
 
         # Build a page mock with one card that has the duplicate job ID
         card = MagicMock()
+        card.get_attribute = AsyncMock(return_value="1234567890")
         title_loc = MagicMock()
         title_loc.first = MagicMock()
         title_loc.first.text_content = AsyncMock(return_value="Developer")
-        title_loc.first.get_attribute = AsyncMock(return_value="/jobs/view/1234567890/")
+        title_loc.first.get_attribute = AsyncMock(
+            side_effect=lambda attr: "Developer" if attr == "aria-label" else "/jobs/view/1234567890/"
+        )
 
         default_loc = MagicMock()
+        default_loc.count = AsyncMock(return_value=0)
         default_loc.first = MagicMock()
         default_loc.first.text_content = AsyncMock(return_value="Company")
 
@@ -542,6 +547,7 @@ class TestDedupLogic:
         easy_loc.count = AsyncMock(return_value=0)
 
         posted_loc = MagicMock()
+        posted_loc.count = AsyncMock(return_value=0)
         posted_loc.first = MagicMock()
         posted_loc.first.text_content = AsyncMock(return_value="")
 
@@ -626,6 +632,7 @@ class TestMaxJobsLimit:
             )
 
             default_loc = MagicMock()
+            default_loc.count = AsyncMock(return_value=0)
             default_loc.first = MagicMock()
             default_loc.first.text_content = AsyncMock(return_value="Company")
 
@@ -633,6 +640,7 @@ class TestMaxJobsLimit:
             easy_loc.count = AsyncMock(return_value=0)
 
             posted_loc = MagicMock()
+            posted_loc.count = AsyncMock(return_value=0)
             posted_loc.first = MagicMock()
             posted_loc.first.text_content = AsyncMock(return_value="")
 

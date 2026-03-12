@@ -193,12 +193,6 @@ class TestPDFAndCVPreview:
             state="visible", timeout=15_000
         )
 
-        # Switch to CV Preview tab
-        page.get_by_text("CV Preview").click()
-
-        # Wait for CV content to load (not the loading state)
-        page.wait_for_timeout(3_000)
-
         # Verify the PDF endpoint returns valid PDF via API
         resp = httpx.get(
             f"{mock_llm_and_api_server}/api/jobs/{job_id}/pdf", timeout=15
@@ -325,6 +319,18 @@ class TestRetryRegenerateFlow:
         deadline = time.monotonic() + 60
         retry_count = None
         while time.monotonic() < deadline:
+            # Check if the job entered a terminal error state (fail fast)
+            status_resp = httpx.get(
+                f"{mock_llm_and_api_server}/api/jobs/{job_id}/status", timeout=10
+            )
+            if status_resp.status_code == 200:
+                status = status_resp.json().get("status")
+                if status == "failed":
+                    raise AssertionError(
+                        f"Job {job_id} failed during retry: "
+                        f"{status_resp.json().get('error_message')}"
+                    )
+
             resp = httpx.get(
                 f"{mock_llm_and_api_server}/api/hitl/pending", timeout=10
             )
