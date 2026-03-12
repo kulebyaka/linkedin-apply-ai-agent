@@ -108,6 +108,9 @@ def main():
             if not key.startswith("VITE_") and val is not None:
                 os.environ.setdefault(key, val)
 
+    # Force in-memory repository for tests regardless of .env settings
+    os.environ["REPO_TYPE"] = "memory"
+
     from src.config.settings import Settings, get_settings
 
     get_settings.cache_clear()

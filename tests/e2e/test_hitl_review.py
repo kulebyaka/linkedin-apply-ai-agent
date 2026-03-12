@@ -340,7 +340,7 @@ class TestRetryRegenerateFlow:
                     if job["job_id"] == job_id:
                         retry_count = job.get("retry_count", 0)
                         break
-                if retry_count is not None:
+                if retry_count is not None and retry_count >= 1:
                     break
             time.sleep(2)
 
