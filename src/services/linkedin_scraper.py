@@ -15,7 +15,6 @@ from src.services.browser_automation import LinkedInAutomation
 from src.services.linkedin_search import LinkedInSearchParams, LinkedInSearchURLBuilder
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)  # TODO: remove after debugging
 
 # CSS selectors for LinkedIn job search results and detail pages.
 # These target the current LinkedIn DOM structure and may need updating

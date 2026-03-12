@@ -13,6 +13,7 @@ import os
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -82,19 +83,27 @@ def mock_llm_and_api_server():
     api_url = f"http://127.0.0.1:{port}"
 
     server_script = str(Path(__file__).parent / "_test_api_server.py")
+    api_log = tempfile.NamedTemporaryFile(
+        prefix="e2e_api_", suffix=".log", delete=False, mode="w"
+    )
     proc = subprocess.Popen(
         [sys.executable, server_script, str(port)],
         cwd=str(PROJECT_ROOT),
         env=_subprocess_env(),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=api_log,
+        stderr=subprocess.STDOUT,
     )
 
     try:
         wait_for_server(f"{api_url}/api/health", timeout=30)
     except TimeoutError:
         proc.kill()
-        raise TimeoutError(f"API server failed to start on {api_url}")
+        api_log.flush()
+        with open(api_log.name) as f:
+            output = f.read()
+        raise TimeoutError(
+            f"API server failed to start on {api_url}.\nServer output:\n{output}"
+        )
 
     yield api_url
 
@@ -122,6 +131,9 @@ def ui_dev_server(mock_llm_and_api_server):
 
     ui_dir = PROJECT_ROOT / "ui"
 
+    vite_log = tempfile.NamedTemporaryFile(
+        prefix="e2e_vite_", suffix=".log", delete=False, mode="w"
+    )
     proc = subprocess.Popen(
         ["npx", "vite", "dev", "--port", str(port), "--strictPort"],
         cwd=str(ui_dir),
@@ -129,15 +141,20 @@ def ui_dev_server(mock_llm_and_api_server):
             NODE_ENV="development",
             VITE_API_BASE_URL=api_url,
         ),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=vite_log,
+        stderr=subprocess.STDOUT,
     )
 
     try:
         wait_for_server(ui_url, timeout=60)
     except TimeoutError:
         proc.kill()
-        raise TimeoutError(f"Vite dev server failed to start on {ui_url}")
+        vite_log.flush()
+        with open(vite_log.name) as f:
+            output = f.read()
+        raise TimeoutError(
+            f"Vite dev server failed to start on {ui_url}.\nServer output:\n{output}"
+        )
 
     yield ui_url
 

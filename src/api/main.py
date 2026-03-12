@@ -43,7 +43,7 @@ from src.models.unified import (
     PendingApproval,
 )
 from src.services.job_queue import get_job_queue, process_queue
-from src.services.job_repository import JobRepository, get_repository
+from src.services.job_repository import JobRepository, RepositoryError, get_repository
 from src.utils.logger import setup_api_logger
 
 settings = get_settings()
@@ -946,11 +946,11 @@ async def submit_hitl_decision(
             # Update status in repository
             try:
                 await job_repository.update(job_id, {"status": "approved"})
-            except NotImplementedError:
-                pass
+            except RepositoryError as e:
+                logger.warning(f"Failed to update repository for job {job_id}: {e}")
 
-            # Update tracking
-            unified_threads[job_id]["workflow_type"] = "application"
+            # Keep workflow_type as "preparation" so status endpoint can still read state
+            # unified_threads[job_id]["workflow_type"] = "application"
 
             return HITLDecisionResponse(
                 job_id=job_id,
@@ -961,11 +961,11 @@ async def submit_hitl_decision(
         elif decision.decision == "declined":
             logger.info(f"Job {job_id} declined by user")
 
-            # Update status in repository (if implemented)
+            # Update status in repository
             try:
                 await job_repository.update(job_id, {"status": "declined"})
-            except NotImplementedError:
-                pass
+            except RepositoryError as e:
+                logger.warning(f"Failed to update repository for job {job_id}: {e}")
 
             return HITLDecisionResponse(
                 job_id=job_id,
@@ -974,13 +974,13 @@ async def submit_hitl_decision(
             )
 
         elif decision.decision == "retry":
-            logger.info(f"Job {job_id} queued for retry with feedback: {decision.feedback}")
+            logger.info(f"Job {job_id} queued for retry with user feedback")
 
             # Update repository status to "retrying" so job leaves pending queue
             try:
                 await job_repository.update(job_id, {"status": "retrying"})
-            except NotImplementedError:
-                pass
+            except RepositoryError as e:
+                logger.warning(f"Failed to update repository for job {job_id}: {e}")
 
             # Create new thread for retry workflow
             retry_thread_id = str(uuid.uuid4())
