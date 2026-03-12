@@ -13,6 +13,8 @@ import re
 from abc import ABC, abstractmethod
 from typing import Any
 
+from src.models.job import ScrapedJob
+
 
 class JobSourceAdapter(ABC):
     """Abstract base class for job source adapters.
@@ -179,11 +181,11 @@ class LinkedInJobAdapter(JobSourceAdapter):
     """
 
     async def extract(self, raw_input: dict[str, Any]) -> dict[str, Any]:
-        """Normalise a scraped LinkedIn job dict into a JobPosting-compatible dict.
+        """Normalise a scraped LinkedIn job into a JobPosting-compatible dict.
 
-        Accepts either the legacy ``{"job_id": ..., "raw_data": {...}}`` envelope
-        or a flat dict coming straight from the scraper (keys: job_id, title,
-        company, location, description, etc.).
+        Accepts a ``ScrapedJob.model_dump()`` dict (from the queue consumer),
+        the legacy ``{"job_id": ..., "raw_data": {...}}`` envelope, or a flat
+        dict with scraper keys.
 
         Returns:
             Normalised dict whose keys match ``JobPosting`` fields.

@@ -5,10 +5,18 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from src.models.job import ScrapedJob
 from src.services.job_queue import JobQueue, get_job_queue, set_job_queue, process_queue
 from src.services.job_source import LinkedInJobAdapter
 
 pytestmark = pytest.mark.asyncio
+
+
+def _job(job_id: str, **kwargs) -> ScrapedJob:
+    """Helper to create a ScrapedJob with minimal required fields."""
+    defaults = {"title": "", "company": "", "location": "", "url": ""}
+    defaults.update(kwargs)
+    return ScrapedJob(job_id=job_id, **defaults)
 
 
 # ---------------------------------------------------------------------------
@@ -21,20 +29,21 @@ class TestJobQueuePutGet:
 
     async def test_single_put_get(self):
         q = JobQueue()
-        await q.put({"job_id": "1"})
+        job = _job("1")
+        await q.put(job)
         assert q.size() == 1
         item = await q.get()
-        assert item == {"job_id": "1"}
+        assert item.job_id == "1"
         assert q.is_empty()
 
     async def test_fifo_ordering(self):
         q = JobQueue()
         for i in range(5):
-            await q.put({"job_id": str(i)})
+            await q.put(_job(str(i)))
         assert q.size() == 5
         for i in range(5):
             item = await q.get()
-            assert item["job_id"] == str(i)
+            assert item.job_id == str(i)
 
     async def test_is_empty_initially(self):
         q = JobQueue()
@@ -47,21 +56,21 @@ class TestJobQueueBatch:
 
     async def test_put_batch_all_fit(self):
         q = JobQueue(max_size=10)
-        jobs = [{"job_id": str(i)} for i in range(5)]
+        jobs = [_job(str(i)) for i in range(5)]
         count = await q.put_batch(jobs)
         assert count == 5
         assert q.size() == 5
 
     async def test_put_batch_partial_when_full(self):
         q = JobQueue(max_size=3)
-        jobs = [{"job_id": str(i)} for i in range(5)]
+        jobs = [_job(str(i)) for i in range(5)]
         count = await q.put_batch(jobs)
         assert count == 3
         assert q.size() == 3
         # First 3 should be in queue
         for i in range(3):
             item = await q.get()
-            assert item["job_id"] == str(i)
+            assert item.job_id == str(i)
 
     async def test_put_batch_empty_list(self):
         q = JobQueue()
@@ -231,8 +240,8 @@ class TestProcessQueue:
 
     async def test_processes_jobs_in_order(self):
         q = JobQueue()
-        await q.put({"job_id": "a", "title": "A", "company": "Co", "location": "", "description": ""})
-        await q.put({"job_id": "b", "title": "B", "company": "Co", "location": "", "description": ""})
+        await q.put(_job("a", title="A", company="Co"))
+        await q.put(_job("b", title="B", company="Co"))
 
         stop = asyncio.Event()
         stop.set()
@@ -254,8 +263,8 @@ class TestProcessQueue:
 
     async def test_handles_workflow_failure_gracefully(self):
         q = JobQueue()
-        await q.put({"job_id": "fail", "title": "", "company": "", "location": "", "description": ""})
-        await q.put({"job_id": "ok", "title": "", "company": "", "location": "", "description": ""})
+        await q.put(_job("fail"))
+        await q.put(_job("ok"))
 
         stop = asyncio.Event()
         stop.set()
@@ -295,7 +304,7 @@ class TestProcessQueue:
 
     async def test_state_fields_are_correct(self):
         q = JobQueue()
-        await q.put({"job_id": "x", "title": "Eng", "company": "Co", "location": "LA", "description": "d"})
+        await q.put(_job("x", title="Eng", company="Co", location="LA", description="d"))
 
         stop = asyncio.Event()
         stop.set()
@@ -313,3 +322,6 @@ class TestProcessQueue:
         assert state["mode"] == "full"
         assert state["master_cv"] == master
         assert state["current_step"] == "queued"
+        # raw_input should be a dict (model_dump output)
+        assert isinstance(state["raw_input"], dict)
+        assert state["raw_input"]["job_id"] == "x"

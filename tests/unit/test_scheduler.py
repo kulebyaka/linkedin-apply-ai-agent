@@ -5,10 +5,15 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from src.models.job import ScrapedJob
 from src.services.job_queue import JobQueue
 from src.services.scheduler import LinkedInSearchScheduler
 
 pytestmark = pytest.mark.asyncio
+
+
+def _job(job_id: str) -> ScrapedJob:
+    return ScrapedJob(job_id=job_id, title="", company="", location="", url="")
 
 
 # ---------------------------------------------------------------------------
@@ -18,7 +23,7 @@ pytestmark = pytest.mark.asyncio
 
 def _make_scheduler(
     *,
-    scrape_result: list[dict] | None = None,
+    scrape_result: list[ScrapedJob] | None = None,
     scrape_error: Exception | None = None,
     interval_hours: int = 1,
 ) -> tuple[LinkedInSearchScheduler, MagicMock, MagicMock, JobQueue]:
@@ -56,7 +61,7 @@ def _make_scheduler(
 
 class TestRunSearch:
     async def test_run_search_enqueues_jobs(self):
-        jobs = [{"job_id": "1"}, {"job_id": "2"}, {"job_id": "3"}]
+        jobs = [_job("1"), _job("2"), _job("3")]
         scheduler, _, scraper, queue = _make_scheduler(scrape_result=jobs)
 
         count = await scheduler.run_search()
@@ -86,7 +91,7 @@ class TestRunSearch:
         assert scheduler.last_run_time is not None
 
     async def test_run_search_updates_last_run_metadata(self):
-        jobs = [{"job_id": "x"}]
+        jobs = [_job("x")]
         scheduler, _, _, _ = _make_scheduler(scrape_result=jobs)
 
         assert scheduler.last_run_time is None

@@ -10,24 +10,26 @@ import asyncio
 import logging
 from typing import Any
 
+from src.models.job import ScrapedJob
+
 logger = logging.getLogger(__name__)
 
 
 class JobQueue:
-    """Async queue for scraped job dicts awaiting workflow processing."""
+    """Async queue for ScrapedJob instances awaiting workflow processing."""
 
     def __init__(self, max_size: int = 100) -> None:
-        self._queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=max_size)
+        self._queue: asyncio.Queue[ScrapedJob] = asyncio.Queue(maxsize=max_size)
 
-    async def put(self, job_data: dict) -> None:
-        """Enqueue a single scraped job dict."""
-        await self._queue.put(job_data)
+    async def put(self, job: ScrapedJob) -> None:
+        """Enqueue a single scraped job."""
+        await self._queue.put(job)
 
-    async def get(self) -> dict:
-        """Dequeue next job dict (blocks until one is available)."""
+    async def get(self) -> ScrapedJob:
+        """Dequeue next job (blocks until one is available)."""
         return await self._queue.get()
 
-    async def put_batch(self, jobs: list[dict]) -> int:
+    async def put_batch(self, jobs: list[ScrapedJob]) -> int:
         """Enqueue multiple jobs. Returns the number actually enqueued."""
         count = 0
         for job in jobs:
@@ -133,31 +135,30 @@ async def process_queue(
 
         # Try to get a job (with timeout so we can re-check stop_event)
         try:
-            job_data = await asyncio.wait_for(queue.get(), timeout=1.0)
+            job = await asyncio.wait_for(queue.get(), timeout=1.0)
         except TimeoutError:
             continue
 
-        job_id = job_data.get("job_id") or job_data.get("id") or "unknown"
-        logger.info("Processing queued job %s", job_id)
+        logger.info("Processing queued job %s", job.job_id)
 
         # Cross-cycle dedup: skip jobs already in the repository
         if job_repository is not None:
             try:
-                existing = await job_repository.get(str(job_id))
+                existing = await job_repository.get(job.job_id)
                 if existing is not None:
-                    logger.info("Skipping already-processed job %s (status: %s)", job_id, existing.status)
+                    logger.info("Skipping already-processed job %s (status: %s)", job.job_id, existing.status)
                     continue
             except Exception:
-                logger.warning("Dedup check failed for job %s, proceeding with processing", job_id)
+                logger.warning("Dedup check failed for job %s, proceeding with processing", job.job_id)
 
         try:
             master_cv = master_cv_loader()
 
             initial_state = {
-                "job_id": job_id,
+                "job_id": job.job_id,
                 "source": "linkedin",
                 "mode": "full",
-                "raw_input": job_data,
+                "raw_input": job.model_dump(),
                 "job_posting": {},
                 "master_cv": master_cv,
                 "tailored_cv_json": {},
@@ -168,21 +169,21 @@ async def process_queue(
                 "error_message": None,
             }
 
-            config = {"configurable": {"thread_id": f"linkedin-{job_id}"}}
+            config = {"configurable": {"thread_id": f"linkedin-{job.job_id}"}}
             result = await asyncio.to_thread(
                 lambda s=initial_state, c=config: list(workflow.stream(s, config=c))
             )
-            logger.info("Workflow completed for job %s (%d steps)", job_id, len(result))
+            logger.info("Workflow completed for job %s (%d steps)", job.job_id, len(result))
             processed += 1
 
             if on_job_processed is not None:
                 try:
-                    on_job_processed(str(job_id), config["configurable"]["thread_id"])
+                    on_job_processed(job.job_id, config["configurable"]["thread_id"])
                 except Exception:
-                    logger.debug("on_job_processed callback failed for %s", job_id)
+                    logger.debug("on_job_processed callback failed for %s", job.job_id)
 
         except Exception:
-            logger.exception("Workflow failed for queued job %s", job_id)
+            logger.exception("Workflow failed for queued job %s", job.job_id)
 
         if delay_between_jobs > 0:
             await asyncio.sleep(delay_between_jobs)

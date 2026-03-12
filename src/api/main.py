@@ -6,6 +6,7 @@ Provides two sets of endpoints:
 """
 
 import asyncio
+import logging
 import time
 import uuid
 from datetime import datetime, timezone
@@ -47,6 +48,17 @@ from src.utils.logger import setup_api_logger
 
 settings = get_settings()
 logger = setup_api_logger(level="INFO")
+
+# Ensure all src.* loggers propagate to a handler (scheduler, scraper, etc.)
+_src_logger = logging.getLogger("src")
+if not _src_logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter(
+        "[%(asctime)s] %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    ))
+    _src_logger.addHandler(_handler)
+    _src_logger.setLevel(logging.INFO)
 
 # Initialize LangGraph workflows (singletons)
 preparation_workflow = create_preparation_workflow()
@@ -576,9 +588,7 @@ async def submit_job(
 
 
 @app.post("/api/jobs/linkedin-search")
-async def trigger_linkedin_search(
-    background_tasks: BackgroundTasks,
-):
+async def trigger_linkedin_search():
     """Trigger a LinkedIn search manually.
 
     Runs search in background and returns immediately.
@@ -624,7 +634,7 @@ async def trigger_linkedin_search(
         except Exception:
             logger.exception("Manual LinkedIn search failed")
 
-    background_tasks.add_task(_run_search)
+    asyncio.create_task(_run_search())
 
     return {"status": "started", "message": "LinkedIn search triggered"}
 
@@ -847,6 +857,7 @@ async def get_hitl_pending() -> list[PendingApproval]:
                 retry_count=job.retry_count,
                 created_at=job.created_at,
                 source=job.source,
+                application_url=job.application_url or (job.job_posting or {}).get("url"),
             )
             for job in pending_jobs
         ]
@@ -877,6 +888,7 @@ async def get_hitl_pending() -> list[PendingApproval]:
                             retry_count=state_values.get("retry_count", 0),
                             created_at=thread_info["created_at"],
                             source=state_values.get("source", "manual"),
+                            application_url=state_values.get("job_posting", {}).get("url"),
                         )
                     )
             except Exception as e:

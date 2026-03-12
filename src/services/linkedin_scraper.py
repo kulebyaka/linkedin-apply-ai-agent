@@ -10,10 +10,12 @@ import re
 from datetime import datetime, timedelta, timezone
 
 from src.config.settings import Settings
+from src.models.job import ScrapedJob
 from src.services.browser_automation import LinkedInAutomation
 from src.services.linkedin_search import LinkedInSearchParams, LinkedInSearchURLBuilder
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)  # TODO: remove after debugging
 
 # CSS selectors for LinkedIn job search results and detail pages.
 # These target the current LinkedIn DOM structure and may need updating
@@ -87,15 +89,15 @@ class LinkedInJobScraper:
 
     async def scrape_search_results(
         self, search_params: LinkedInSearchParams
-    ) -> list[dict]:
+    ) -> list[ScrapedJob]:
         """Scrape job cards from LinkedIn search results pages.
 
         Paginates through results until max_jobs is reached or no more
         results are available. Skips already-seen job IDs (dedup).
 
-        Returns list of raw job dicts extracted from job cards.
+        Returns list of ScrapedJob instances extracted from job cards.
         """
-        all_jobs: list[dict] = []
+        all_jobs: list[ScrapedJob] = []
         page_num = 0
         max_jobs = search_params.max_jobs
         max_stale_pages = 3  # Stop after this many consecutive pages with no new jobs
@@ -132,18 +134,19 @@ class LinkedInJobScraper:
                     break
 
                 card = cards.nth(i)
-                job_data = await self._parse_job_card(card)
+                job = await self._parse_job_card(card)
 
-                if not job_data or not job_data.get("job_id"):
+                if job is None:
+                    logger.debug("Card %d on page %d returned None (parse failed)", i, page_num)
                     continue
 
                 # Dedup
-                if job_data["job_id"] in self._seen_job_ids:
-                    logger.debug("Skipping duplicate job %s", job_data["job_id"])
+                if job.job_id in self._seen_job_ids:
+                    logger.debug("Skipping duplicate job %s", job.job_id)
                     continue
 
-                self._seen_job_ids.add(job_data["job_id"])
-                all_jobs.append(job_data)
+                self._seen_job_ids.add(job.job_id)
+                all_jobs.append(job)
 
             # Warn if cards were found but none could be parsed (possible selector breakage)
             parsed_this_page = len(all_jobs) - jobs_before
@@ -183,43 +186,43 @@ class LinkedInJobScraper:
         experience_level.
         """
         await self.browser.random_delay()
-        await self.browser.page.goto(job_url, wait_until="domcontentloaded")
+        await self.browser.page.goto(job_url, wait_until="domcontentloaded", timeout=15000)
         await self.browser.random_delay(1.0, 3.0)
 
         return await self._parse_job_detail_page(self.browser.page)
 
     async def scrape_and_enrich(
         self, search_params: LinkedInSearchParams
-    ) -> list[dict]:
+    ) -> list[ScrapedJob]:
         """Scrape search results then enrich each with full job details.
 
-        Returns list of enriched job dicts matching JobPosting field structure.
+        Returns list of ScrapedJob instances with detail-level fields populated.
         """
         jobs = await self.scrape_search_results(search_params)
-        enriched: list[dict] = []
+        enriched: list[ScrapedJob] = []
 
-        for job in jobs:
-            job_url = job.get("url")
-            if not job_url:
-                logger.warning("No URL for job %s, skipping enrichment", job.get("job_id"))
+        for idx, job in enumerate(jobs, 1):
+            if not job.url:
+                logger.warning("No URL for job %s, skipping enrichment", job.job_id)
                 enriched.append(job)
                 continue
 
+            logger.info("Enriching job %d/%d: %s (%s)", idx, len(jobs), job.job_id, job.title)
             try:
-                details = await self.scrape_job_details(job_url)
-                job.update(details)
+                details = await self.scrape_job_details(job.url)
+                job = job.model_copy(update=details)
+                logger.info("Enriched job %s: description=%d chars", job.job_id, len(job.description))
             except Exception as exc:
-                logger.warning("Failed to enrich job %s: %s", job.get("job_id"), exc)
+                logger.warning("Failed to enrich job %s: %s", job.job_id, exc)
 
             enriched.append(job)
 
         return enriched
 
-    async def _parse_job_card(self, card_element) -> dict | None:
+    async def _parse_job_card(self, card_element) -> ScrapedJob | None:
         """Extract data from a single job card DOM element.
 
-        Returns dict with keys: job_id, title, company, location,
-        posted_date, easy_apply, url.
+        Returns a ScrapedJob with card-level fields populated, or None on failure.
         """
         try:
             # Job ID from data attribute (most reliable) or from link href
@@ -239,15 +242,19 @@ class LinkedInJobScraper:
 
             if not job_id:
                 job_id = _extract_job_id_from_url(href)
-            url = f"https://www.linkedin.com/jobs/view/{job_id}/" if job_id else href
+            if not job_id:
+                return None
+            url = f"https://www.linkedin.com/jobs/view/{job_id}/"
 
             # Company
-            company_el = card_element.locator(SELECTORS["job_card_company"]).first
-            company = " ".join((await company_el.text_content() or "").split())
+            company = ""
+            if await card_element.locator(SELECTORS["job_card_company"]).count() > 0:
+                company = " ".join((await card_element.locator(SELECTORS["job_card_company"]).first.text_content() or "").split())
 
             # Location
-            location_el = card_element.locator(SELECTORS["job_card_location"]).first
-            location = " ".join((await location_el.text_content() or "").split())
+            location = ""
+            if await card_element.locator(SELECTORS["job_card_location"]).count() > 0:
+                location = " ".join((await card_element.locator(SELECTORS["job_card_location"]).first.text_content() or "").split())
 
             # Easy Apply badge
             easy_apply_count = await card_element.locator(
@@ -255,20 +262,22 @@ class LinkedInJobScraper:
             ).count()
             easy_apply = easy_apply_count > 0
 
-            # Posted date
-            posted_el = card_element.locator(SELECTORS["job_card_posted"]).first
-            posted_text = (await posted_el.text_content() or "").strip()
-            posted_date = _parse_relative_time(posted_text)
+            # Posted date (optional — element may not exist on all cards)
+            posted_date = None
+            posted_count = await card_element.locator(SELECTORS["job_card_posted"]).count()
+            if posted_count > 0:
+                posted_text = (await card_element.locator(SELECTORS["job_card_posted"]).first.text_content() or "").strip()
+                posted_date = _parse_relative_time(posted_text)
 
-            return {
-                "job_id": job_id,
-                "title": title,
-                "company": company,
-                "location": location,
-                "posted_date": posted_date,
-                "easy_apply": easy_apply,
-                "url": url,
-            }
+            return ScrapedJob(
+                job_id=job_id,
+                title=title,
+                company=company,
+                location=location,
+                posted_date=posted_date,
+                easy_apply=easy_apply,
+                url=url,
+            )
         except Exception as exc:
             logger.debug("Failed to parse job card: %s", exc)
             return None
@@ -288,10 +297,24 @@ class LinkedInJobScraper:
         }
 
         try:
-            desc_el = page.locator(SELECTORS["detail_description"]).first
-            desc_count = await page.locator(SELECTORS["detail_description"]).count()
-            if desc_count > 0:
-                result["description"] = (await desc_el.text_content() or "").strip()
+            # Primary: find h2 "About the job" and get its grandparent's text
+            # (LinkedIn now uses hashed CSS classes, so text-based lookup is more stable)
+            about_h2 = page.locator("h2:has-text('About the job')")
+            if await about_h2.count() > 0:
+                # Grandparent contains: separator div + heading div + <p> with description
+                container = about_h2.first.locator("../..")
+                raw = (await container.text_content() or "").strip()
+                # Strip the "About the job" heading prefix
+                desc = raw.removeprefix("About the job").strip()
+                if desc:
+                    result["description"] = desc
+            else:
+                # Fallback: legacy selectors for older LinkedIn DOM
+                desc_count = await page.locator(SELECTORS["detail_description"]).count()
+                if desc_count > 0:
+                    result["description"] = (
+                        await page.locator(SELECTORS["detail_description"]).first.text_content() or ""
+                    ).strip()
         except Exception as exc:
             logger.debug("Failed to extract description: %s", exc)
 

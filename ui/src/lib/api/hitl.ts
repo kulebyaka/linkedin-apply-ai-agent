@@ -1,7 +1,7 @@
 import type { PendingApproval, Decision, DecisionResponse } from '$lib/types';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
-const USE_MOCK = true;
+const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true';
 
 // Mock data for development
 const mockPendingJobs: PendingApproval[] = [

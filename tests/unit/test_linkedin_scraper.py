@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, PropertyMock
 
 import pytest
 
+from src.models.job import ScrapedJob
 from src.services.linkedin_scraper import (
     LinkedInJobScraper,
     _extract_job_id_from_url,
@@ -187,14 +188,14 @@ class TestParseJobCard:
 
         result = await scraper._parse_job_card(card)
 
-        assert result is not None
-        assert result["job_id"] == "1234567890"
-        assert result["title"] == "Senior Python Developer"
-        assert result["company"] == "Acme Corp"
-        assert result["location"] == "Remote"
-        assert result["easy_apply"] is True
-        assert result["url"] == "https://www.linkedin.com/jobs/view/1234567890/"
-        assert result["posted_date"] is not None
+        assert isinstance(result, ScrapedJob)
+        assert result.job_id == "1234567890"
+        assert result.title == "Senior Python Developer"
+        assert result.company == "Acme Corp"
+        assert result.location == "Remote"
+        assert result.easy_apply is True
+        assert result.url == "https://www.linkedin.com/jobs/view/1234567890/"
+        assert result.posted_date is not None
 
     async def test_returns_none_on_error(self, scraper):
         """Card that raises an exception returns None."""
@@ -238,8 +239,8 @@ class TestParseJobCard:
         card.locator = MagicMock(side_effect=locator_side_effect)
 
         result = await scraper._parse_job_card(card)
-        assert result is not None
-        assert result["easy_apply"] is False
+        assert isinstance(result, ScrapedJob)
+        assert result.easy_apply is False
 
     async def test_strips_verification_badge_from_title(self, scraper):
         """'with verification' suffix from LinkedIn badge is stripped from title."""
@@ -279,8 +280,8 @@ class TestParseJobCard:
         card.locator = MagicMock(side_effect=locator_side_effect)
 
         result = await scraper._parse_job_card(card)
-        assert result is not None
-        assert result["title"] == "AI Engineer, Entry Level"
+        assert isinstance(result, ScrapedJob)
+        assert result.title == "AI Engineer, Entry Level"
 
 
 # ---------------------------------------------------------------------------
@@ -583,10 +584,10 @@ class TestScrapeAndEnrich:
         browser = _make_mock_browser()
         scraper = LinkedInJobScraper(browser, settings)
 
-        # Mock scrape_search_results to return pre-made jobs
+        # Mock scrape_search_results to return ScrapedJob instances
         scraper.scrape_search_results = AsyncMock(return_value=[
-            {"job_id": "111", "title": "Dev", "url": "https://www.linkedin.com/jobs/view/111/"},
-            {"job_id": "222", "title": "Eng", "url": "https://www.linkedin.com/jobs/view/222/"},
+            ScrapedJob(job_id="111", title="Dev", company="Co", location="NYC", url="https://www.linkedin.com/jobs/view/111/"),
+            ScrapedJob(job_id="222", title="Eng", company="Co", location="SF", url="https://www.linkedin.com/jobs/view/222/"),
         ])
 
         # Mock scrape_job_details
@@ -600,9 +601,9 @@ class TestScrapeAndEnrich:
         results = await scraper.scrape_and_enrich(params)
 
         assert len(results) == 2
-        assert results[0]["description"] == "Detail for 111"
-        assert results[0]["salary_range"] == "$100k"
-        assert results[1]["description"] == "Detail for 222"
+        assert results[0].description == "Detail for 111"
+        assert results[0].salary_range == "$100k"
+        assert results[1].description == "Detail for 222"
 
     async def test_handles_enrichment_failure(self):
         settings = _make_mock_settings()
@@ -610,7 +611,7 @@ class TestScrapeAndEnrich:
         scraper = LinkedInJobScraper(browser, settings)
 
         scraper.scrape_search_results = AsyncMock(return_value=[
-            {"job_id": "333", "title": "Dev", "url": "https://www.linkedin.com/jobs/view/333/"},
+            ScrapedJob(job_id="333", title="Dev", company="Co", location="NYC", url="https://www.linkedin.com/jobs/view/333/"),
         ])
         scraper.scrape_job_details = AsyncMock(side_effect=Exception("Page crashed"))
 
@@ -620,7 +621,7 @@ class TestScrapeAndEnrich:
 
         # Should still include the job even if enrichment failed
         assert len(results) == 1
-        assert results[0]["job_id"] == "333"
+        assert results[0].job_id == "333"
 
     async def test_skips_enrichment_without_url(self):
         settings = _make_mock_settings()
@@ -628,7 +629,7 @@ class TestScrapeAndEnrich:
         scraper = LinkedInJobScraper(browser, settings)
 
         scraper.scrape_search_results = AsyncMock(return_value=[
-            {"job_id": "444", "title": "Dev"},  # No url key
+            ScrapedJob(job_id="444", title="Dev", company="Co", location="NYC", url=""),
         ])
         scraper.scrape_job_details = AsyncMock()
 
