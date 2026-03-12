@@ -114,7 +114,7 @@ def main():
 
     import src.config.settings as _settings_mod
 
-    _test_settings = Settings(_env_file=None)
+    _test_settings = Settings(_env_file=None, cors_origins=["*"])
     _settings_mod.get_settings = lambda: _test_settings
 
     # Apply patches BEFORE importing the app (which triggers module-level init)

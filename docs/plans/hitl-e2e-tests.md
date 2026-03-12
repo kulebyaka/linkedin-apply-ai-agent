@@ -55,13 +55,13 @@ Add Playwright E2E tests for the HITL review UI using a TDD approach: write fail
 - Modify: `tests/e2e/test_hitl_review.py`
 - Modify: `tests/e2e/conftest.py` (add fixture to seed a job via API)
 
-- [ ] Add `seed_pending_job` fixture: POST to `/api/jobs/submit` with `mode=full` and manual job input (reuse `sample_job_posting` data). Wait for status to reach `pending`. Return `job_id`.
-- [ ] Write test `test_pending_jobs_displayed`: seed 1 job, navigate to UI, verify job card shows title, company, and "1 pending" badge.
-- [ ] Write test `test_navigate_between_jobs`: seed 2 jobs, navigate to UI, verify "1 of 2" counter, click Next, verify "2 of 2", click Previous, verify "1 of 2".
-- [ ] Write test `test_approve_job`: seed 1 job, navigate to UI, click Approve button, verify toast "Application Approved" appears, verify empty state shown after.
-- [ ] Write test `test_decline_job`: seed 1 job, click Decline, enter optional feedback in modal, submit, verify toast "Application Declined", verify empty state.
-- [ ] Run tests — verify they fail for the right reasons (e.g., pending job not appearing because LLM mock needs tuning). Fix fixture issues only, not app code.
-- [ ] Run project test suite: `pytest tests/ -v --ignore=tests/eval` — must pass before task 3.
+- [x] Add `seed_pending_job` fixture: POST to `/api/jobs/submit` with `mode=full` and manual job input (reuse `sample_job_posting` data). Wait for status to reach `pending`. Return `job_id`.
+- [x] Write test `test_pending_jobs_displayed`: seed 1 job, navigate to UI, verify job card shows title, company, and "1 pending" badge.
+- [x] Write test `test_navigate_between_jobs`: seed 2 jobs, navigate to UI, verify "1 of 2" counter, click Next, verify "2 of 2", click Previous, verify "1 of 2".
+- [x] Write test `test_approve_job`: seed 1 job, navigate to UI, click Approve button, verify toast "Application Approved" appears, verify empty state shown after.
+- [x] Write test `test_decline_job`: seed 1 job, click Decline, enter optional feedback in modal, submit, verify toast "Application Declined", verify empty state.
+- [x] Run tests — verify they fail for the right reasons (e.g., pending job not appearing because LLM mock needs tuning). Fix fixture issues only, not app code.
+- [x] Run project test suite: `pytest tests/ -v --ignore=tests/eval` — must pass before task 3.
 
 ### Task 3: Write failing tests for known bugs — PDF generation, job description truncation, retry button
 

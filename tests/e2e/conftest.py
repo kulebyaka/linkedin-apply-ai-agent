@@ -8,6 +8,7 @@ Provides session-scoped fixtures that auto-start:
 Both servers are started as subprocesses and killed on teardown.
 """
 
+import json
 import os
 import socket
 import subprocess
@@ -177,3 +178,82 @@ def page(browser):
     pg = browser.new_page()
     yield pg
     pg.close()
+
+
+# ---------------------------------------------------------------------------
+# Job seeding fixtures
+# ---------------------------------------------------------------------------
+
+SAMPLE_JOB_POSTING = {
+    "title": "Senior Python Backend Engineer",
+    "company": "AI Startup",
+    "description": (
+        "We're looking for an experienced Python backend engineer to join our "
+        "growing team. You'll be responsible for designing and implementing "
+        "scalable microservices architecture for our AI-powered platform. The "
+        "ideal candidate has strong experience with Python, Django, AWS, and "
+        "containerization technologies."
+    ),
+    "requirements": (
+        "5+ years of Python development experience, Strong knowledge of Django "
+        "or Flask, Experience with AWS services (EC2, S3, Lambda, RDS), Docker "
+        "and Kubernetes expertise, PostgreSQL or similar relational database "
+        "experience, Experience with RESTful API design, Strong problem-solving "
+        "skills, Excellent communication abilities"
+    ),
+}
+
+
+def _submit_and_wait_pending(api_url: str, job_data: dict, timeout: float = 60) -> str:
+    """Submit a job in full mode and poll until it reaches 'pending' status.
+
+    Returns the job_id.
+    """
+    payload = {
+        "source": "manual",
+        "mode": "full",
+        "job_description": job_data,
+    }
+    resp = httpx.post(f"{api_url}/api/jobs/submit", json=payload, timeout=10)
+    resp.raise_for_status()
+    job_id = resp.json()["job_id"]
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        status_resp = httpx.get(f"{api_url}/api/jobs/{job_id}/status", timeout=10)
+        status_resp.raise_for_status()
+        status = status_resp.json()["status"]
+        if status == "pending":
+            return job_id
+        if status == "failed":
+            raise RuntimeError(
+                f"Job {job_id} failed: {status_resp.json().get('error_message')}"
+            )
+        time.sleep(1)
+
+    raise TimeoutError(f"Job {job_id} did not reach 'pending' within {timeout}s (last: {status})")
+
+
+@pytest.fixture
+def seed_pending_job(mock_llm_and_api_server):
+    """Submit one job via API and wait until it reaches 'pending' status.
+
+    Returns the job_id.
+    """
+    return _submit_and_wait_pending(mock_llm_and_api_server, SAMPLE_JOB_POSTING)
+
+
+@pytest.fixture
+def seed_two_pending_jobs(mock_llm_and_api_server):
+    """Submit two jobs and wait for both to reach 'pending' status.
+
+    Returns a list of two job_ids.
+    """
+    job1 = _submit_and_wait_pending(mock_llm_and_api_server, SAMPLE_JOB_POSTING)
+    second_job = {
+        **SAMPLE_JOB_POSTING,
+        "title": "ML Platform Engineer",
+        "company": "DataCorp",
+    }
+    job2 = _submit_and_wait_pending(mock_llm_and_api_server, second_job)
+    return [job1, job2]
