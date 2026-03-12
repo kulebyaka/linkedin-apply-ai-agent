@@ -68,12 +68,12 @@ Add Playwright E2E tests for the HITL review UI using a TDD approach: write fail
 **Files:**
 - Modify: `tests/e2e/test_hitl_review.py`
 
-- [ ] Write test `test_pdf_download_works`: seed 1 job, navigate to UI, switch to CV tab, click "Download Full PDF" button, intercept the download or verify the response from `/api/jobs/{job_id}/pdf` returns 200 with `application/pdf` content type.
-- [ ] Write test `test_cv_html_preview_loads`: seed 1 job, switch to CV tab, verify CV HTML content is rendered (not loading spinner, not error state).
-- [ ] Write test `test_job_description_not_truncated`: seed 1 job with a long description (500+ words), navigate to UI, verify full description text is present in the DOM (no "read more" or "show more" truncation).
-- [ ] Write test `test_retry_regenerates_cv`: seed 1 job, click Retry button, enter feedback "Emphasize Python skills" in modal, submit, verify toast "CV Regeneration Started", wait for job to reappear in pending queue (poll `/api/hitl/pending`), verify retry_count incremented.
-- [ ] Run tests — confirm they fail, documenting which bugs each test exposes.
-- [ ] Run project test suite: `pytest tests/ -v --ignore=tests/eval` — must pass before task 4.
+- [x] Write test `test_pdf_download_works`: seed 1 job, navigate to UI, switch to CV tab, click "Download Full PDF" button, intercept the download or verify the response from `/api/jobs/{job_id}/pdf` returns 200 with `application/pdf` content type.
+- [x] Write test `test_cv_html_preview_loads`: seed 1 job, switch to CV tab, verify CV HTML content is rendered (not loading spinner, not error state).
+- [x] Write test `test_job_description_not_truncated`: seed 1 job with a long description (500+ words), navigate to UI, verify full description text is present in the DOM (no "read more" or "show more" truncation).
+- [x] Write test `test_retry_regenerates_cv`: seed 1 job, click Retry button, enter feedback "Emphasize Python skills" in modal, submit, verify toast "CV Regeneration Started", wait for job to reappear in pending queue (poll `/api/hitl/pending`), verify retry_count incremented.
+- [x] Run tests — confirm they fail, documenting which bugs each test exposes.
+- [x] Run project test suite: `pytest tests/ -v --ignore=tests/eval` — must pass before task 4.
 
 ### Task 4: Fix bug — PDF not generating / not downloadable
 

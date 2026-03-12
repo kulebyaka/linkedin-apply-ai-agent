@@ -13,6 +13,7 @@ Servers are auto-started by session fixtures in conftest.py.
 
 import re
 import time
+from urllib.parse import urljoin
 
 import httpx
 import pytest
@@ -164,4 +165,177 @@ class TestApproveDeclineFlows:
         ]
         assert job_id not in pending_ids, (
             f"Declined job {job_id} should not appear in pending list"
+        )
+
+
+class TestPDFAndCVPreview:
+    """Tests for PDF download and CV HTML preview — known bug area."""
+
+    def test_pdf_download_works(
+        self,
+        mock_llm_and_api_server: str,
+        ui_dev_server: str,
+        page: Page,
+        seed_pending_job: str,
+    ):
+        """Seed 1 job, switch to CV tab, click Download Full PDF, verify PDF response."""
+        job_id = seed_pending_job
+        page.goto(ui_dev_server)
+        page.wait_for_load_state("networkidle")
+
+        # Wait for job card to load
+        page.get_by_role("heading", name="Senior Python Backend Engineer").wait_for(
+            state="visible", timeout=15_000
+        )
+
+        # Switch to CV Preview tab
+        page.get_by_text("CV Preview").click()
+
+        # Wait for CV content to load (not the loading state)
+        page.wait_for_timeout(3_000)
+
+        # Verify the PDF endpoint returns valid PDF via API
+        resp = httpx.get(
+            f"{mock_llm_and_api_server}/api/jobs/{job_id}/pdf", timeout=15
+        )
+        assert resp.status_code == 200, (
+            f"PDF endpoint returned {resp.status_code}: {resp.text[:500]}"
+        )
+        assert resp.headers.get("content-type", "").startswith("application/pdf"), (
+            f"Expected application/pdf, got {resp.headers.get('content-type')}"
+        )
+        # PDF files start with %PDF
+        assert resp.content[:5] == b"%PDF-", "Response body is not a valid PDF"
+
+    def test_cv_html_preview_loads(
+        self,
+        mock_llm_and_api_server: str,
+        ui_dev_server: str,
+        page: Page,
+        seed_pending_job: str,
+    ):
+        """Seed 1 job, switch to CV tab, verify CV HTML renders (not loading/error)."""
+        job_id = seed_pending_job
+        page.goto(ui_dev_server)
+        page.wait_for_load_state("networkidle")
+
+        # Wait for job card to load
+        page.get_by_role("heading", name="Senior Python Backend Engineer").wait_for(
+            state="visible", timeout=15_000
+        )
+
+        # Switch to CV Preview tab
+        page.get_by_text("CV Preview").click()
+
+        # Verify the HTML endpoint returns valid HTML via API
+        resp = httpx.get(
+            f"{mock_llm_and_api_server}/api/jobs/{job_id}/html", timeout=15
+        )
+        assert resp.status_code == 200, (
+            f"HTML endpoint returned {resp.status_code}: {resp.text[:500]}"
+        )
+        assert "text/html" in resp.headers.get("content-type", ""), (
+            f"Expected text/html, got {resp.headers.get('content-type')}"
+        )
+        # HTML should contain some CV content (not an error page)
+        assert len(resp.text) > 100, "HTML response too short to be a valid CV"
+
+        # Also verify in the UI: loading spinner should not be visible
+        # and some content should appear in the CV preview area
+        loading = page.get_by_text("Loading CV...")
+        expect(loading).not_to_be_visible(timeout=15_000)
+
+
+class TestJobDescriptionTruncation:
+    """Tests for job description display — known bug: truncation by 'read more'."""
+
+    def test_job_description_not_truncated(
+        self,
+        ui_dev_server: str,
+        page: Page,
+        seed_long_description_job: str,
+    ):
+        """Seed job with 500+ word description, verify full text present in DOM."""
+        page.goto(ui_dev_server)
+        page.wait_for_load_state("networkidle")
+
+        # Wait for job card to load
+        page.get_by_role("heading", name="Senior Python Backend Engineer").wait_for(
+            state="visible", timeout=15_000
+        )
+
+        # The long description contains a unique marker phrase near the end
+        # that would be truncated if a "read more" or CSS clipping was active
+        marker = "UNIQUE_END_MARKER_PARAGRAPH"
+        expect(page.get_by_text(marker).first).to_be_visible(timeout=10_000)
+
+        # Also verify no "read more" / "show more" button exists
+        read_more = page.get_by_text(re.compile(r"read more|show more", re.IGNORECASE))
+        expect(read_more).to_have_count(0)
+
+
+class TestRetryRegenerateFlow:
+    """Tests for retry/regenerate CV — known bug: retry button broken."""
+
+    def test_retry_regenerates_cv(
+        self,
+        mock_llm_and_api_server: str,
+        ui_dev_server: str,
+        page: Page,
+        seed_pending_job: str,
+    ):
+        """Click Retry, enter feedback, submit, verify regeneration starts and job returns to pending."""
+        job_id = seed_pending_job
+        page.goto(ui_dev_server)
+        page.wait_for_load_state("networkidle")
+
+        # Wait for job card to load
+        page.get_by_role("heading", name="Senior Python Backend Engineer").wait_for(
+            state="visible", timeout=15_000
+        )
+
+        # Click Retry button
+        page.get_by_role("button", name="Retry").click()
+
+        # Modal should appear with "Regenerate CV" title
+        expect(page.get_by_role("heading", name="Regenerate CV")).to_be_visible(
+            timeout=5_000
+        )
+
+        # Enter feedback (required for retry)
+        textarea = page.locator("textarea")
+        textarea.fill("Emphasize Python skills")
+
+        # Click "Regenerate CV" submit button (wait for it to become enabled after typing)
+        regen_btn = page.get_by_role("button", name="Regenerate CV")
+        expect(regen_btn).to_be_enabled(timeout=5_000)
+        regen_btn.click()
+
+        # Verify toast appears with regeneration started message
+        expect(page.get_by_text("CV Regeneration Started")).to_be_visible(
+            timeout=10_000
+        )
+
+        # Wait for retry workflow to complete and job to reappear in pending
+        deadline = time.monotonic() + 60
+        retry_count = None
+        while time.monotonic() < deadline:
+            resp = httpx.get(
+                f"{mock_llm_and_api_server}/api/hitl/pending", timeout=10
+            )
+            if resp.status_code == 200:
+                pending = resp.json()
+                for job in pending:
+                    if job["job_id"] == job_id:
+                        retry_count = job.get("retry_count", 0)
+                        break
+                if retry_count is not None:
+                    break
+            time.sleep(2)
+
+        assert retry_count is not None, (
+            f"Job {job_id} did not reappear in pending queue after retry within 60s"
+        )
+        assert retry_count >= 1, (
+            f"Expected retry_count >= 1, got {retry_count}"
         )

@@ -257,3 +257,77 @@ def seed_two_pending_jobs(mock_llm_and_api_server):
     }
     job2 = _submit_and_wait_pending(mock_llm_and_api_server, second_job)
     return [job1, job2]
+
+
+# Build a long job description (500+ words) with a unique marker near the end.
+_LONG_DESCRIPTION_PARAGRAPHS = [
+    (
+        "We are seeking an experienced Senior Python Backend Engineer to join our "
+        "rapidly growing engineering team. In this role, you will design and build "
+        "scalable, high-performance backend services that power our AI-driven "
+        "platform. You will collaborate closely with data scientists, frontend "
+        "engineers, and product managers to deliver impactful features."
+    ),
+    (
+        "Our technology stack is built on Python, FastAPI, and PostgreSQL, with "
+        "services deployed on AWS using Docker and Kubernetes. We practice "
+        "continuous integration and deployment, code reviews, and automated "
+        "testing. We believe in pragmatic engineering decisions and keeping our "
+        "codebase clean and maintainable."
+    ),
+    (
+        "As a senior engineer, you will mentor junior team members, contribute "
+        "to architectural discussions, and help shape our engineering culture. "
+        "You will be responsible for designing APIs, optimizing database queries, "
+        "implementing caching strategies, and ensuring our services meet strict "
+        "SLA requirements. You will also participate in on-call rotations."
+    ),
+    (
+        "We value engineers who are passionate about building great software, "
+        "who take ownership of their work, and who are always looking for ways "
+        "to improve. Our team is distributed across multiple time zones, so "
+        "strong written communication skills are essential. We hold weekly "
+        "architecture reviews and monthly tech talks."
+    ),
+    (
+        "The ideal candidate has deep experience with Python web frameworks, "
+        "message queues like RabbitMQ or Kafka, and monitoring tools such as "
+        "Prometheus and Grafana. Experience with machine learning pipelines, "
+        "data processing at scale, and event-driven architectures is a plus. "
+        "We offer competitive compensation, equity, and flexible work arrangements."
+    ),
+    (
+        "Additional responsibilities include writing technical documentation, "
+        "conducting performance benchmarks, managing database migrations, and "
+        "integrating third-party services. You will work with our DevOps team "
+        "to improve CI/CD pipelines and infrastructure as code practices."
+    ),
+    (
+        "Our company is at the forefront of applying AI to solve real-world "
+        "problems in the enterprise space. We have raised Series B funding and "
+        "are scaling rapidly. This is an opportunity to make a significant "
+        "impact at a company that values engineering excellence."
+    ),
+    (
+        "UNIQUE_END_MARKER_PARAGRAPH — This final section confirms the full "
+        "job description is visible without truncation. If you can read this "
+        "paragraph, the description has not been clipped by a read-more button "
+        "or CSS overflow rules."
+    ),
+]
+
+LONG_DESCRIPTION_JOB_POSTING = {
+    "title": "Senior Python Backend Engineer",
+    "company": "AI Startup",
+    "description": "\n\n".join(_LONG_DESCRIPTION_PARAGRAPHS),
+    "requirements": SAMPLE_JOB_POSTING["requirements"],
+}
+
+
+@pytest.fixture
+def seed_long_description_job(mock_llm_and_api_server):
+    """Submit a job with a 500+ word description and wait for 'pending' status.
+
+    Returns the job_id.
+    """
+    return _submit_and_wait_pending(mock_llm_and_api_server, LONG_DESCRIPTION_JOB_POSTING)
