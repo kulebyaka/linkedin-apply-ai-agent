@@ -95,10 +95,10 @@ Add Playwright E2E tests for the HITL review UI using a TDD approach: write fail
 - Modify: `src/agents/preparation_workflow.py` or `src/services/linkedin_scraper.py` (if description fetched truncated)
 - Modify: `src/api/main.py` (if API truncates description)
 
-- [ ] Investigate where truncation happens: check if the LinkedIn scraper fetches truncated descriptions, if the API response truncates, or if the UI has CSS that clips content.
-- [ ] Fix the root cause. If it's the scraper not clicking "read more" on LinkedIn, fix `linkedin_scraper.py`. If it's CSS, fix the Svelte component.
-- [ ] Verify `test_job_description_not_truncated` now passes.
-- [ ] Run project test suite: `pytest tests/ -v --ignore=tests/eval` — must pass before task 6.
+- [x] Investigate where truncation happens: check if the LinkedIn scraper fetches truncated descriptions, if the API response truncates, or if the UI has CSS that clips content.
+- [x] Fix the root cause. If it's the scraper not clicking "read more" on LinkedIn, fix `linkedin_scraper.py`. If it's CSS, fix the Svelte component.
+- [x] Verify `test_job_description_not_truncated` now passes.
+- [x] Run project test suite: `pytest tests/ -v --ignore=tests/eval` — must pass before task 6.
 
 ### Task 6: Fix bug — regenerate/retry button doesn't work
 
