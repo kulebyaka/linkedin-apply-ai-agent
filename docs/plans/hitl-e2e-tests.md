@@ -39,15 +39,15 @@ Add Playwright E2E tests for the HITL review UI using a TDD approach: write fail
 - Create: `tests/e2e/test_hitl_review.py` (skeleton)
 - Modify: `pytest.ini` (add `e2e` marker if missing)
 
-- [ ] Create `tests/e2e/conftest.py` with session-scoped fixtures:
+- [x] Create `tests/e2e/conftest.py` with session-scoped fixtures:
   - `mock_llm_and_api_server` fixture: patches `src.agents.preparation_workflow._init_llm_client` and `src.agents.retry_workflow._init_llm_client` to return a mock `BaseLLMClient` that returns canned CV JSON from `tests/fixtures/`. Starts FastAPI via `uvicorn` in a subprocess on a free port. Waits for health check. Yields `api_url`. Kills process on teardown.
   - `ui_dev_server` fixture: runs `npm run dev -- --port {free_port}` in `ui/` directory as subprocess. Waits for the dev server to respond. Yields `ui_url`. Kills process on teardown.
   - `browser` fixture (session-scoped): launches Playwright Chromium, yields browser, closes on teardown.
   - `page` fixture (function-scoped): creates a new browser page per test, closes after.
   - Helper: `wait_for_server(url, timeout=30)` — polls until server responds or times out.
-- [ ] Create skeleton `tests/e2e/test_hitl_review.py` with a single smoke test: navigate to UI URL, assert "Review Applications" heading is visible.
-- [ ] Add `e2e` marker to `pytest.ini` if not already present.
-- [ ] Verify: run `pytest tests/e2e/test_hitl_review.py -v -m e2e` — smoke test passes with both servers auto-started.
+- [x] Create skeleton `tests/e2e/test_hitl_review.py` with a single smoke test: navigate to UI URL, assert "Review Applications" heading is visible.
+- [x] Add `e2e` marker to `pytest.ini` if not already present.
+- [x] Verify: run `pytest tests/e2e/test_hitl_review.py -v -m e2e` — smoke test passes with both servers auto-started.
 
 ### Task 2: Write failing tests for basic HITL flows (load pending, navigate, approve, decline)
 
