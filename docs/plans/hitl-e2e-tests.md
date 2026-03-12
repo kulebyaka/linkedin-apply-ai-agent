@@ -82,11 +82,11 @@ Add Playwright E2E tests for the HITL review UI using a TDD approach: write fail
 - Modify: `src/agents/preparation_workflow.py` (PDF generation node fixes if needed)
 - Modify: `ui/src/lib/components/review/CVPreviewPanel.svelte` (if UI-side issue)
 
-- [ ] Investigate why PDF download fails: check if `pdf_path` is set correctly in JobRecord, if the file exists on disk, if the `/api/jobs/{id}/pdf` endpoint returns the file correctly.
-- [ ] Fix the root cause (likely: PDF path not persisted, or file not found at expected path).
-- [ ] Fix the CV HTML preview endpoint if it also fails (`/api/jobs/{id}/html`).
-- [ ] Verify `test_pdf_download_works` and `test_cv_html_preview_loads` now pass.
-- [ ] Run project test suite: `pytest tests/ -v --ignore=tests/eval` — must pass before task 5.
+- [x] Investigate why PDF download fails: check if `pdf_path` is set correctly in JobRecord, if the file exists on disk, if the `/api/jobs/{id}/pdf` endpoint returns the file correctly.
+- [x] Fix the root cause (likely: PDF path not persisted, or file not found at expected path).
+- [x] Fix the CV HTML preview endpoint if it also fails (`/api/jobs/{id}/html`).
+- [x] Verify `test_pdf_download_works` and `test_cv_html_preview_loads` now pass.
+- [x] Run project test suite: `pytest tests/ -v --ignore=tests/eval` — must pass before task 5.
 
 ### Task 5: Fix bug — job description truncated by "read more"
 

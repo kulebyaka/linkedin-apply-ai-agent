@@ -817,7 +817,7 @@ async def get_job_cv_html(job_id: str) -> HTMLResponse:
             config = {"configurable": {"thread_id": thread_id}}
             state = preparation_workflow.get_state(config).values
             raw_input = state.get("raw_input", {})
-            template_name = raw_input.get("template_name", "compact")
+            template_name = raw_input.get("template_name") or "compact"
 
         generator = PDFGenerator(template_name=template_name)
         html = generator.render_html(status.cv_json)
