@@ -1,0 +1,44 @@
+[
+  {
+    "job_id": "fixture-001",
+    "title": "Senior Python Backend Engineer",
+    "company": "TechCorp AI",
+    "location": "Remote",
+    "url": "https://www.linkedin.com/jobs/view/fixture-001",
+    "posted_date": null,
+    "easy_apply": true,
+    "description": "We are looking for a Senior Python Backend Engineer to join our growing team. You will design and build scalable microservices for our AI-powered platform. Requirements: 5+ years Python, Django/FastAPI, AWS, Docker, PostgreSQL. Strong problem-solving skills and excellent communication.",
+    "requirements": "5+ years Python, Django or FastAPI, AWS services, Docker and Kubernetes, PostgreSQL",
+    "salary_range": "$150k-$180k",
+    "experience_level": "Mid-Senior level",
+    "job_type": "Full-time"
+  },
+  {
+    "job_id": "fixture-002",
+    "title": "ML Platform Engineer",
+    "company": "DataCorp Analytics",
+    "location": "San Francisco, CA (Hybrid)",
+    "url": "https://www.linkedin.com/jobs/view/fixture-002",
+    "posted_date": null,
+    "easy_apply": true,
+    "description": "Join our ML Platform team to build and maintain the infrastructure powering our machine learning models. You will work on data pipelines, model serving, and monitoring. Experience with Python, Kubernetes, and ML frameworks required.",
+    "requirements": "3+ years ML infrastructure, Python, Kubernetes, TensorFlow or PyTorch, data pipeline tools",
+    "salary_range": "$160k-$200k",
+    "experience_level": "Mid-Senior level",
+    "job_type": "Full-time"
+  },
+  {
+    "job_id": "fixture-003",
+    "title": "Full Stack Developer",
+    "company": "StartupCo",
+    "location": "New York, NY (Remote)",
+    "url": "https://www.linkedin.com/jobs/view/fixture-003",
+    "posted_date": null,
+    "easy_apply": false,
+    "description": "We need a Full Stack Developer comfortable with React, TypeScript, and Python backends. You will own features end-to-end from database to UI. Fast-paced startup environment with significant ownership and growth opportunities.",
+    "requirements": "React, TypeScript, Python, PostgreSQL, REST API design, 3+ years full stack experience",
+    "salary_range": "$130k-$160k",
+    "experience_level": "Associate",
+    "job_type": "Full-time"
+  }
+]

@@ -213,6 +213,29 @@ async def startup_event():
     await job_repository.initialize()
     logger.info("Repository initialized successfully")
 
+    # Fixture replay mode: seed jobs from file, skip LinkedIn entirely
+    if settings.seed_jobs_from_file:
+        logger.info(
+            "Fixture replay mode enabled — LinkedIn scraping disabled. "
+            "Loading jobs from %s", settings.scraped_jobs_path,
+        )
+        from src.services.job_fixtures import enqueue_from_fixtures
+
+        queue = get_job_queue()
+        result = await enqueue_from_fixtures(
+            settings.scraped_jobs_path,
+            queue,
+            repository=job_repository,
+            limit=settings.seed_jobs_limit,
+        )
+        logger.info(
+            "Fixture replay: enqueued=%d, skipped=%d, total_in_file=%d",
+            result["enqueued"], result["skipped"], result["total_in_file"],
+        )
+        if result["enqueued"] > 0:
+            _queue_consumer_task = _start_queue_consumer(queue)
+        return
+
     if settings.linkedin_search_schedule_enabled:
         try:
             from src.services.browser_automation import LinkedInAutomation
@@ -595,6 +618,13 @@ async def trigger_linkedin_search():
     """
     global _linkedin_scheduler, _linkedin_browser, _queue_consumer_task
 
+    if settings.seed_jobs_from_file:
+        raise HTTPException(
+            409,
+            "LinkedIn scraping is disabled in fixture replay mode "
+            "(SEED_JOBS_FROM_FILE=true). Use POST /api/jobs/replay-fixtures instead.",
+        )
+
     async with _linkedin_init_lock:
         if _linkedin_scheduler is None:
             # Create a temporary scheduler for one-off search
@@ -663,6 +693,39 @@ async def get_linkedin_search_status():
         if _linkedin_scheduler.next_run_time
         else None,
         "queue_size": get_job_queue().size(),
+    }
+
+
+@app.post("/api/jobs/replay-fixtures")
+async def replay_fixtures(limit: Annotated[int, Query(ge=0)] = 0):
+    """Load scraped jobs from fixture file and enqueue for processing.
+
+    Useful for HITL testing and demos. Jobs already in the repository are skipped.
+    """
+    global _queue_consumer_task
+
+    from src.services.job_fixtures import enqueue_from_fixtures
+
+    path = settings.scraped_jobs_path
+    result = await enqueue_from_fixtures(
+        path,
+        get_job_queue(),
+        repository=job_repository,
+        limit=limit,
+    )
+
+    if result["total_in_file"] == 0:
+        raise HTTPException(404, f"Fixture file not found or empty: {path}")
+
+    # Ensure queue consumer is running to process the enqueued jobs
+    queue = get_job_queue()
+    if result["enqueued"] > 0 and (_queue_consumer_task is None or _queue_consumer_task.done()):
+        _queue_consumer_task = _start_queue_consumer(queue)
+
+    return {
+        "status": "ok",
+        **result,
+        "source": str(path),
     }
 
 
