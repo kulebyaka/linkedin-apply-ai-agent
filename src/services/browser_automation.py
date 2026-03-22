@@ -7,6 +7,7 @@ and anti-detection via playwright-stealth.
 import asyncio
 import json
 import logging
+import os
 import random
 from pathlib import Path
 
@@ -52,7 +53,13 @@ class LinkedInAutomation:
             viewport_width = random.randint(1280, 1920)
             viewport_height = random.randint(800, 1080)
 
-            self.browser = await self._playwright.chromium.launch(headless=self.headless)
+            # Strip DYLD_LIBRARY_PATH so Chromium doesn't load wrong libs
+            # (e.g. /opt/homebrew/lib set for WeasyPrint breaks Chrome on macOS)
+            clean_env = {k: v for k, v in os.environ.items() if not k.startswith("DYLD_")}
+            self.browser = await self._playwright.chromium.launch(
+                headless=self.headless,
+                env=clean_env,
+            )
             self.context = await self.browser.new_context(
                 viewport={"width": viewport_width, "height": viewport_height},
                 locale="en-US",
