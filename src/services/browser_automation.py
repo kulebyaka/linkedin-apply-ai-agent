@@ -53,8 +53,9 @@ class LinkedInAutomation:
             viewport_width = random.randint(1280, 1920)
             viewport_height = random.randint(800, 1080)
 
-            # Strip DYLD_LIBRARY_PATH so Chromium doesn't load wrong libs
-            # (e.g. /opt/homebrew/lib set for WeasyPrint breaks Chrome on macOS)
+            # macOS fix: DYLD_LIBRARY_PATH (set for WeasyPrint to find Homebrew libs)
+            # gets inherited by Chromium, forcing it to load incompatible libs and crash.
+            # Strip DYLD_* vars from the child process env. No-op on Linux.
             clean_env = {k: v for k, v in os.environ.items() if not k.startswith("DYLD_")}
             self.browser = await self._playwright.chromium.launch(
                 headless=self.headless,
