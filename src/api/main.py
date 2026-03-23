@@ -740,7 +740,28 @@ async def get_job_status(job_id: str) -> JobStatusResponse:
     - failed: Job failed with error
     """
     try:
-        # Check unified threads first
+        # Check repository first — it has authoritative state for completed jobs
+        # (LangGraph in-memory checkpoints can be stale after server reload)
+        try:
+            job_record = await job_repository.get(job_id)
+            if job_record:
+                return JobStatusResponse(
+                    job_id=job_id,
+                    status=job_record.status,
+                    source=job_record.source,
+                    mode=job_record.mode,
+                    job_posting=job_record.job_posting,
+                    cv_json=job_record.cv_json,
+                    pdf_path=job_record.pdf_path,
+                    retry_count=job_record.retry_count,
+                    error_message=job_record.error_message,
+                    created_at=job_record.created_at,
+                    updated_at=job_record.updated_at,
+                )
+        except Exception:
+            pass
+
+        # Fall back to unified workflow threads (for in-progress jobs not yet saved)
         if job_id in unified_threads:
             thread_info = unified_threads[job_id]
             thread_id = thread_info["thread_id"]
@@ -983,22 +1004,15 @@ async def submit_hitl_decision(
         if decision.decision == "retry" and not decision.feedback:
             raise HTTPException(400, "Feedback is required for retry decision")
 
-        # Get current job state
-        if job_id not in unified_threads:
+        # Get current job state from repository (authoritative source)
+        job_record = await job_repository.get(job_id)
+        if job_record is None:
             raise HTTPException(404, f"Job {job_id} not found")
 
-        thread_info = unified_threads[job_id]
-        thread_id = thread_info["thread_id"]
-        config = {"configurable": {"thread_id": thread_id}}
-
-        # Get current state
-        state_snapshot = preparation_workflow.get_state(config)
-        state_values = state_snapshot.values
-
-        if state_values.get("current_step") != "pending":
+        if job_record.status != "pending":
             raise HTTPException(
                 400,
-                f"Job {job_id} is not pending review (status: {state_values.get('current_step')})",
+                f"Job {job_id} is not pending review (status: {job_record.status})",
             )
 
         if decision.decision == "approved":
@@ -1011,9 +1025,6 @@ async def submit_hitl_decision(
                 await job_repository.update(job_id, {"status": "approved"})
             except RepositoryError as e:
                 logger.warning(f"Failed to update repository for job {job_id}: {e}")
-
-            # Keep workflow_type as "preparation" so status endpoint can still read state
-            # unified_threads[job_id]["workflow_type"] = "application"
 
             return HITLDecisionResponse(
                 job_id=job_id,
@@ -1048,13 +1059,14 @@ async def submit_hitl_decision(
             # Create new thread for retry workflow
             retry_thread_id = str(uuid.uuid4())
 
-            # Build retry state from current state
+            # Build retry state from repository record (authoritative source)
+            from src.agents.preparation_workflow import load_master_cv
             retry_state = {
                 "job_id": job_id,
                 "user_feedback": decision.feedback,
-                "job_posting": state_values.get("job_posting"),
-                "master_cv": state_values.get("master_cv"),
-                "retry_count": state_values.get("retry_count", 0),
+                "job_posting": job_record.job_posting,
+                "master_cv": load_master_cv(),
+                "retry_count": job_record.retry_count,
                 "current_step": "queued",
                 "error_message": None,
             }
