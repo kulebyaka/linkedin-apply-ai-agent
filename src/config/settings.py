@@ -73,6 +73,11 @@ class Settings(BaseSettings):
     linkedin_search_schedule_enabled: bool = False
     linkedin_search_interval_hours: int = 1
 
+    # Job Fixture Record & Replay
+    seed_jobs_from_file: bool = False  # Bypass LinkedIn scraping, load from fixture file
+    scraped_jobs_path: str = "./data/jobs/scraped_jobs.json"  # Fixture file path
+    seed_jobs_limit: int = 0  # Max jobs to replay from file (0 = no limit)
+
     # Workflow
     job_fetch_interval_hours: int = 1
     max_concurrent_applications: int = 3
@@ -106,6 +111,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        extra = "ignore"
 
 
 @lru_cache

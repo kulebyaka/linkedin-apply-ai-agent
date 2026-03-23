@@ -79,6 +79,15 @@ class LinkedInSearchScheduler:
             jobs = await self.scraper.scrape_and_enrich(params)
             logger.info("Scraped %d jobs from LinkedIn", len(jobs))
 
+            # Auto-record scraped jobs to fixture file
+            fixture_path = getattr(self.settings, "scraped_jobs_path", None)
+            if jobs and isinstance(fixture_path, str):
+                try:
+                    from src.services.job_fixtures import save_scraped_jobs
+                    save_scraped_jobs(jobs, fixture_path)
+                except Exception:
+                    logger.warning("Failed to save scraped jobs to fixture file", exc_info=True)
+
             # Enqueue for workflow processing
             enqueued = await self.queue.put_batch(jobs)
             logger.info("Enqueued %d jobs (queue size: %d)", enqueued, self.queue.size())

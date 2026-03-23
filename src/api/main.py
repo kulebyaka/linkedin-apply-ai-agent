@@ -213,6 +213,29 @@ async def startup_event():
     await job_repository.initialize()
     logger.info("Repository initialized successfully")
 
+    # Fixture replay mode: seed jobs from file, skip LinkedIn entirely
+    if settings.seed_jobs_from_file:
+        logger.info(
+            "Fixture replay mode enabled — LinkedIn scraping disabled. "
+            "Loading jobs from %s", settings.scraped_jobs_path,
+        )
+        from src.services.job_fixtures import enqueue_from_fixtures
+
+        queue = get_job_queue()
+        result = await enqueue_from_fixtures(
+            settings.scraped_jobs_path,
+            queue,
+            repository=job_repository,
+            limit=settings.seed_jobs_limit,
+        )
+        logger.info(
+            "Fixture replay: enqueued=%d, skipped=%d, total_in_file=%d",
+            result["enqueued"], result["skipped"], result["total_in_file"],
+        )
+        if result["enqueued"] > 0:
+            _queue_consumer_task = _start_queue_consumer(queue)
+        return
+
     if settings.linkedin_search_schedule_enabled:
         try:
             from src.services.browser_automation import LinkedInAutomation
@@ -595,6 +618,13 @@ async def trigger_linkedin_search():
     """
     global _linkedin_scheduler, _linkedin_browser, _queue_consumer_task
 
+    if settings.seed_jobs_from_file:
+        raise HTTPException(
+            409,
+            "LinkedIn scraping is disabled in fixture replay mode "
+            "(SEED_JOBS_FROM_FILE=true). Use POST /api/jobs/replay-fixtures instead.",
+        )
+
     async with _linkedin_init_lock:
         if _linkedin_scheduler is None:
             # Create a temporary scheduler for one-off search
@@ -666,6 +696,39 @@ async def get_linkedin_search_status():
     }
 
 
+@app.post("/api/jobs/replay-fixtures")
+async def replay_fixtures(limit: Annotated[int, Query(ge=0)] = 0):
+    """Load scraped jobs from fixture file and enqueue for processing.
+
+    Useful for HITL testing and demos. Jobs already in the repository are skipped.
+    """
+    global _queue_consumer_task
+
+    from src.services.job_fixtures import enqueue_from_fixtures
+
+    path = settings.scraped_jobs_path
+    result = await enqueue_from_fixtures(
+        path,
+        get_job_queue(),
+        repository=job_repository,
+        limit=limit,
+    )
+
+    if result["total_in_file"] == 0:
+        raise HTTPException(404, f"Fixture file not found or empty: {path}")
+
+    # Ensure queue consumer is running to process the enqueued jobs
+    queue = get_job_queue()
+    if result["enqueued"] > 0 and (_queue_consumer_task is None or _queue_consumer_task.done()):
+        _queue_consumer_task = _start_queue_consumer(queue)
+
+    return {
+        "status": "ok",
+        **result,
+        "source": str(path),
+    }
+
+
 @app.get("/api/jobs/{job_id}/status", response_model=JobStatusResponse)
 async def get_job_status(job_id: str) -> JobStatusResponse:
     """
@@ -677,7 +740,28 @@ async def get_job_status(job_id: str) -> JobStatusResponse:
     - failed: Job failed with error
     """
     try:
-        # Check unified threads first
+        # Check repository first — it has authoritative state for completed jobs
+        # (LangGraph in-memory checkpoints can be stale after server reload)
+        try:
+            job_record = await job_repository.get(job_id)
+            if job_record:
+                return JobStatusResponse(
+                    job_id=job_id,
+                    status=job_record.status,
+                    source=job_record.source,
+                    mode=job_record.mode,
+                    job_posting=job_record.job_posting,
+                    cv_json=job_record.cv_json,
+                    pdf_path=job_record.pdf_path,
+                    retry_count=job_record.retry_count,
+                    error_message=job_record.error_message,
+                    created_at=job_record.created_at,
+                    updated_at=job_record.updated_at,
+                )
+        except Exception:
+            pass
+
+        # Fall back to unified workflow threads (for in-progress jobs not yet saved)
         if job_id in unified_threads:
             thread_info = unified_threads[job_id]
             thread_id = thread_info["thread_id"]
@@ -920,22 +1004,15 @@ async def submit_hitl_decision(
         if decision.decision == "retry" and not decision.feedback:
             raise HTTPException(400, "Feedback is required for retry decision")
 
-        # Get current job state
-        if job_id not in unified_threads:
+        # Get current job state from repository (authoritative source)
+        job_record = await job_repository.get(job_id)
+        if job_record is None:
             raise HTTPException(404, f"Job {job_id} not found")
 
-        thread_info = unified_threads[job_id]
-        thread_id = thread_info["thread_id"]
-        config = {"configurable": {"thread_id": thread_id}}
-
-        # Get current state
-        state_snapshot = preparation_workflow.get_state(config)
-        state_values = state_snapshot.values
-
-        if state_values.get("current_step") != "pending":
+        if job_record.status != "pending":
             raise HTTPException(
                 400,
-                f"Job {job_id} is not pending review (status: {state_values.get('current_step')})",
+                f"Job {job_id} is not pending review (status: {job_record.status})",
             )
 
         if decision.decision == "approved":
@@ -948,9 +1025,6 @@ async def submit_hitl_decision(
                 await job_repository.update(job_id, {"status": "approved"})
             except RepositoryError as e:
                 logger.warning(f"Failed to update repository for job {job_id}: {e}")
-
-            # Keep workflow_type as "preparation" so status endpoint can still read state
-            # unified_threads[job_id]["workflow_type"] = "application"
 
             return HITLDecisionResponse(
                 job_id=job_id,
@@ -985,13 +1059,14 @@ async def submit_hitl_decision(
             # Create new thread for retry workflow
             retry_thread_id = str(uuid.uuid4())
 
-            # Build retry state from current state
+            # Build retry state from repository record (authoritative source)
+            from src.agents.preparation_workflow import load_master_cv
             retry_state = {
                 "job_id": job_id,
                 "user_feedback": decision.feedback,
-                "job_posting": state_values.get("job_posting"),
-                "master_cv": state_values.get("master_cv"),
-                "retry_count": state_values.get("retry_count", 0),
+                "job_posting": job_record.job_posting,
+                "master_cv": load_master_cv(),
+                "retry_count": job_record.retry_count,
                 "current_step": "queued",
                 "error_message": None,
             }

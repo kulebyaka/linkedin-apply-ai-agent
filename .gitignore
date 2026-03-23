@@ -119,3 +119,4 @@ scripts/test_job.json
 .ralphex/progress/
 settings.local.json
 _env
+.claude-project
