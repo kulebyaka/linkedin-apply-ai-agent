@@ -118,3 +118,4 @@ scripts/test_job.json
 # ralphex progress logs
 .ralphex/progress/
 settings.local.json
+_env

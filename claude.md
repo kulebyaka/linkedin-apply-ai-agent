@@ -249,6 +249,7 @@ Defined in `src/models/unified.py`:
 - Mock LLM responses for determinism
 - Playwright tests for browser automation
 - API endpoint tests with TestClient
+- HITL E2E tests (`tests/e2e/test_hitl_review.py`): Full Playwright tests for the HITL review UI covering approve/decline/retry flows, PDF download, CV preview, and job description rendering. Servers are auto-started by fixtures. Run with: `pytest tests/e2e/test_hitl_review.py -v -m e2e`
 
 ### Configuration
 

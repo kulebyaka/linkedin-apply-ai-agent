@@ -15,7 +15,6 @@ from src.services.browser_automation import LinkedInAutomation
 from src.services.linkedin_search import LinkedInSearchParams, LinkedInSearchURLBuilder
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)  # TODO: remove after debugging
 
 # CSS selectors for LinkedIn job search results and detail pages.
 # These target the current LinkedIn DOM structure and may need updating
@@ -30,6 +29,7 @@ SELECTORS = {
     "detail_description": "div.jobs-description__content, div#job-details",
     "detail_criteria": "li.jobs-unified-top-card__job-insight, ul.job-criteria__list li",
     "detail_salary": "div.salary-main-rail__data-body, span.jobs-unified-top-card__salary",
+    "detail_show_more": "button.jobs-description__footer-button, button[aria-label='Show more'], button:has-text('Show more')",
     "no_results": "div.jobs-search-no-results-banner",
 }
 
@@ -87,9 +87,7 @@ class LinkedInJobScraper:
         """Clear the set of seen job IDs for a new session."""
         self._seen_job_ids.clear()
 
-    async def scrape_search_results(
-        self, search_params: LinkedInSearchParams
-    ) -> list[ScrapedJob]:
+    async def scrape_search_results(self, search_params: LinkedInSearchParams) -> list[ScrapedJob]:
         """Scrape job cards from LinkedIn search results pages.
 
         Paginates through results until max_jobs is reached or no more
@@ -153,7 +151,8 @@ class LinkedInJobScraper:
             if card_count > 0 and parsed_this_page == 0 and len(self._seen_job_ids) == 0:
                 logger.warning(
                     "Page %d had %d cards but none were parsed — CSS selectors may be outdated",
-                    page_num, card_count,
+                    page_num,
+                    card_count,
                 )
 
             # Track stale pages (cards found but no new jobs added)
@@ -161,7 +160,9 @@ class LinkedInJobScraper:
                 stale_pages += 1
                 logger.info(
                     "No new jobs on page %d (%d/%d stale pages)",
-                    page_num, stale_pages, max_stale_pages,
+                    page_num,
+                    stale_pages,
+                    max_stale_pages,
                 )
                 if stale_pages >= max_stale_pages:
                     logger.info("Stopping pagination: %d consecutive stale pages", stale_pages)
@@ -191,9 +192,7 @@ class LinkedInJobScraper:
 
         return await self._parse_job_detail_page(self.browser.page)
 
-    async def scrape_and_enrich(
-        self, search_params: LinkedInSearchParams
-    ) -> list[ScrapedJob]:
+    async def scrape_and_enrich(self, search_params: LinkedInSearchParams) -> list[ScrapedJob]:
         """Scrape search results then enrich each with full job details.
 
         Returns list of ScrapedJob instances with detail-level fields populated.
@@ -211,7 +210,9 @@ class LinkedInJobScraper:
             try:
                 details = await self.scrape_job_details(job.url)
                 job = job.model_copy(update=details)
-                logger.info("Enriched job %s: description=%d chars", job.job_id, len(job.description))
+                logger.info(
+                    "Enriched job %s: description=%d chars", job.job_id, len(job.description)
+                )
             except Exception as exc:
                 logger.warning("Failed to enrich job %s: %s", job.job_id, exc)
 
@@ -249,24 +250,39 @@ class LinkedInJobScraper:
             # Company
             company = ""
             if await card_element.locator(SELECTORS["job_card_company"]).count() > 0:
-                company = " ".join((await card_element.locator(SELECTORS["job_card_company"]).first.text_content() or "").split())
+                company = " ".join(
+                    (
+                        await card_element.locator(
+                            SELECTORS["job_card_company"]
+                        ).first.text_content()
+                        or ""
+                    ).split()
+                )
 
             # Location
             location = ""
             if await card_element.locator(SELECTORS["job_card_location"]).count() > 0:
-                location = " ".join((await card_element.locator(SELECTORS["job_card_location"]).first.text_content() or "").split())
+                location = " ".join(
+                    (
+                        await card_element.locator(
+                            SELECTORS["job_card_location"]
+                        ).first.text_content()
+                        or ""
+                    ).split()
+                )
 
             # Easy Apply badge
-            easy_apply_count = await card_element.locator(
-                SELECTORS["job_card_easy_apply"]
-            ).count()
+            easy_apply_count = await card_element.locator(SELECTORS["job_card_easy_apply"]).count()
             easy_apply = easy_apply_count > 0
 
             # Posted date (optional — element may not exist on all cards)
             posted_date = None
             posted_count = await card_element.locator(SELECTORS["job_card_posted"]).count()
             if posted_count > 0:
-                posted_text = (await card_element.locator(SELECTORS["job_card_posted"]).first.text_content() or "").strip()
+                posted_text = (
+                    await card_element.locator(SELECTORS["job_card_posted"]).first.text_content()
+                    or ""
+                ).strip()
                 posted_date = _parse_relative_time(posted_text)
 
             return ScrapedJob(
@@ -297,6 +313,16 @@ class LinkedInJobScraper:
         }
 
         try:
+            # Click "Show more" button to expand truncated job descriptions.
+            # LinkedIn hides long descriptions behind this button by default.
+            show_more = page.locator(SELECTORS["detail_show_more"]).first
+            try:
+                if await show_more.is_visible(timeout=2000):
+                    await show_more.click()
+                    await self.browser.random_delay(0.5, 1.0)
+            except Exception:
+                pass  # Button not present or not clickable — continue with whatever is visible
+
             # Primary: find h2 "About the job" and get its grandparent's text
             # (LinkedIn now uses hashed CSS classes, so text-based lookup is more stable)
             about_h2 = page.locator("h2:has-text('About the job')")
@@ -313,7 +339,8 @@ class LinkedInJobScraper:
                 desc_count = await page.locator(SELECTORS["detail_description"]).count()
                 if desc_count > 0:
                     result["description"] = (
-                        await page.locator(SELECTORS["detail_description"]).first.text_content() or ""
+                        await page.locator(SELECTORS["detail_description"]).first.text_content()
+                        or ""
                     ).strip()
         except Exception as exc:
             logger.debug("Failed to extract description: %s", exc)
