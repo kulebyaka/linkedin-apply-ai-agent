@@ -24,6 +24,7 @@ from ..config.settings import get_settings
 from ..llm.provider import LLMClientFactory, LLMProvider
 from ..models.unified import JobRecord
 from ..services.cv_composer import CVComposer
+from ..services.job_fixtures import get_cached_llm_response, save_llm_response
 from ..services.job_repository import InMemoryJobRepository, JobRepository
 from ..services.job_source import JobExtractionError, JobSourceFactory
 from ..services.pdf_generator import PDFGenerator
@@ -278,6 +279,19 @@ def compose_cv_node(state: PreparationWorkflowState) -> PreparationWorkflowState
     state["current_step"] = "composing_cv"
 
     try:
+        # In fixture replay mode, check LLM response cache first (skip retries)
+        if settings.seed_jobs_from_file and not user_feedback:
+            cached = get_cached_llm_response(job_id)
+            if cached is not None:
+                state["tailored_cv_json"] = cached
+                state["current_step"] = "cv_composed"
+                state["error_message"] = None
+                elapsed = time.time() - start_time
+                logger.info(
+                    f"[TIMING] compose_cv_node completed in {elapsed:.2f}s (LLM cache hit)"
+                )
+                return state
+
         # Get LLM provider/model from raw_input if specified
         raw_input = state.get("raw_input", {})
         llm_provider = raw_input.get("llm_provider")
@@ -312,6 +326,10 @@ def compose_cv_node(state: PreparationWorkflowState) -> PreparationWorkflowState
         state["current_step"] = "cv_composed"
         state["error_message"] = None  # Clear any previous errors
         logger.info(f"CV composition completed successfully for job {job_id}")
+
+        # Cache LLM response for future fixture replays
+        if settings.seed_jobs_from_file:
+            save_llm_response(job_id, state["tailored_cv_json"])
 
     except Exception as e:
         logger.error(f"CV composition failed for job {job_id}: {e}", exc_info=True)

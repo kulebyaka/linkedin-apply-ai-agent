@@ -3,6 +3,10 @@
 Enables fast HITL testing and demos without live LinkedIn scraping.
 Recording happens automatically after each scrape; replay loads jobs from
 file and enqueues them into the job queue with deduplication.
+
+Also provides LLM response caching: when fixture replay mode is active,
+LLM outputs (tailored CV JSON) are cached per job_id so repeated runs
+skip expensive LLM calls entirely.
 """
 
 from __future__ import annotations
@@ -10,11 +14,55 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+from typing import Any
 
 from src.models.job import ScrapedJob
 from src.services.job_queue import JobQueue
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# LLM response cache
+# ---------------------------------------------------------------------------
+
+_DEFAULT_LLM_CACHE_PATH = Path("./data/jobs/llm_response_cache.json")
+
+
+def _load_llm_cache(path: Path) -> dict[str, Any]:
+    """Load LLM response cache from disk."""
+    if not path.exists():
+        return {}
+    try:
+        raw = json.loads(path.read_text())
+        if isinstance(raw, dict):
+            return raw
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.warning("Failed to read LLM cache %s: %s", path, exc)
+    return {}
+
+
+def _save_llm_cache(cache: dict[str, Any], path: Path) -> None:
+    """Persist LLM response cache to disk."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(cache, indent=2, default=str))
+
+
+def get_cached_llm_response(job_id: str, path: Path | None = None) -> dict[str, Any] | None:
+    """Return cached tailored CV JSON for *job_id*, or ``None`` on miss."""
+    cache = _load_llm_cache(path or _DEFAULT_LLM_CACHE_PATH)
+    hit = cache.get(job_id)
+    if hit is not None:
+        logger.info("LLM cache HIT for job %s", job_id)
+    return hit
+
+
+def save_llm_response(job_id: str, tailored_cv_json: dict[str, Any], path: Path | None = None) -> None:
+    """Persist a tailored CV JSON to the LLM response cache."""
+    p = path or _DEFAULT_LLM_CACHE_PATH
+    cache = _load_llm_cache(p)
+    cache[job_id] = tailored_cv_json
+    _save_llm_cache(cache, p)
+    logger.info("LLM cache SAVE for job %s", job_id)
 
 
 def save_scraped_jobs(jobs: list[ScrapedJob], path: str | Path) -> int:
