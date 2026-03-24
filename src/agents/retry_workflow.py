@@ -20,6 +20,7 @@ from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 
 from ..models.cv_attempt import CVCompositionAttempt
+from ..models.state_machine import BusinessState, WorkflowStep
 from ..services.cv_composer import CVComposer
 from ..services.pdf_generator import PDFGenerator
 from ..services.job_repository import JobRepository
@@ -107,7 +108,7 @@ async def load_from_db_node(state: RetryWorkflowState, config: dict | None = Non
     """
     job_id = state.get("job_id", "unknown")
     logger.info(f"Loading job data for retry: {job_id}")
-    state["current_step"] = "loading"
+    state["current_step"] = WorkflowStep.LOADING
 
     try:
         repo = _get_repository_from_config(config or {})
@@ -129,13 +130,13 @@ async def load_from_db_node(state: RetryWorkflowState, config: dict | None = Non
         from .preparation_workflow import load_master_cv
         state["master_cv"] = load_master_cv()
 
-        state["current_step"] = "loaded"
+        state["current_step"] = WorkflowStep.LOADED
         logger.info(f"Loaded job data for {job_id}, retry #{state['retry_count']}")
 
     except Exception as e:
         logger.error(f"Failed to load job {job_id} for retry: {e}", exc_info=True)
         state["error_message"] = f"Failed to load job data: {str(e)}"
-        state["current_step"] = "failed"
+        state["current_step"] = BusinessState.FAILED
 
     return state
 
@@ -155,7 +156,7 @@ async def compose_cv_node(state: RetryWorkflowState) -> RetryWorkflowState:
 
     logger.info(f"Composing CV for retry #{retry_count} of job {job_id}")
     logger.info(f"User feedback: {user_feedback}")
-    state["current_step"] = "composing_cv"
+    state["current_step"] = WorkflowStep.COMPOSING_CV
 
     # Check for previous errors
     if state.get("error_message"):
@@ -194,7 +195,7 @@ async def compose_cv_node(state: RetryWorkflowState) -> RetryWorkflowState:
 
         # Update state - convert Pydantic model to dict
         state["tailored_cv_json"] = tailored_cv.model_dump()
-        state["current_step"] = "cv_composed"
+        state["current_step"] = WorkflowStep.CV_COMPOSED
         state["error_message"] = None
         logger.info(f"CV retry composition completed for job {job_id}")
 
@@ -218,7 +219,7 @@ async def generate_pdf_node(state: RetryWorkflowState) -> RetryWorkflowState:
     job_id = state.get("job_id", "unknown")
     retry_count = state.get("retry_count", 1)
     logger.info(f"Generating PDF for retry #{retry_count} of job {job_id}")
-    state["current_step"] = "generating_pdf"
+    state["current_step"] = WorkflowStep.GENERATING_PDF
 
     # Check if we have CV data
     cv_json = state.get("tailored_cv_json")
@@ -232,7 +233,7 @@ async def generate_pdf_node(state: RetryWorkflowState) -> RetryWorkflowState:
         logger.error(error_msg)
         state["error_message"] = error_msg
         state["tailored_cv_pdf_path"] = None
-        state["current_step"] = "failed"
+        state["current_step"] = BusinessState.FAILED
         return state
 
     try:
@@ -280,14 +281,14 @@ async def generate_pdf_node(state: RetryWorkflowState) -> RetryWorkflowState:
 
         # Update state
         state["tailored_cv_pdf_path"] = pdf_path
-        state["current_step"] = "pdf_generated"
+        state["current_step"] = WorkflowStep.PDF_GENERATED
         logger.info(f"Retry PDF generated for job {job_id}: {pdf_path}")
 
     except Exception as e:
         logger.error(f"PDF generation failed for retry of job {job_id}: {e}", exc_info=True)
         state["error_message"] = f"PDF generation failed: {str(e)}"
         state["tailored_cv_pdf_path"] = None
-        state["current_step"] = "failed"
+        state["current_step"] = BusinessState.FAILED
 
     return state
 
@@ -306,13 +307,13 @@ async def update_db_node(state: RetryWorkflowState, config: dict | None = None) 
     job_id = state.get("job_id", "unknown")
     retry_count = state.get("retry_count", 1)
     logger.info(f"Updating job {job_id} after retry #{retry_count}")
-    state["current_step"] = "saving"
+    state["current_step"] = WorkflowStep.SAVING
 
     # Determine final status
     if state.get("error_message") and not state.get("tailored_cv_pdf_path"):
-        final_status = "failed"
+        final_status = BusinessState.FAILED
     else:
-        final_status = "pending"  # Back to HITL queue
+        final_status = BusinessState.PENDING_REVIEW  # Back to HITL queue
 
     try:
         repo = _get_repository_from_config(config or {})
@@ -351,7 +352,7 @@ async def update_db_node(state: RetryWorkflowState, config: dict | None = None) 
     except Exception as e:
         logger.error(f"Failed to update job {job_id} after retry: {e}", exc_info=True)
         state["error_message"] = f"Failed to update job: {str(e)}"
-        state["current_step"] = "failed"
+        state["current_step"] = BusinessState.FAILED
 
     return state
 

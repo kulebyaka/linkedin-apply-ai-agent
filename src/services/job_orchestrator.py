@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from src.context import AppContext
 
+from src.models.state_machine import BusinessState
 from src.models.unified import (
     JobStatusResponse,
     JobSubmitRequest,
@@ -98,7 +99,7 @@ class JobOrchestrator:
             "mode": request.mode,
             "raw_input": raw_input,
             "master_cv": master_cv,
-            "current_step": "queued",
+            "current_step": BusinessState.QUEUED,
             "retry_count": 0,
             "user_feedback": None,
             "error_message": None,
@@ -116,7 +117,7 @@ class JobOrchestrator:
 
         return JobSubmitResponse(
             job_id=job_id,
-            status="queued",
+            status=BusinessState.QUEUED,
             message=f"Job submitted successfully. Mode: {request.mode}",
         )
 
@@ -164,7 +165,7 @@ class JobOrchestrator:
 
             return JobStatusResponse(
                 job_id=job_id,
-                status=state_values.get("current_step", "queued"),
+                status=state_values.get("current_step", BusinessState.QUEUED),
                 source=state_values.get("source"),
                 mode=state_values.get("mode"),
                 job_posting=state_values.get("job_posting"),

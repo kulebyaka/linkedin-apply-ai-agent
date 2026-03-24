@@ -26,6 +26,7 @@ from src.agents.preparation_workflow import (
 from src.config.settings import get_settings
 from src.context import AppContext, create_app_context
 from src.models.mvp import CVGenerationResponse, CVGenerationStatus, JobDescriptionInput
+from src.models.state_machine import BusinessState
 from src.models.unified import (
     ApplicationHistoryItem,
     HITLDecision,
@@ -312,7 +313,7 @@ async def generate_cv(
             "mode": "mvp",
             "raw_input": raw_input,
             "master_cv": master_cv,
-            "current_step": "queued",
+            "current_step": BusinessState.QUEUED,
             "retry_count": 0,
             "user_feedback": None,
             "error_message": None,
@@ -614,10 +615,15 @@ async def download_job_pdf(job_id: str, request: Request):
         status = await get_job_status(job_id, request)
 
         # Check if job is ready
-        if status.status == "failed":
+        if status.status == BusinessState.FAILED:
             raise HTTPException(400, f"Job failed: {status.error_message}")
 
-        if status.status not in ["completed", "pending", "pdf_generated"]:
+        pdf_ready_statuses = {
+            BusinessState.CV_READY,
+            BusinessState.PENDING_REVIEW,
+            "pdf_generated",  # Workflow-internal step from in-progress query
+        }
+        if status.status not in pdf_ready_statuses:
             raise HTTPException(400, f"PDF not ready yet (status: {status.status})")
 
         # Check PDF exists
@@ -662,10 +668,15 @@ async def get_job_cv_html(job_id: str, request: Request) -> HTMLResponse:
         status = await get_job_status(job_id, request)
 
         # Check if job is ready
-        if status.status == "failed":
+        if status.status == BusinessState.FAILED:
             raise HTTPException(400, f"Job failed: {status.error_message}")
 
-        if status.status not in ["completed", "pending", "pdf_generated"]:
+        cv_ready_statuses = {
+            BusinessState.CV_READY,
+            BusinessState.PENDING_REVIEW,
+            "pdf_generated",
+        }
+        if status.status not in cv_ready_statuses:
             raise HTTPException(400, f"CV not ready yet (status: {status.status})")
 
         # Check CV JSON exists
@@ -771,7 +782,11 @@ async def cleanup_jobs(
     Returns:
         {"deleted": int, "message": str}
     """
-    deletable_statuses = {"declined", "failed", "completed"}
+    deletable_statuses = {
+        BusinessState.DECLINED,
+        BusinessState.FAILED,
+        BusinessState.CV_READY,
+    }
     try:
         if statuses is None:
             statuses = ["declined", "failed"]

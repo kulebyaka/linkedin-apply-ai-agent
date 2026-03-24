@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Optional
 
 from ..models.cv_attempt import CVCompositionAttempt
+from ..models.state_machine import BusinessState, InvalidStateTransition, validate_transition
 from ..models.unified import JobRecord
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,7 @@ logger = logging.getLogger(__name__)
 # Valid fields that can be updated via update() method
 UPDATABLE_FIELDS = frozenset({
     "status",
+    "workflow_step",
     "job_posting",
     "raw_input",
     "current_cv_json",
@@ -377,6 +379,7 @@ class InMemoryJobRepository(JobRepository):
         Raises:
             RepositoryError: If job not found.
             ValueError: If updates contain invalid field names.
+            InvalidStateTransition: If status transition is not allowed.
         """
         async with self._lock:
             if job_id not in self._jobs:
@@ -386,6 +389,17 @@ class InMemoryJobRepository(JobRepository):
             invalid_fields = set(updates.keys()) - UPDATABLE_FIELDS
             if invalid_fields:
                 raise ValueError(f"Invalid update fields: {invalid_fields}")
+
+            # Validate state transition if status is being changed
+            if "status" in updates:
+                current_status = self._jobs[job_id].status
+                new_status = updates["status"]
+                # Coerce to BusinessState for validation
+                if not isinstance(current_status, BusinessState):
+                    current_status = BusinessState(current_status)
+                if not isinstance(new_status, BusinessState):
+                    new_status = BusinessState(new_status)
+                validate_transition(current_status, new_status, job_id)
 
             # Auto-set updated_at
             updates["updated_at"] = datetime.now(tz=timezone.utc)
@@ -416,7 +430,7 @@ class InMemoryJobRepository(JobRepository):
         Returns:
             List of jobs with status='pending', sorted by created_at desc.
         """
-        jobs = [j for j in self._jobs.values() if j.status == "pending"]
+        jobs = [j for j in self._jobs.values() if j.status == BusinessState.PENDING_REVIEW]
         jobs.sort(key=lambda j: j.created_at, reverse=True)
         return jobs
 
@@ -770,6 +784,7 @@ class SQLiteJobRepository(JobRepository):
         Raises:
             RepositoryError: If job not found.
             ValueError: If updates contain invalid field names.
+            InvalidStateTransition: If status transition is not allowed.
         """
         self._ensure_initialized()
         from .tables import Job
@@ -783,6 +798,16 @@ class SQLiteJobRepository(JobRepository):
         invalid_fields = set(updates.keys()) - UPDATABLE_FIELDS
         if invalid_fields:
             raise ValueError(f"Invalid update fields: {invalid_fields}")
+
+        # Validate state transition if status is being changed
+        if "status" in updates:
+            current_status = existing["status"]
+            new_status = updates["status"]
+            if not isinstance(current_status, BusinessState):
+                current_status = BusinessState(current_status)
+            if not isinstance(new_status, BusinessState):
+                new_status = BusinessState(new_status)
+            validate_transition(current_status, new_status, job_id)
 
         # Auto-set updated_at
         updates["updated_at"] = datetime.now(tz=timezone.utc)
@@ -829,7 +854,7 @@ class SQLiteJobRepository(JobRepository):
 
         rows = (
             await Job.select()
-            .where(Job.status == "pending")
+            .where(Job.status == BusinessState.PENDING_REVIEW)
             .order_by(Job.created_at, ascending=False)
             .run()
         )

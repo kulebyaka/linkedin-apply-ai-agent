@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from src.context import AppContext
 
+from src.models.state_machine import BusinessState
 from src.models.unified import (
     ApplicationHistoryItem,
     HITLDecision,
@@ -65,7 +66,7 @@ class HITLProcessor:
         if job_record is None:
             raise KeyError(f"Job {job_id} not found")
 
-        if job_record.status != "pending":
+        if job_record.status != BusinessState.PENDING_REVIEW:
             raise RuntimeError(
                 f"Job {job_id} is not pending review (status: {job_record.status})"
             )
@@ -143,26 +144,26 @@ class HITLProcessor:
     async def _handle_approve(self, job_id: str) -> HITLDecisionResponse:
         logger.info("Job %s approved for application (workflow not implemented)", job_id)
         try:
-            await self._ctx.repository.update(job_id, {"status": "approved"})
+            await self._ctx.repository.update(job_id, {"status": BusinessState.APPROVED})
         except RepositoryError as e:
             logger.warning("Failed to update repository for job %s: %s", job_id, e)
 
         return HITLDecisionResponse(
             job_id=job_id,
-            status="approved",
+            status=BusinessState.APPROVED,
             message="Job approved. Application workflow not yet implemented.",
         )
 
     async def _handle_decline(self, job_id: str) -> HITLDecisionResponse:
         logger.info("Job %s declined by user", job_id)
         try:
-            await self._ctx.repository.update(job_id, {"status": "declined"})
+            await self._ctx.repository.update(job_id, {"status": BusinessState.DECLINED})
         except RepositoryError as e:
             logger.warning("Failed to update repository for job %s: %s", job_id, e)
 
         return HITLDecisionResponse(
             job_id=job_id,
-            status="declined",
+            status=BusinessState.DECLINED,
             message="Job declined. No further action will be taken.",
         )
 
@@ -172,7 +173,7 @@ class HITLProcessor:
         logger.info("Job %s queued for retry with user feedback", job_id)
 
         try:
-            await self._ctx.repository.update(job_id, {"status": "retrying"})
+            await self._ctx.repository.update(job_id, {"status": BusinessState.RETRYING})
         except RepositoryError as e:
             logger.warning("Failed to update repository for job %s: %s", job_id, e)
 
@@ -190,7 +191,7 @@ class HITLProcessor:
             "job_posting": job_record.job_posting,
             "master_cv": load_master_cv(),
             "retry_count": retry_count,
-            "current_step": "queued",
+            "current_step": BusinessState.QUEUED,
             "error_message": None,
         }
 
@@ -202,7 +203,7 @@ class HITLProcessor:
 
         return HITLDecisionResponse(
             job_id=job_id,
-            status="retrying",
+            status=BusinessState.RETRYING,
             message="CV regeneration started with your feedback.",
         )
 
@@ -241,7 +242,7 @@ class HITLProcessor:
             try:
                 state_snapshot = self._ctx.prep_workflow.get_state(config)
                 state_values = state_snapshot.values
-                if state_values.get("current_step") == "pending":
+                if state_values.get("current_step") == BusinessState.PENDING_REVIEW:
                     pending.append(
                         PendingApproval(
                             job_id=job_id,

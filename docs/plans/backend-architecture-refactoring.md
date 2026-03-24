@@ -179,15 +179,15 @@ Addresses **Finding #7** (No state transition validation). Create separate `Work
 - Modify: `src/services/hitl_processor.py`
 - Create: `tests/unit/test_state_machine.py`
 
-- [ ] Create `src/models/state_machine.py` with two enums: `WorkflowStep` (extracting, filtering, composing_cv, generating_pdf, loading, applying) and `BusinessState` (queued, processing, cv_ready, pending_review, approved, declined, retrying, applying, applied, failed). Add `ALLOWED_TRANSITIONS: dict[BusinessState, set[BusinessState]]` mapping each state to its valid successors. Add a `validate_transition(current: BusinessState, target: BusinessState) -> bool` function that checks the map and raises `InvalidStateTransition` if disallowed
-- [ ] Update `JobRecord` in `unified.py` to use the new enums: `status: BusinessState`, `workflow_step: WorkflowStep | None`
-- [ ] Add transition validation in `JobRepository.update()`: when `status` is in the updates dict, call `validate_transition(current_status, new_status)` before applying. Both `InMemoryJobRepository` and `SQLiteJobRepository` must enforce this
-- [ ] Update all workflow nodes to use the new enum values instead of string literals (e.g., `state["status"] = BusinessState.PROCESSING` instead of `state["current_step"] = "extracting"`)
-- [ ] Update `JobOrchestrator` and `HITLProcessor` to use enum values
-- [ ] Update API response serialization to handle enum → string conversion for JSON responses
-- [ ] Write comprehensive tests in `tests/unit/test_state_machine.py`: test all valid transitions succeed, test invalid transitions raise `InvalidStateTransition`, test terminal states have no successors (except `failed → retrying`)
-- [ ] Update existing tests that compare status strings to use enum values
-- [ ] Run project test suite — must pass before task 8
+- [x] Create `src/models/state_machine.py` with two enums: `WorkflowStep` (extracting, filtering, composing_cv, generating_pdf, loading, applying) and `BusinessState` (queued, processing, cv_ready, pending_review, approved, declined, retrying, applying, applied, failed). Add `ALLOWED_TRANSITIONS: dict[BusinessState, set[BusinessState]]` mapping each state to its valid successors. Add a `validate_transition(current: BusinessState, target: BusinessState) -> bool` function that checks the map and raises `InvalidStateTransition` if disallowed
+- [x] Update `JobRecord` in `unified.py` to use the new enums: `status: BusinessState`, `workflow_step: WorkflowStep | None`
+- [x] Add transition validation in `JobRepository.update()`: when `status` is in the updates dict, call `validate_transition(current_status, new_status)` before applying. Both `InMemoryJobRepository` and `SQLiteJobRepository` must enforce this
+- [x] Update all workflow nodes to use the new enum values instead of string literals (e.g., `state["status"] = BusinessState.PROCESSING` instead of `state["current_step"] = "extracting"`)
+- [x] Update `JobOrchestrator` and `HITLProcessor` to use enum values
+- [x] Update API response serialization to handle enum → string conversion for JSON responses
+- [x] Write comprehensive tests in `tests/unit/test_state_machine.py`: test all valid transitions succeed, test invalid transitions raise `InvalidStateTransition`, test terminal states have no successors (except `failed → retrying`)
+- [x] Update existing tests that compare status strings to use enum values
+- [x] Run project test suite — must pass before task 8
 
 ### Task 8: Fix queue consumer silent death
 

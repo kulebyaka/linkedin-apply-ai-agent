@@ -151,12 +151,12 @@ async def test_update_multiple_fields(temp_db):
     await temp_db.create(job)
 
     await temp_db.update("test-3", {
-        "status": "applied",
+        "status": "approved",
         "current_pdf_path": "/data/cv.pdf",
     })
 
     updated = await temp_db.get("test-3")
-    assert updated.status == "applied"
+    assert updated.status == "approved"
     assert updated.current_pdf_path == "/data/cv.pdf"
 
 

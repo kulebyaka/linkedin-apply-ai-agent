@@ -23,6 +23,7 @@ from langgraph.graph import END, StateGraph
 from ..config.settings import get_settings
 from ..llm.provider import LLMClientFactory, LLMProvider
 from ..models.cv_attempt import CVCompositionAttempt
+from ..models.state_machine import BusinessState, WorkflowStep
 from ..models.unified import JobRecord
 from ..services.cv_composer import CVComposer
 from ..services.job_fixtures import get_cached_llm_response, save_llm_response
@@ -150,7 +151,7 @@ async def extract_job_node(state: PreparationWorkflowState) -> PreparationWorkfl
     job_id = state.get("job_id", "unknown")
     source = state.get("source", "unknown")
     logger.info(f"[TIMING] Starting extract_job_node for {job_id} from source: {source}")
-    state["current_step"] = "extracting"
+    state["current_step"] = WorkflowStep.EXTRACTING
 
     try:
         # Extract job data
@@ -181,29 +182,29 @@ async def extract_job_node(state: PreparationWorkflowState) -> PreparationWorkfl
                 "is_remote": True,
             }
             state["job_posting"] = job_posting
-            state["current_step"] = "job_extracted"
+            state["current_step"] = WorkflowStep.JOB_EXTRACTED
             logger.info(f"Manual job data processed for {job_id}")
         else:
             # URL and LinkedIn extraction
             job_posting = await adapter.extract(raw_input)
             state["job_posting"] = job_posting
-            state["current_step"] = "job_extracted"
+            state["current_step"] = WorkflowStep.JOB_EXTRACTED
 
     except JobExtractionError as e:
         logger.error(f"Job extraction failed for {job_id}: {e}")
         state["error_message"] = f"Job extraction failed: {e.message}"
-        state["current_step"] = "failed"
+        state["current_step"] = BusinessState.FAILED
     except NotImplementedError as e:
         logger.error(f"Job extraction not implemented for source '{source}': {e}")
         state["error_message"] = (
             f"Job extraction for source '{source}' is not yet implemented. "
             f"Use source='manual' instead."
         )
-        state["current_step"] = "failed"
+        state["current_step"] = BusinessState.FAILED
     except Exception as e:
         logger.error(f"Job extraction failed for {job_id}: {e}", exc_info=True)
         state["error_message"] = f"Job extraction failed: {str(e)}"
-        state["current_step"] = "failed"
+        state["current_step"] = BusinessState.FAILED
 
     elapsed = time.time() - start_time
     logger.info(f"[TIMING] extract_job_node completed in {elapsed:.2f}s")
@@ -224,12 +225,12 @@ async def filter_job_node(state: PreparationWorkflowState) -> PreparationWorkflo
     """
     job_id = state.get("job_id", "unknown")
     logger.info(f"Filtering job {job_id} (LinkedIn source)")
-    state["current_step"] = "filtering"
+    state["current_step"] = WorkflowStep.FILTERING
 
     # TODO: Implement LLM-based job filtering for LinkedIn jobs
     # For now, just pass through (all jobs are considered suitable)
     logger.warning(f"Job filtering not implemented, passing through for {job_id}")
-    state["current_step"] = "job_filtered"
+    state["current_step"] = WorkflowStep.JOB_FILTERED
 
     return state
 
@@ -251,7 +252,7 @@ async def compose_cv_node(state: PreparationWorkflowState) -> PreparationWorkflo
     logger.info(f"[TIMING] Starting compose_cv_node for job {job_id}")
     if user_feedback:
         logger.info(f"Retry with feedback: {user_feedback}")
-    state["current_step"] = "composing_cv"
+    state["current_step"] = WorkflowStep.COMPOSING_CV
 
     try:
         # In fixture replay mode, check LLM response cache first (skip retries)
@@ -259,7 +260,7 @@ async def compose_cv_node(state: PreparationWorkflowState) -> PreparationWorkflo
             cached = get_cached_llm_response(job_id)
             if cached is not None:
                 state["tailored_cv_json"] = cached
-                state["current_step"] = "cv_composed"
+                state["current_step"] = WorkflowStep.CV_COMPOSED
                 state["error_message"] = None
                 elapsed = time.time() - start_time
                 logger.info(
@@ -298,7 +299,7 @@ async def compose_cv_node(state: PreparationWorkflowState) -> PreparationWorkflo
 
         # Update state - convert Pydantic model to dict
         state["tailored_cv_json"] = tailored_cv.model_dump()
-        state["current_step"] = "cv_composed"
+        state["current_step"] = WorkflowStep.CV_COMPOSED
         state["error_message"] = None  # Clear any previous errors
         logger.info(f"CV composition completed successfully for job {job_id}")
 
@@ -330,7 +331,7 @@ async def generate_pdf_node(state: PreparationWorkflowState) -> PreparationWorkf
     start_time = time.time()
     job_id = state.get("job_id", "unknown")
     logger.info(f"[TIMING] Starting generate_pdf_node for job {job_id}")
-    state["current_step"] = "generating_pdf"
+    state["current_step"] = WorkflowStep.GENERATING_PDF
 
     # Check if we have CV data
     cv_json = state.get("tailored_cv_json")
@@ -344,7 +345,7 @@ async def generate_pdf_node(state: PreparationWorkflowState) -> PreparationWorkf
         logger.error(error_msg)
         state["error_message"] = error_msg
         state["tailored_cv_pdf_path"] = None
-        state["current_step"] = "failed"
+        state["current_step"] = BusinessState.FAILED
         return state
 
     try:
@@ -392,14 +393,14 @@ async def generate_pdf_node(state: PreparationWorkflowState) -> PreparationWorkf
 
         # Update state
         state["tailored_cv_pdf_path"] = pdf_path
-        state["current_step"] = "pdf_generated"
+        state["current_step"] = WorkflowStep.PDF_GENERATED
         logger.info(f"PDF generated successfully for job {job_id}: {pdf_path}")
 
     except Exception as e:
         logger.error(f"PDF generation failed for job {job_id}: {e}", exc_info=True)
         state["error_message"] = f"PDF generation failed: {str(e)}"
         state["tailored_cv_pdf_path"] = None
-        state["current_step"] = "failed"
+        state["current_step"] = BusinessState.FAILED
 
     elapsed = time.time() - start_time
     logger.info(f"[TIMING] generate_pdf_node completed in {elapsed:.2f}s")
@@ -422,15 +423,15 @@ async def save_to_db_node(state: PreparationWorkflowState, config: dict | None =
     job_id = state.get("job_id", "unknown")
     mode = state.get("mode", "mvp")
     logger.info(f"Saving job {job_id} to repository (mode: {mode})")
-    state["current_step"] = "saving"
+    state["current_step"] = WorkflowStep.SAVING
 
     # Determine final status
     if state.get("error_message") and not state.get("tailored_cv_pdf_path"):
-        final_status = "failed"
+        final_status = BusinessState.FAILED
     elif mode == "mvp":
-        final_status = "completed"
+        final_status = BusinessState.CV_READY
     else:
-        final_status = "pending"  # Awaiting HITL review
+        final_status = BusinessState.PENDING_REVIEW
 
     try:
         cv_json = state.get("tailored_cv_json")
@@ -476,7 +477,7 @@ async def save_to_db_node(state: PreparationWorkflowState, config: dict | None =
     except Exception as e:
         logger.error(f"Failed to save job {job_id}: {e}", exc_info=True)
         state["error_message"] = f"Failed to save job: {str(e)}"
-        state["current_step"] = "failed"
+        state["current_step"] = BusinessState.FAILED
 
     return state
 

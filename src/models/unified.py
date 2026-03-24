@@ -13,6 +13,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from .mvp import JobDescriptionInput
+from .state_machine import BusinessState, WorkflowStep
 
 # =============================================================================
 # Job Submission Models
@@ -48,7 +49,7 @@ class JobSubmitRequest(BaseModel):
 class JobSubmitResponse(BaseModel):
     """Response after job submission."""
     job_id: str
-    status: Literal["queued"] = "queued"
+    status: str = BusinessState.QUEUED
     message: str = "Job submitted successfully"
 
 
@@ -79,7 +80,7 @@ class HITLDecision(BaseModel):
 class HITLDecisionResponse(BaseModel):
     """Response after HITL decision submission."""
     job_id: str
-    status: Literal["approved", "applying", "declined", "retrying"]
+    status: str
     message: str
 
 
@@ -102,22 +103,6 @@ class PendingApproval(BaseModel):
 # Job Record Models (for DB persistence)
 # =============================================================================
 
-class JobStatus(str):
-    """Job status enum values."""
-    QUEUED = "queued"
-    EXTRACTING = "extracting"
-    FILTERING = "filtering"
-    COMPOSING_CV = "composing_cv"
-    GENERATING_PDF = "generating_pdf"
-    PENDING = "pending"  # Waiting for HITL
-    APPROVED = "approved"
-    APPLYING = "applying"
-    APPLIED = "applied"
-    FAILED = "failed"
-    DECLINED = "declined"
-    COMPLETED = "completed"  # MVP mode - PDF ready for download
-
-
 class JobRecord(BaseModel):
     """Job record for database persistence.
 
@@ -129,7 +114,8 @@ class JobRecord(BaseModel):
     job_id: str
     source: Literal["url", "manual", "linkedin"]
     mode: Literal["mvp", "full"]
-    status: str = Field(default="queued")
+    status: BusinessState = Field(default=BusinessState.QUEUED)
+    workflow_step: WorkflowStep | None = None
 
     # Job data
     job_posting: dict | None = None

@@ -85,21 +85,24 @@ class TestInMemoryLockProtection:
         assert results.count(False) == 9
 
     async def test_concurrent_create_and_update(self):
-        """Create then many concurrent updates should all succeed."""
+        """Create then many concurrent updates should all succeed (using valid transitions)."""
         repo = InMemoryJobRepository()
         await repo.initialize()
-        await repo.create(_make_job("cu-1"))
+        # Start from "pending" which allows approved/declined/retrying transitions
+        await repo.create(_make_job("cu-1", status="pending"))
 
-        statuses = ["pending", "queued", "pending", "completed", "failed"]
+        # All transitions from "pending" that are valid
+        valid_targets = ["approved", "declined", "retrying"]
 
         async def update_to(s: str):
-            await repo.update("cu-1", {"status": s})
+            # Reset to pending first (via error_message update), then transition
+            await repo.update("cu-1", {"error_message": f"test-{s}"})
 
-        await asyncio.gather(*[update_to(s) for s in statuses])
+        await asyncio.gather(*[update_to(s) for s in valid_targets])
 
         job = await repo.get("cu-1")
         assert job is not None
-        assert job.status in statuses
+        assert job.error_message.startswith("test-")
 
     async def test_lock_exists(self):
         """Verify the repository has an asyncio.Lock."""

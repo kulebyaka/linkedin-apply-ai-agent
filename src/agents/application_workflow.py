@@ -24,6 +24,7 @@ from datetime import datetime
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 
+from ..models.state_machine import BusinessState, WorkflowStep
 from ..services.job_repository import JobRepository
 from ..config.settings import get_settings
 
@@ -150,7 +151,7 @@ async def load_from_db_node(state: ApplicationWorkflowState, config: dict | None
     """
     job_id = state.get("job_id", "unknown")
     logger.info(f"Loading job data for application: {job_id}")
-    state["current_step"] = "loading"
+    state["current_step"] = WorkflowStep.LOADING
 
     try:
         repo = _get_repository_from_config(config or {})
@@ -167,13 +168,13 @@ async def load_from_db_node(state: ApplicationWorkflowState, config: dict | None
         state["pdf_path"] = job_record.current_pdf_path or ""
         state["job_posting"] = job_record.job_posting or {}
 
-        state["current_step"] = "loaded"
+        state["current_step"] = WorkflowStep.LOADED
         logger.info(f"Loaded job data for application: {job_id}")
 
     except Exception as e:
         logger.error(f"Failed to load job {job_id} for application: {e}", exc_info=True)
         state["error_message"] = f"Failed to load job data: {str(e)}"
-        state["current_step"] = "failed"
+        state["current_step"] = BusinessState.FAILED
 
     return state
 
@@ -197,7 +198,7 @@ async def apply_deep_agent_node(state: ApplicationWorkflowState) -> ApplicationW
     """
     job_id = state.get("job_id", "unknown")
     logger.info(f"Starting Deep Agent application for job {job_id}")
-    state["current_step"] = "applying_deep_agent"
+    state["current_step"] = WorkflowStep.APPLYING_DEEP_AGENT
 
     # STUB: Deep Agent not implemented yet
     logger.warning(f"Deep Agent application not implemented for job {job_id}")
@@ -231,7 +232,7 @@ async def apply_linkedin_node(state: ApplicationWorkflowState) -> ApplicationWor
     """
     job_id = state.get("job_id", "unknown")
     logger.info(f"Starting LinkedIn Easy Apply for job {job_id}")
-    state["current_step"] = "applying_linkedin"
+    state["current_step"] = WorkflowStep.APPLYING_LINKEDIN
 
     # STUB: LinkedIn automation not implemented yet
     logger.warning(f"LinkedIn Easy Apply not implemented for job {job_id}")
@@ -261,7 +262,7 @@ async def apply_manual_node(state: ApplicationWorkflowState) -> ApplicationWorkf
     job_id = state.get("job_id", "unknown")
     application_url = state.get("application_url", "")
     logger.info(f"Job {job_id} marked for manual application: {application_url}")
-    state["current_step"] = "manual_required"
+    state["current_step"] = WorkflowStep.MANUAL_REQUIRED
 
     state["application_status"] = "manual_required"
     state["application_result"] = {
@@ -285,15 +286,15 @@ async def update_db_node(state: ApplicationWorkflowState, config: dict | None = 
     job_id = state.get("job_id", "unknown")
     app_status = state.get("application_status", "failed")
     logger.info(f"Updating job {job_id} after application: {app_status}")
-    state["current_step"] = "saving"
+    state["current_step"] = WorkflowStep.SAVING
 
     # Map application_status to job status
     if app_status == "success":
-        job_status = "applied"
+        job_status = BusinessState.APPLIED
     elif app_status == "manual_required":
-        job_status = "manual_required"
+        job_status = BusinessState.FAILED  # Stub: manual_required maps to failed until implemented
     else:
-        job_status = "failed"
+        job_status = BusinessState.FAILED
 
     try:
         repo = _get_repository_from_config(config or {})
@@ -316,6 +317,6 @@ async def update_db_node(state: ApplicationWorkflowState, config: dict | None = 
     except Exception as e:
         logger.error(f"Failed to update job {job_id} after application: {e}", exc_info=True)
         state["error_message"] = f"Failed to update job: {str(e)}"
-        state["current_step"] = "failed"
+        state["current_step"] = BusinessState.FAILED
 
     return state
