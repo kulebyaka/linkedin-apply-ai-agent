@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.context import AppContext
-from src.models.mvp import JobDescriptionInput
+from src.models.unified import JobDescriptionInput
 from src.models.unified import JobRecord, JobSubmitRequest
 from src.services.job_orchestrator import JobOrchestrator
 

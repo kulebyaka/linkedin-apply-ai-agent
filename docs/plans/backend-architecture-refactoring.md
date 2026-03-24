@@ -249,15 +249,15 @@ Addresses **Finding #12** (Two codepath divergence). Remove legacy `/api/cv/*` e
 - Delete: `src/models/mvp.py`
 - Modify: `src/models/unified.py` (absorb any needed MVP fields)
 
-- [ ] Remove the 3 legacy endpoints from `api/main.py`: `POST /api/cv/generate` (lines ~320-382), `GET /api/cv/status/{job_id}` (lines ~385-424), `GET /api/cv/download/{job_id}` (lines ~427-470)
-- [ ] Remove `workflow_threads` and `workflow_created_at` tracking dicts (legacy tracking — should already be gone from Task 1, verify)
-- [ ] Remove `run_workflow_async()` helper if it was only used by legacy endpoints
-- [ ] Check if `JobDescriptionInput` from `mvp.py` is used by unified endpoints. If so, move it to `unified.py`. If not, delete the import
-- [ ] Delete `src/models/mvp.py` entirely (after confirming `CVGenerationResponse`, `CVGenerationStatus` are not referenced elsewhere)
-- [ ] Remove all imports of `mvp` models throughout the codebase
-- [ ] If the UI references legacy endpoint paths, update the UI API client (check `ui/src/` for `/api/cv/` references)
-- [ ] Update tests that target legacy endpoints — remove or migrate to unified endpoint equivalents
-- [ ] Run project test suite — must pass before task 12
+- [x] Remove the 3 legacy endpoints from `api/main.py`: `POST /api/cv/generate` (lines ~320-382), `GET /api/cv/status/{job_id}` (lines ~385-424), `GET /api/cv/download/{job_id}` (lines ~427-470)
+- [x] Remove `workflow_threads` and `workflow_created_at` tracking dicts (legacy tracking — should already be gone from Task 1, verify)
+- [x] Remove `run_workflow_async()` helper if it was only used by legacy endpoints
+- [x] Check if `JobDescriptionInput` from `mvp.py` is used by unified endpoints. If so, move it to `unified.py`. If not, delete the import
+- [x] Delete `src/models/mvp.py` entirely (after confirming `CVGenerationResponse`, `CVGenerationStatus` are not referenced elsewhere)
+- [x] Remove all imports of `mvp` models throughout the codebase
+- [x] If the UI references legacy endpoint paths, update the UI API client (check `ui/src/` for `/api/cv/` references)
+- [x] Update tests that target legacy endpoints — remove or migrate to unified endpoint equivalents
+- [x] Run project test suite — must pass before task 12
 
 ### Task 12: Verify acceptance criteria
 

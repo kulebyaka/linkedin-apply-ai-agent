@@ -2,6 +2,7 @@
 
 from .state_machine import BusinessState, WorkflowStep
 from .unified import (
+    JobDescriptionInput,
     JobSubmitRequest,
     JobSubmitResponse,
     HITLDecision,
@@ -11,7 +12,6 @@ from .unified import (
     JobStatusResponse,
     ApplicationHistoryItem,
 )
-from .mvp import JobDescriptionInput, CVGenerationResponse, CVGenerationStatus
 from .job import JobPosting
 from .cv import CV, ContactInfo, Experience, Education, Skill, Project
 
@@ -20,6 +20,7 @@ __all__ = [
     "BusinessState",
     "WorkflowStep",
     # Unified models
+    "JobDescriptionInput",
     "JobSubmitRequest",
     "JobSubmitResponse",
     "HITLDecision",
@@ -28,10 +29,6 @@ __all__ = [
     "JobRecord",
     "JobStatusResponse",
     "ApplicationHistoryItem",
-    # MVP models
-    "JobDescriptionInput",
-    "CVGenerationResponse",
-    "CVGenerationStatus",
     # Job models
     "JobPosting",
     # CV models

@@ -1,17 +1,13 @@
 """FastAPI application for HITL UI and job submission.
 
-Provides two sets of endpoints:
-1. Legacy MVP endpoints (/api/cv/*) - for backward compatibility
-2. Unified endpoints (/api/jobs/*, /api/hitl/*) - new two-workflow pipeline
+Provides unified endpoints (/api/jobs/*, /api/hitl/*) for the two-workflow pipeline.
 """
 
 import asyncio
 import logging
 import time
-import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated
 
@@ -20,10 +16,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from src.agents._shared import load_master_cv
 from src.config.settings import get_settings
 from src.context import AppContext, create_app_context
-from src.models.mvp import CVGenerationResponse, CVGenerationStatus, JobDescriptionInput
 from src.models.state_machine import BusinessState
 from src.models.unified import (
     ApplicationHistoryItem,
@@ -169,19 +163,6 @@ async def log_requests(request: Request, call_next):
 
 
 
-async def run_workflow_async(job_id: str, thread_id: str, initial_state: dict, ctx: AppContext):
-    """Execute LangGraph workflow asynchronously (legacy endpoint support)."""
-    try:
-        config = {"configurable": {"thread_id": thread_id, "repository": ctx.repository}}
-
-        result = await ctx.prep_workflow.ainvoke(initial_state, config)
-
-        logger.info(f"Job {job_id} completed with status: {result.get('current_step')}")
-
-    except Exception as e:
-        logger.error(f"Job {job_id} failed: {e}", exc_info=True)
-
-
 @app.get("/api/health")
 async def health():
     """Health check endpoint with consumer health status."""
@@ -192,156 +173,8 @@ async def health():
     }
 
 
-# MVP CV Generation Endpoints
-
-
-@app.post("/api/cv/generate", response_model=CVGenerationResponse)
-async def generate_cv(
-    request: Request, job_input: JobDescriptionInput
-) -> CVGenerationResponse:
-    """
-    Submit CV generation request
-
-    Returns job_id immediately. Client should poll /api/cv/status/{job_id}
-    """
-    try:
-        ctx = _get_ctx(request)
-
-        # Generate unique IDs
-        job_id = str(uuid.uuid4())
-        thread_id = str(uuid.uuid4())
-
-        # Load master CV
-        master_cv = load_master_cv()
-
-        # Build raw_input for preparation workflow
-        raw_input = {
-            "title": job_input.title,
-            "company": job_input.company,
-            "description": job_input.description,
-            "requirements": job_input.requirements or "",
-        }
-
-        # Initialize workflow state (preparation workflow with MVP mode)
-        initial_state = {
-            "job_id": job_id,
-            "source": "manual",
-            "mode": "mvp",
-            "raw_input": raw_input,
-            "master_cv": master_cv,
-            "current_step": BusinessState.QUEUED,
-            "retry_count": 0,
-            "user_feedback": None,
-            "error_message": None,
-        }
-
-        # Track in workflow threads for status queries
-        await ctx.register_workflow(job_id, thread_id, "preparation")
-
-        # Run workflow in background
-        asyncio.create_task(
-            run_workflow_async(job_id=job_id, thread_id=thread_id, initial_state=initial_state, ctx=ctx)
-        )
-
-        logger.info(f"Job {job_id} submitted: {job_input.title} at {job_input.company}")
-
-        return CVGenerationResponse(
-            job_id=job_id, status="queued", message="CV generation job submitted successfully"
-        )
-
-    except Exception as e:
-        logger.error(f"Failed to submit job: {e}", exc_info=True)
-        raise HTTPException(500, "Failed to submit job") from None
-
-
-@app.get("/api/cv/status/{job_id}", response_model=CVGenerationStatus)
-async def get_cv_status(job_id: str, request: Request) -> CVGenerationStatus:
-    """
-    Get status of CV generation job
-
-    Poll this endpoint every 2-3 seconds until status is 'completed' or 'failed'
-    """
-    try:
-        ctx = _get_ctx(request)
-
-        # Check workflow tracking
-        thread_info = await ctx.get_workflow_thread(job_id)
-        if thread_info is None:
-            raise HTTPException(404, f"Job {job_id} not found")
-
-        thread_id = thread_info["thread_id"]
-        config = {"configurable": {"thread_id": thread_id}}
-
-        # Get current state from LangGraph checkpointer (using preparation_workflow)
-        state_snapshot = ctx.prep_workflow.get_state(config)
-        state_values = state_snapshot.values
-
-        return CVGenerationStatus(
-            job_id=job_id,
-            status=state_values.get("current_step", "queued"),
-            created_at=thread_info.get("created_at", datetime.now(tz=timezone.utc)),
-            completed_at=datetime.now(tz=timezone.utc)
-            if state_values.get("current_step") in ["completed", "failed"]
-            else None,
-            error_message=state_values.get("error_message"),
-            pdf_path=state_values.get("tailored_cv_pdf_path"),
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to get status for job {job_id}: {e}", exc_info=True)
-        raise HTTPException(500, "Failed to get job status") from None
-
-
-@app.get("/api/cv/download/{job_id}")
-async def download_cv(job_id: str, request: Request):
-    """
-    Download generated CV PDF
-
-    Returns 400 if job not completed
-    Returns 404 if PDF file missing
-    """
-    try:
-        # Get status first
-        status = await get_cv_status(job_id, request)
-
-        # Check if job is completed
-        if status.status == "failed":
-            raise HTTPException(400, f"Job failed: {status.error_message}")
-
-        if status.status != "completed":
-            raise HTTPException(400, f"Job not ready yet (status: {status.status})")
-
-        # Check PDF exists
-        if not status.pdf_path:
-            raise HTTPException(404, "PDF path not set in job state")
-
-        pdf_path = Path(status.pdf_path).resolve()
-        allowed_dir = Path(settings.generated_cvs_dir).resolve()
-        if not pdf_path.is_relative_to(allowed_dir):
-            raise HTTPException(403, "Access denied")
-
-        if not pdf_path.exists():
-            raise HTTPException(404, "PDF file not found")
-
-        # Return file
-        return FileResponse(
-            path=str(pdf_path),
-            media_type="application/pdf",
-            filename=pdf_path.name,
-            headers={"Content-Disposition": f'attachment; filename="{pdf_path.name}"'},
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to download CV for job {job_id}: {e}", exc_info=True)
-        raise HTTPException(500, "Failed to download CV") from None
-
-
 # =============================================================================
-# Unified Job Submission Endpoints
+# Job Submission Endpoints
 # =============================================================================
 
 
