@@ -197,3 +197,9 @@ class JobOrchestrator:
             )
         except Exception as e:
             logger.error("Preparation workflow for job %s failed: %s", job_id, e, exc_info=True)
+            try:
+                await self._ctx.repository.update(
+                    job_id, {"status": BusinessState.FAILED, "error_message": str(e)}
+                )
+            except Exception:
+                logger.warning("Failed to mark job %s as FAILED in repository", job_id)

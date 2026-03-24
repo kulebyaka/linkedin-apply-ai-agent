@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 
 from src.config.settings import get_settings
 from src.context import AppContext, create_app_context
-from src.models.state_machine import BusinessState
+from src.models.state_machine import BusinessState, WorkflowStep
 from src.models.unified import (
     ApplicationHistoryItem,
     HITLDecision,
@@ -369,7 +369,10 @@ async def download_job_pdf(job_id: str, request: Request):
         pdf_ready_statuses = {
             BusinessState.CV_READY,
             BusinessState.PENDING_REVIEW,
-            "pdf_generated",  # Workflow-internal step from in-progress query
+            BusinessState.APPROVED,
+            BusinessState.RETRYING,
+            BusinessState.APPLIED,
+            WorkflowStep.PDF_GENERATED,
         }
         if status.status not in pdf_ready_statuses:
             raise HTTPException(400, f"PDF not ready yet (status: {status.status})")
@@ -422,7 +425,10 @@ async def get_job_cv_html(job_id: str, request: Request) -> HTMLResponse:
         cv_ready_statuses = {
             BusinessState.CV_READY,
             BusinessState.PENDING_REVIEW,
-            "pdf_generated",
+            BusinessState.APPROVED,
+            BusinessState.RETRYING,
+            BusinessState.APPLIED,
+            WorkflowStep.PDF_GENERATED,
         }
         if status.status not in cv_ready_statuses:
             raise HTTPException(400, f"CV not ready yet (status: {status.status})")

@@ -298,7 +298,7 @@ class ConsumerManager:
                 self.restart_count = 0
 
         def _register_linkedin_job(job_id: str, thread_id: str) -> None:
-            asyncio.create_task(
+            ctx.create_background_task(
                 ctx.register_workflow(job_id, thread_id, "preparation")
             )
 

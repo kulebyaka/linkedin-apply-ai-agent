@@ -22,7 +22,6 @@ from src.models.unified import (
     HITLDecisionResponse,
     PendingApproval,
 )
-from src.services.job_repository import RepositoryError
 
 logger = logging.getLogger(__name__)
 
@@ -163,10 +162,7 @@ class HITLProcessor:
     ) -> HITLDecisionResponse:
         logger.info("Job %s queued for retry with user feedback", job_id)
 
-        try:
-            await self._ctx.repository.update(job_id, {"status": BusinessState.RETRYING})
-        except RepositoryError as e:
-            logger.warning("Failed to update repository for job %s: %s", job_id, e)
+        await self._ctx.repository.update(job_id, {"status": BusinessState.RETRYING})
 
         retry_thread_id = str(uuid.uuid4())
 
@@ -219,4 +215,10 @@ class HITLProcessor:
             logger.error(
                 "Retry workflow for job %s failed: %s", job_id, e, exc_info=True
             )
+            try:
+                await self._ctx.repository.update(
+                    job_id, {"status": BusinessState.FAILED, "error_message": str(e)}
+                )
+            except Exception:
+                logger.warning("Failed to mark job %s as FAILED in repository", job_id)
 
