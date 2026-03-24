@@ -17,6 +17,7 @@ from pathlib import Path
 from ..config.settings import get_settings
 from ..llm.provider import LLMClientFactory, LLMProvider
 from ..services.cv_composer import CVComposer
+from ..services.cv_validator import CVValidator, HallucinationPolicy
 from ..services.job_repository import JobRepository
 from ..services.pdf_generator import PDFGenerator
 
@@ -100,6 +101,26 @@ def load_master_cv() -> dict:
         return json.load(f)
 
 
+def _resolve_hallucination_policy() -> HallucinationPolicy:
+    """Resolve hallucination policy from settings.
+
+    Priority:
+    1. Fine-grained cv_composer_hallucination_policy setting
+    2. Boolean cv_composer_enable_hallucination_checks (True->STRICT, False->DISABLED)
+    """
+    policy_str = settings.cv_composer_hallucination_policy
+    try:
+        return HallucinationPolicy(policy_str)
+    except ValueError:
+        logger.warning(
+            f"Unknown hallucination policy '{policy_str}', "
+            f"falling back to enable_hallucination_checks boolean"
+        )
+        if settings.cv_composer_enable_hallucination_checks:
+            return HallucinationPolicy.STRICT
+        return HallucinationPolicy.DISABLED
+
+
 async def compose_cv(
     state: dict,
     *,
@@ -137,12 +158,19 @@ async def compose_cv(
         if not job_posting:
             raise ValueError("Job posting not provided in workflow state")
 
+        # Resolve hallucination policy from settings
+        policy = _resolve_hallucination_policy()
+        validator = CVValidator(master_cv=master_cv, policy=policy)
+
         logger.info(
             f"Composing CV for job {job_id}: "
             f"{job_posting.get('title')} at {job_posting.get('company')}"
         )
         tailored_cv = cv_composer.compose_cv(
-            master_cv=master_cv, job_posting=job_posting, user_feedback=user_feedback
+            master_cv=master_cv,
+            job_posting=job_posting,
+            user_feedback=user_feedback,
+            validator=validator,
         )
 
         elapsed = time.time() - start_time

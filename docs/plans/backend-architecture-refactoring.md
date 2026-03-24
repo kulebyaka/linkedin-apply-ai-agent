@@ -232,13 +232,13 @@ Addresses **Findings #10 and #11** (CVComposer does too much; hallucination chec
 - Modify: `src/services/cv_composer.py`
 - Modify: `src/config/settings.py`
 
-- [ ] Create `src/services/cv_validator.py` with class `CVValidator`. Move these methods from `CVComposer`: `_validate_contact()`, `_validate_languages()`, `_validate_interests()`, `_validate_output()` (hallucination checks). `CVValidator.__init__` takes `master_cv: dict` and `policy: HallucinationPolicy`
-- [ ] Add `HallucinationPolicy` enum to `cv_validator.py`: `STRICT` (raise `CVHallucinationError` on fabricated companies/institutions), `WARN` (log warning, current behavior), `DISABLED` (skip checks)
-- [ ] Wire the existing `settings.cv_composer_enable_hallucination_checks` to actually control the policy: `True` → `STRICT`, `False` → `DISABLED`. Add a new setting `cv_composer_hallucination_policy: str = "strict"` for fine-grained control (`strict`, `warn`, `disabled`)
-- [ ] Update `CVComposer.compose_cv()` to accept a `CVValidator` instance and call `validator.validate(tailored_cv, master_cv)` after composition. Remove the moved methods from `CVComposer`
-- [ ] In `STRICT` mode, `CVHallucinationError` should include the specific fabricated entities so the error message is actionable
-- [ ] Update `tests/unit/test_cv_composer.py` with tests for the new validation: test STRICT mode raises on hallucinated company, test WARN mode logs but doesn't raise, test DISABLED mode skips entirely
-- [ ] Run project test suite — must pass before task 11
+- [x] Create `src/services/cv_validator.py` with class `CVValidator`. Move these methods from `CVComposer`: `_validate_contact()`, `_validate_languages()`, `_validate_interests()`, `_validate_output()` (hallucination checks). `CVValidator.__init__` takes `master_cv: dict` and `policy: HallucinationPolicy`
+- [x] Add `HallucinationPolicy` enum to `cv_validator.py`: `STRICT` (raise `CVHallucinationError` on fabricated companies/institutions), `WARN` (log warning, current behavior), `DISABLED` (skip checks)
+- [x] Wire the existing `settings.cv_composer_enable_hallucination_checks` to actually control the policy: `True` → `STRICT`, `False` → `DISABLED`. Add a new setting `cv_composer_hallucination_policy: str = "strict"` for fine-grained control (`strict`, `warn`, `disabled`)
+- [x] Update `CVComposer.compose_cv()` to accept a `CVValidator` instance and call `validator.validate(tailored_cv, master_cv)` after composition. Remove the moved methods from `CVComposer`
+- [x] In `STRICT` mode, `CVHallucinationError` should include the specific fabricated entities so the error message is actionable
+- [x] Update `tests/unit/test_cv_composer.py` with tests for the new validation: test STRICT mode raises on hallucinated company, test WARN mode logs but doesn't raise, test DISABLED mode skips entirely
+- [x] Run project test suite — must pass before task 11
 
 ### Task 11: Remove legacy MVP endpoints and consolidate models
 

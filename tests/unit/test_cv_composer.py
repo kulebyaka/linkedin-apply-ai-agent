@@ -9,6 +9,11 @@ import pytest
 from src.llm.provider import BaseLLMClient
 from src.models.cv import CVLLMOutput, JobSummary
 from src.services.cv_composer import CVComposer, CVCompositionError
+from src.services.cv_validator import (
+    CVHallucinationError,
+    CVValidator,
+    HallucinationPolicy,
+)
 
 # Test fixtures directory
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -283,7 +288,7 @@ class TestComposeCVIntegration:
 
 
 class TestValidation:
-    """Test CV validation and hallucination detection"""
+    """Test CV validation and hallucination detection (legacy path)"""
 
     @pytest.fixture
     def valid_tailored_cv(self, master_cv):
@@ -375,3 +380,348 @@ class TestValidation:
         with patch("src.services.cv_composer.logger") as mock_logger:
             cv_composer._validate_output(valid_tailored_cv, master_cv)
             mock_logger.warning.assert_called()
+
+
+class TestCVValidator:
+    """Tests for the extracted CVValidator class."""
+
+    @pytest.fixture
+    def master_cv(self):
+        """Master CV fixture with contact, experiences, and education."""
+        return {
+            "contact": {
+                "full_name": "John Doe",
+                "email": "john@example.com",
+                "phone": "+1234567890",
+                "location": "San Francisco, CA",
+            },
+            "experiences": [
+                {
+                    "company": "Tech Corp",
+                    "position": "Senior Software Engineer",
+                    "start_date": "2020-01-15",
+                },
+                {
+                    "company": "Startup Inc",
+                    "position": "Software Engineer",
+                    "start_date": "2017-06-01",
+                },
+            ],
+            "education": [
+                {
+                    "institution": "Stanford University",
+                    "degree": "BS",
+                    "field_of_study": "CS",
+                },
+                {
+                    "institution": "MIT",
+                    "degree": "MS",
+                    "field_of_study": "CS",
+                },
+            ],
+            "languages": [
+                {"language": "English", "level": "Native"},
+                {"language": "Spanish", "level": "B2"},
+            ],
+            "interests": {
+                "technical": ["Open Source"],
+                "sports": ["Running"],
+                "other": [],
+            },
+        }
+
+    @pytest.fixture
+    def valid_tailored_cv(self):
+        """A tailored CV that uses only entities from master_cv."""
+        return {
+            "summary": "Experienced engineer",
+            "experiences": [
+                {
+                    "company": "Tech Corp",
+                    "position": "Senior Software Engineer",
+                    "start_date": "2020-01-15",
+                    "end_date": None,
+                    "is_current": True,
+                    "location": "San Francisco, CA",
+                    "description": "Led platform development",
+                    "achievements": ["Built microservices"],
+                    "technologies": ["Python"],
+                }
+            ],
+            "education": [
+                {
+                    "institution": "Stanford University",
+                    "degree": "Bachelor of Science",
+                    "field_of_study": "Computer Science",
+                    "start_date": "2011-09-01",
+                    "end_date": "2015-06-15",
+                }
+            ],
+            "skills": [{"name": "Python", "category": "Programming"}],
+            "projects": [],
+            "certifications": [],
+        }
+
+    def test_validate_contact_valid(self, master_cv):
+        """Test valid contact passes validation."""
+        validator = CVValidator(master_cv=master_cv)
+        result = validator.validate_contact(master_cv["contact"])
+        assert result["full_name"] == "John Doe"
+        assert result["email"] == "john@example.com"
+
+    def test_validate_contact_invalid(self, master_cv):
+        """Test invalid contact raises CVCompositionError."""
+        validator = CVValidator(master_cv=master_cv)
+        with pytest.raises(CVCompositionError, match="Invalid contact data"):
+            validator.validate_contact({"full_name": "No Email"})
+
+    def test_validate_languages_valid(self, master_cv):
+        """Test valid languages pass validation."""
+        validator = CVValidator(master_cv=master_cv)
+        result = validator.validate_languages(master_cv["languages"])
+        assert len(result) == 2
+        assert result[0]["language"] == "English"
+
+    def test_validate_languages_invalid(self, master_cv):
+        """Test invalid languages raise CVCompositionError."""
+        validator = CVValidator(master_cv=master_cv)
+        with pytest.raises(CVCompositionError, match="Invalid languages data"):
+            validator.validate_languages([{"bad_key": "value"}])
+
+    def test_validate_interests_valid(self, master_cv):
+        """Test valid interests pass validation."""
+        validator = CVValidator(master_cv=master_cv)
+        result = validator.validate_interests(master_cv["interests"])
+        assert result["technical"] == ["Open Source"]
+
+    def test_validate_interests_none(self, master_cv):
+        """Test None interests returns None."""
+        validator = CVValidator(master_cv=master_cv)
+        assert validator.validate_interests(None) is None
+
+    def test_validate_interests_invalid(self, master_cv):
+        """Test invalid interests raise CVCompositionError."""
+        validator = CVValidator(master_cv=master_cv)
+        with pytest.raises(CVCompositionError, match="Invalid interests data"):
+            validator.validate_interests({"technical": "not a list"})
+
+    def test_validate_output_success(self, master_cv, valid_tailored_cv):
+        """Test valid CV passes all checks."""
+        validator = CVValidator(master_cv=master_cv, policy=HallucinationPolicy.STRICT)
+        result = validator.validate_output(valid_tailored_cv)
+        assert isinstance(result, CVLLMOutput)
+        assert result.experiences[0].company == "Tech Corp"
+
+    def test_validate_output_invalid_schema(self, master_cv):
+        """Test invalid schema raises CVCompositionError."""
+        validator = CVValidator(master_cv=master_cv)
+        with pytest.raises(CVCompositionError, match="(?i)schema"):
+            validator.validate_output({"no_summary": True})
+
+    def test_strict_raises_on_hallucinated_company(self, master_cv, valid_tailored_cv):
+        """Test STRICT mode raises CVHallucinationError on fabricated company."""
+        valid_tailored_cv["experiences"].append({
+            "company": "Fake Corp",
+            "position": "Engineer",
+            "start_date": "2020-01-01",
+            "end_date": None,
+            "is_current": True,
+            "location": "Nowhere",
+            "description": "Fake",
+            "achievements": [],
+            "technologies": [],
+        })
+        validator = CVValidator(master_cv=master_cv, policy=HallucinationPolicy.STRICT)
+
+        with pytest.raises(CVHallucinationError) as exc_info:
+            validator.validate_output(valid_tailored_cv)
+
+        assert "fake corp" in exc_info.value.fabricated_companies
+        assert "fabricated companies" in str(exc_info.value).lower()
+
+    def test_strict_raises_on_hallucinated_institution(self, master_cv, valid_tailored_cv):
+        """Test STRICT mode raises CVHallucinationError on fabricated institution."""
+        valid_tailored_cv["education"].append({
+            "institution": "Fake University",
+            "degree": "PhD",
+            "field_of_study": "CS",
+            "start_date": "2015-09-01",
+            "end_date": "2019-06-01",
+        })
+        validator = CVValidator(master_cv=master_cv, policy=HallucinationPolicy.STRICT)
+
+        with pytest.raises(CVHallucinationError) as exc_info:
+            validator.validate_output(valid_tailored_cv)
+
+        assert "fake university" in exc_info.value.fabricated_institutions
+        assert "fabricated institutions" in str(exc_info.value).lower()
+
+    def test_strict_raises_with_both_hallucinations(self, master_cv, valid_tailored_cv):
+        """Test STRICT mode includes both fabricated companies and institutions."""
+        valid_tailored_cv["experiences"].append({
+            "company": "Ghost LLC",
+            "position": "Dev",
+            "start_date": "2020-01-01",
+            "end_date": None,
+            "is_current": False,
+            "location": "X",
+            "description": "X",
+            "achievements": [],
+            "technologies": [],
+        })
+        valid_tailored_cv["education"].append({
+            "institution": "Phantom College",
+            "degree": "BA",
+            "field_of_study": "Art",
+            "start_date": "2010-09-01",
+            "end_date": "2014-06-01",
+        })
+        validator = CVValidator(master_cv=master_cv, policy=HallucinationPolicy.STRICT)
+
+        with pytest.raises(CVHallucinationError) as exc_info:
+            validator.validate_output(valid_tailored_cv)
+
+        assert "ghost llc" in exc_info.value.fabricated_companies
+        assert "phantom college" in exc_info.value.fabricated_institutions
+
+    def test_warn_logs_but_does_not_raise(self, master_cv, valid_tailored_cv):
+        """Test WARN mode logs warning but returns validated CV."""
+        valid_tailored_cv["experiences"].append({
+            "company": "Fake Corp",
+            "position": "Engineer",
+            "start_date": "2020-01-01",
+            "end_date": None,
+            "is_current": True,
+            "location": "Nowhere",
+            "description": "Fake",
+            "achievements": [],
+            "technologies": [],
+        })
+        validator = CVValidator(master_cv=master_cv, policy=HallucinationPolicy.WARN)
+
+        with patch("src.services.cv_validator.logger") as mock_logger:
+            result = validator.validate_output(valid_tailored_cv)
+            assert isinstance(result, CVLLMOutput)
+            mock_logger.warning.assert_called_once()
+            warning_msg = mock_logger.warning.call_args[0][0]
+            assert "fake corp" in warning_msg.lower()
+
+    def test_disabled_skips_hallucination_checks(self, master_cv, valid_tailored_cv):
+        """Test DISABLED mode skips hallucination checks entirely."""
+        valid_tailored_cv["experiences"].append({
+            "company": "Totally Made Up Corp",
+            "position": "Engineer",
+            "start_date": "2020-01-01",
+            "end_date": None,
+            "is_current": True,
+            "location": "Nowhere",
+            "description": "Fake",
+            "achievements": [],
+            "technologies": [],
+        })
+        validator = CVValidator(master_cv=master_cv, policy=HallucinationPolicy.DISABLED)
+
+        # Should not raise even with fabricated companies
+        result = validator.validate_output(valid_tailored_cv)
+        assert isinstance(result, CVLLMOutput)
+
+    def test_no_hallucination_with_matching_entities(self, master_cv, valid_tailored_cv):
+        """Test STRICT mode passes when all entities match master CV."""
+        validator = CVValidator(master_cv=master_cv, policy=HallucinationPolicy.STRICT)
+        result = validator.validate_output(valid_tailored_cv)
+        assert isinstance(result, CVLLMOutput)
+
+    def test_hallucination_error_is_composition_error(self):
+        """Test CVHallucinationError inherits from CVCompositionError."""
+        err = CVHallucinationError("test", fabricated_companies={"x"})
+        assert isinstance(err, CVCompositionError)
+        assert err.fabricated_companies == {"x"}
+        assert err.fabricated_institutions == set()
+
+    def test_compose_cv_with_validator(self, mock_llm_client, master_cv):
+        """Test compose_cv accepts and uses a CVValidator."""
+        composer = CVComposer(llm_client=mock_llm_client)
+
+        mock_llm_client.set_response("job description", {
+            "technical_skills": ["Python"],
+            "soft_skills": [],
+            "education_reqs": [],
+            "experience_reqs": {"years": None, "level": None},
+            "responsibilities": [],
+            "nice_to_have": [],
+        })
+
+        mock_llm_client.set_response("master cv", {
+            "summary": "Engineer",
+            "experiences": [
+                {
+                    "company": "Tech Corp",
+                    "position": "Engineer",
+                    "start_date": "2020-01-01",
+                    "end_date": None,
+                    "is_current": True,
+                    "location": "SF",
+                    "description": "Dev",
+                    "achievements": [],
+                    "technologies": [],
+                }
+            ],
+            "education": [
+                {
+                    "institution": "Stanford University",
+                    "degree": "BS",
+                    "field_of_study": "CS",
+                    "start_date": "2011-09-01",
+                    "end_date": "2015-06-15",
+                }
+            ],
+            "skills": [{"name": "Python", "category": "Programming"}],
+            "projects": [],
+            "certifications": [],
+        })
+
+        validator = CVValidator(master_cv=master_cv, policy=HallucinationPolicy.STRICT)
+        job_posting = {"title": "Dev", "company": "X", "description": "Y"}
+
+        result = composer.compose_cv(master_cv, job_posting, validator=validator)
+        assert isinstance(result, CVLLMOutput)
+
+    def test_compose_cv_with_strict_validator_rejects_hallucination(self, mock_llm_client, master_cv):
+        """Test compose_cv with STRICT validator raises on hallucinated company."""
+        composer = CVComposer(llm_client=mock_llm_client)
+
+        mock_llm_client.set_response("job description", {
+            "technical_skills": [],
+            "soft_skills": [],
+            "education_reqs": [],
+            "experience_reqs": {"years": None, "level": None},
+            "responsibilities": [],
+            "nice_to_have": [],
+        })
+
+        mock_llm_client.set_response("master cv", {
+            "summary": "Engineer",
+            "experiences": [
+                {
+                    "company": "Hallucinated Corp",
+                    "position": "Engineer",
+                    "start_date": "2020-01-01",
+                    "end_date": None,
+                    "is_current": True,
+                    "location": "SF",
+                    "description": "Dev",
+                    "achievements": [],
+                    "technologies": [],
+                }
+            ],
+            "education": [],
+            "skills": [],
+            "projects": [],
+            "certifications": [],
+        })
+
+        validator = CVValidator(master_cv=master_cv, policy=HallucinationPolicy.STRICT)
+        job_posting = {"title": "Dev", "company": "X", "description": "Y"}
+
+        with pytest.raises(CVHallucinationError):
+            composer.compose_cv(master_cv, job_posting, validator=validator)
