@@ -148,11 +148,9 @@ async def process_queue(
                 "error_message": None,
             }
 
-            config = {"configurable": {"thread_id": f"linkedin-{job.job_id}"}}
-            result = await asyncio.to_thread(
-                lambda s=initial_state, c=config: list(workflow.stream(s, config=c))
-            )
-            logger.info("Workflow completed for job %s (%d steps)", job.job_id, len(result))
+            config = {"configurable": {"thread_id": f"linkedin-{job.job_id}", "repository": job_repository}}
+            result = await workflow.ainvoke(initial_state, config=config)
+            logger.info("Workflow completed for job %s", job.job_id)
             processed += 1
 
             if on_job_processed is not None:

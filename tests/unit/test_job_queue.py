@@ -1,7 +1,7 @@
 """Tests for async job queue, LinkedInJobAdapter, and queue consumer."""
 
 import asyncio
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -215,9 +215,9 @@ class TestProcessQueue:
     """Test the queue consumer function."""
 
     def _make_workflow_mock(self):
-        """Create a mock compiled workflow."""
+        """Create a mock compiled workflow with async ainvoke."""
         wf = MagicMock()
-        wf.stream.return_value = [{"step": "done"}]
+        wf.ainvoke = AsyncMock(return_value={"step": "done"})
         return wf
 
     async def test_processes_jobs_in_order(self):
@@ -236,11 +236,11 @@ class TestProcessQueue:
         )
 
         assert count == 2
-        assert wf.stream.call_count == 2
+        assert wf.ainvoke.call_count == 2
 
-        first_call_state = wf.stream.call_args_list[0][0][0]
+        first_call_state = wf.ainvoke.call_args_list[0][0][0]
         assert first_call_state["job_id"] == "a"
-        second_call_state = wf.stream.call_args_list[1][0][0]
+        second_call_state = wf.ainvoke.call_args_list[1][0][0]
         assert second_call_state["job_id"] == "b"
 
     async def test_handles_workflow_failure_gracefully(self):
@@ -254,14 +254,14 @@ class TestProcessQueue:
         wf = MagicMock()
         call_count = 0
 
-        def side_effect(state, config=None):
+        async def side_effect(state, config=None):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
                 raise RuntimeError("LLM error")
-            return [{"step": "done"}]
+            return {"step": "done"}
 
-        wf.stream.side_effect = side_effect
+        wf.ainvoke = AsyncMock(side_effect=side_effect)
         cv_loader = lambda: {"contact": {"full_name": "Test"}}
 
         count = await process_queue(
@@ -276,6 +276,7 @@ class TestProcessQueue:
         stop.set()
 
         wf = MagicMock()
+        wf.ainvoke = AsyncMock()
         cv_loader = lambda: {}
 
         count = await process_queue(
@@ -299,7 +300,7 @@ class TestProcessQueue:
             q, workflow=wf, master_cv_loader=cv_loader, delay_between_jobs=0, stop_event=stop
         )
 
-        state = wf.stream.call_args[0][0]
+        state = wf.ainvoke.call_args[0][0]
         assert state["source"] == "linkedin"
         assert state["mode"] == "full"
         assert state["master_cv"] == master

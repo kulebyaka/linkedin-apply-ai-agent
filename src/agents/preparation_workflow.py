@@ -136,7 +136,7 @@ def route_after_extract(state: PreparationWorkflowState) -> str:
 # =============================================================================
 
 
-def extract_job_node(state: PreparationWorkflowState) -> PreparationWorkflowState:
+async def extract_job_node(state: PreparationWorkflowState) -> PreparationWorkflowState:
     """Extract job data from source using appropriate adapter.
 
     Args:
@@ -187,9 +187,7 @@ def extract_job_node(state: PreparationWorkflowState) -> PreparationWorkflowStat
             # In the future, this will use async extraction
             # For now, we catch the NotImplementedError and provide a stub response
             try:
-                import asyncio
-
-                job_posting = asyncio.run(adapter.extract(raw_input))
+                job_posting = await adapter.extract(raw_input)
                 state["job_posting"] = job_posting
                 state["current_step"] = "job_extracted"
             except NotImplementedError:
@@ -227,7 +225,7 @@ def extract_job_node(state: PreparationWorkflowState) -> PreparationWorkflowStat
     return state
 
 
-def filter_job_node(state: PreparationWorkflowState) -> PreparationWorkflowState:
+async def filter_job_node(state: PreparationWorkflowState) -> PreparationWorkflowState:
     """Filter job using LLM (LinkedIn source only).
 
     This node evaluates if a job is suitable based on user preferences.
@@ -251,7 +249,7 @@ def filter_job_node(state: PreparationWorkflowState) -> PreparationWorkflowState
     return state
 
 
-def compose_cv_node(state: PreparationWorkflowState) -> PreparationWorkflowState:
+async def compose_cv_node(state: PreparationWorkflowState) -> PreparationWorkflowState:
     """Compose tailored CV using LLM.
 
     Reuses logic from MVP workflow. Supports user_feedback for retry.
@@ -333,7 +331,7 @@ def compose_cv_node(state: PreparationWorkflowState) -> PreparationWorkflowState
     return state
 
 
-def generate_pdf_node(state: PreparationWorkflowState) -> PreparationWorkflowState:
+async def generate_pdf_node(state: PreparationWorkflowState) -> PreparationWorkflowState:
     """Generate PDF from tailored CV JSON.
 
     Reuses logic from MVP workflow.
@@ -423,7 +421,7 @@ def generate_pdf_node(state: PreparationWorkflowState) -> PreparationWorkflowSta
     return state
 
 
-def save_to_db_node(state: PreparationWorkflowState, config: dict | None = None) -> PreparationWorkflowState:
+async def save_to_db_node(state: PreparationWorkflowState, config: dict | None = None) -> PreparationWorkflowState:
     """Save job record to repository.
 
     Sets status based on mode:
@@ -471,9 +469,7 @@ def save_to_db_node(state: PreparationWorkflowState, config: dict | None = None)
         # Save to repository
         repo = _get_repository_from_config(config or {})
         try:
-            import asyncio
-
-            asyncio.run(repo.create(job_record))
+            await repo.create(job_record)
             logger.info(f"Job {job_id} saved to repository with status: {final_status}")
         except NotImplementedError:
             # Repository not implemented yet - log and continue

@@ -95,7 +95,7 @@ def create_retry_workflow() -> StateGraph:
 # Workflow Nodes
 # =============================================================================
 
-def load_from_db_node(state: RetryWorkflowState, config: dict | None = None) -> RetryWorkflowState:
+async def load_from_db_node(state: RetryWorkflowState, config: dict | None = None) -> RetryWorkflowState:
     """Load existing job data from repository.
 
     Args:
@@ -112,9 +112,8 @@ def load_from_db_node(state: RetryWorkflowState, config: dict | None = None) -> 
         repo = _get_repository_from_config(config or {})
 
         # Load job record
-        import asyncio
         try:
-            job_record = asyncio.run(repo.get(job_id))
+            job_record = await repo.get(job_id)
         except NotImplementedError:
             # Repository not implemented - use stub data
             logger.warning(f"Repository not implemented, using stub for retry {job_id}")
@@ -149,7 +148,7 @@ def load_from_db_node(state: RetryWorkflowState, config: dict | None = None) -> 
     return state
 
 
-def compose_cv_node(state: RetryWorkflowState) -> RetryWorkflowState:
+async def compose_cv_node(state: RetryWorkflowState) -> RetryWorkflowState:
     """Compose CV with user feedback.
 
     Args:
@@ -215,7 +214,7 @@ def compose_cv_node(state: RetryWorkflowState) -> RetryWorkflowState:
     return state
 
 
-def generate_pdf_node(state: RetryWorkflowState) -> RetryWorkflowState:
+async def generate_pdf_node(state: RetryWorkflowState) -> RetryWorkflowState:
     """Generate PDF from retried CV.
 
     Args:
@@ -301,7 +300,7 @@ def generate_pdf_node(state: RetryWorkflowState) -> RetryWorkflowState:
     return state
 
 
-def update_db_node(state: RetryWorkflowState, config: dict | None = None) -> RetryWorkflowState:
+async def update_db_node(state: RetryWorkflowState, config: dict | None = None) -> RetryWorkflowState:
     """Update job record in repository after retry.
 
     Sets status back to "pending" so it appears in HITL queue again.
@@ -338,9 +337,8 @@ def update_db_node(state: RetryWorkflowState, config: dict | None = None) -> Ret
         }
 
         # Update repository
-        import asyncio
         try:
-            asyncio.run(repo.update(job_id, updates))
+            await repo.update(job_id, updates)
             logger.info(f"Job {job_id} updated after retry: status={final_status}")
         except NotImplementedError:
             logger.warning(f"Repository not implemented, job {job_id} not updated")

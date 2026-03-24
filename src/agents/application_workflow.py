@@ -137,7 +137,7 @@ def route_by_application_type(state: ApplicationWorkflowState) -> str:
 # Workflow Nodes
 # =============================================================================
 
-def load_from_db_node(state: ApplicationWorkflowState, config: dict | None = None) -> ApplicationWorkflowState:
+async def load_from_db_node(state: ApplicationWorkflowState, config: dict | None = None) -> ApplicationWorkflowState:
     """Load job data from repository.
 
     IMPLEMENTATION STATUS: Stub.
@@ -156,9 +156,8 @@ def load_from_db_node(state: ApplicationWorkflowState, config: dict | None = Non
         repo = _get_repository_from_config(config or {})
 
         # Load job record
-        import asyncio
         try:
-            job_record = asyncio.run(repo.get(job_id))
+            job_record = await repo.get(job_id)
         except NotImplementedError:
             logger.warning(f"Repository not implemented for job {job_id}")
             state["error_message"] = "Repository not implemented"
@@ -185,7 +184,7 @@ def load_from_db_node(state: ApplicationWorkflowState, config: dict | None = Non
     return state
 
 
-def apply_deep_agent_node(state: ApplicationWorkflowState) -> ApplicationWorkflowState:
+async def apply_deep_agent_node(state: ApplicationWorkflowState) -> ApplicationWorkflowState:
     """Apply using Deep Agent (Playwright MCP browser automation).
 
     IMPLEMENTATION STATUS: Stub only - future feature.
@@ -218,7 +217,7 @@ def apply_deep_agent_node(state: ApplicationWorkflowState) -> ApplicationWorkflo
     return state
 
 
-def apply_linkedin_node(state: ApplicationWorkflowState) -> ApplicationWorkflowState:
+async def apply_linkedin_node(state: ApplicationWorkflowState) -> ApplicationWorkflowState:
     """Apply using LinkedIn Easy Apply automation.
 
     IMPLEMENTATION STATUS: Stub only - future feature.
@@ -252,7 +251,7 @@ def apply_linkedin_node(state: ApplicationWorkflowState) -> ApplicationWorkflowS
     return state
 
 
-def apply_manual_node(state: ApplicationWorkflowState) -> ApplicationWorkflowState:
+async def apply_manual_node(state: ApplicationWorkflowState) -> ApplicationWorkflowState:
     """Mark job as requiring manual application.
 
     For jobs that require manual application (e.g., external job boards
@@ -280,7 +279,7 @@ def apply_manual_node(state: ApplicationWorkflowState) -> ApplicationWorkflowSta
     return state
 
 
-def update_db_node(state: ApplicationWorkflowState, config: dict | None = None) -> ApplicationWorkflowState:
+async def update_db_node(state: ApplicationWorkflowState, config: dict | None = None) -> ApplicationWorkflowState:
     """Update job record in repository after application attempt.
 
     Args:
@@ -313,9 +312,8 @@ def update_db_node(state: ApplicationWorkflowState, config: dict | None = None) 
         }
 
         # Update repository
-        import asyncio
         try:
-            asyncio.run(repo.update(job_id, updates))
+            await repo.update(job_id, updates)
             logger.info(f"Job {job_id} updated after application: status={job_status}")
         except NotImplementedError:
             logger.warning(f"Repository not implemented, job {job_id} not updated")

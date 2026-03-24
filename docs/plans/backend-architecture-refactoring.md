@@ -81,14 +81,14 @@ Addresses **Finding #2** (asyncio.run() in sync nodes). Convert all workflow nod
 - Modify: `src/services/job_queue.py` (process_queue consumer)
 - Modify: `src/api/main.py` (workflow invocation)
 
-- [ ] Convert all 5 node functions in `preparation_workflow.py` to `async def`: `extract_job_node`, `filter_job_node`, `compose_cv_node`, `generate_pdf_node`, `save_to_db_node`. Replace every `asyncio.run(repo.xxx())` with `await repo.xxx()`. Replace `asyncio.run(adapter.extract())` with `await adapter.extract()`
-- [ ] Convert all 4 node functions in `retry_workflow.py` to `async def`: `load_from_db_node`, `compose_cv_node`, `generate_pdf_node`, `update_db_node`. Replace all `asyncio.run()` calls with `await`
-- [ ] Convert all 5 node functions in `application_workflow.py` to `async def`. Replace all `asyncio.run()` calls with `await`
-- [ ] Update `process_queue()` in `job_queue.py`: remove `asyncio.to_thread(lambda: list(workflow.stream(...)))` wrapper. Use `await workflow.ainvoke(initial_state, config=config)` directly since the consumer is already async
-- [ ] Update `api/main.py`: replace `run_workflow_async()`, `run_preparation_workflow_async()`, `run_retry_workflow_async()` background task functions. They should now `await workflow.ainvoke()` instead of calling sync `workflow.invoke()` in a thread. Use `asyncio.create_task()` instead of `background_tasks.add_task()` for fire-and-forget workflow execution
-- [ ] Verify that no `asyncio.run()` calls remain anywhere in `src/agents/` or `src/services/job_queue.py` (grep to confirm)
-- [ ] Update affected unit tests to use `pytest-asyncio` for async node testing
-- [ ] Run project test suite — must pass before task 3
+- [x] Convert all 5 node functions in `preparation_workflow.py` to `async def`: `extract_job_node`, `filter_job_node`, `compose_cv_node`, `generate_pdf_node`, `save_to_db_node`. Replace every `asyncio.run(repo.xxx())` with `await repo.xxx()`. Replace `asyncio.run(adapter.extract())` with `await adapter.extract()`
+- [x] Convert all 4 node functions in `retry_workflow.py` to `async def`: `load_from_db_node`, `compose_cv_node`, `generate_pdf_node`, `update_db_node`. Replace all `asyncio.run()` calls with `await`
+- [x] Convert all 5 node functions in `application_workflow.py` to `async def`. Replace all `asyncio.run()` calls with `await`
+- [x] Update `process_queue()` in `job_queue.py`: remove `asyncio.to_thread(lambda: list(workflow.stream(...)))` wrapper. Use `await workflow.ainvoke(initial_state, config=config)` directly since the consumer is already async
+- [x] Update `api/main.py`: replace `run_workflow_async()`, `run_preparation_workflow_async()`, `run_retry_workflow_async()` background task functions. They should now `await workflow.ainvoke()` instead of calling sync `workflow.invoke()` in a thread. Use `asyncio.create_task()` instead of `background_tasks.add_task()` for fire-and-forget workflow execution
+- [x] Verify that no `asyncio.run()` calls remain anywhere in `src/agents/` or `src/services/job_queue.py` (grep to confirm)
+- [x] Update affected unit tests to use `pytest-asyncio` for async node testing
+- [x] Run project test suite — must pass before task 3
 
 ### Task 3: Add thread-safe state management
 

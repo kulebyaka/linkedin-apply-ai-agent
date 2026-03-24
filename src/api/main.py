@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -255,19 +255,17 @@ def _restart_consumer(ctx: AppContext) -> None:
     _queue_consumer_task = _start_queue_consumer(ctx)
 
 
-def run_workflow_async(job_id: str, thread_id: str, initial_state: dict, ctx: AppContext):
-    """Execute LangGraph workflow in background thread (legacy endpoint support)."""
+async def run_workflow_async(job_id: str, thread_id: str, initial_state: dict, ctx: AppContext):
+    """Execute LangGraph workflow asynchronously (legacy endpoint support)."""
     try:
         config = {"configurable": {"thread_id": thread_id, "repository": ctx.repository}}
 
-        # Invoke preparation workflow with MVP mode (blocking call in background thread)
-        result = ctx.prep_workflow.invoke(initial_state, config)
+        result = await ctx.prep_workflow.ainvoke(initial_state, config)
 
         logger.info(f"Job {job_id} completed with status: {result.get('current_step')}")
 
     except Exception as e:
         logger.error(f"Job {job_id} failed: {e}", exc_info=True)
-        # Error is stored in workflow state, no need to re-raise
 
 
 @app.get("/api/health")
@@ -281,7 +279,7 @@ async def health():
 
 @app.post("/api/cv/generate", response_model=CVGenerationResponse)
 async def generate_cv(
-    request: Request, job_input: JobDescriptionInput, background_tasks: BackgroundTasks
+    request: Request, job_input: JobDescriptionInput
 ) -> CVGenerationResponse:
     """
     Submit CV generation request
@@ -323,8 +321,8 @@ async def generate_cv(
         await ctx.register_workflow(job_id, thread_id, "preparation")
 
         # Run workflow in background
-        background_tasks.add_task(
-            run_workflow_async, job_id=job_id, thread_id=thread_id, initial_state=initial_state, ctx=ctx
+        asyncio.create_task(
+            run_workflow_async(job_id=job_id, thread_id=thread_id, initial_state=initial_state, ctx=ctx)
         )
 
         logger.info(f"Job {job_id} submitted: {job_input.title} at {job_input.company}")
@@ -429,11 +427,11 @@ async def download_cv(job_id: str, request: Request):
 # =============================================================================
 
 
-def run_preparation_workflow_async(job_id: str, thread_id: str, initial_state: dict, ctx: AppContext):
-    """Execute Preparation Workflow in background thread."""
+async def run_preparation_workflow_async(job_id: str, thread_id: str, initial_state: dict, ctx: AppContext):
+    """Execute Preparation Workflow asynchronously."""
     try:
         config = {"configurable": {"thread_id": thread_id, "repository": ctx.repository}}
-        result = ctx.prep_workflow.invoke(initial_state, config)
+        result = await ctx.prep_workflow.ainvoke(initial_state, config)
         logger.info(
             f"Preparation workflow for job {job_id} completed: {result.get('current_step')}"
         )
@@ -441,11 +439,11 @@ def run_preparation_workflow_async(job_id: str, thread_id: str, initial_state: d
         logger.error(f"Preparation workflow for job {job_id} failed: {e}", exc_info=True)
 
 
-def run_retry_workflow_async(job_id: str, thread_id: str, initial_state: dict, ctx: AppContext):
-    """Execute Retry Workflow in background thread."""
+async def run_retry_workflow_async(job_id: str, thread_id: str, initial_state: dict, ctx: AppContext):
+    """Execute Retry Workflow asynchronously."""
     try:
         config = {"configurable": {"thread_id": thread_id, "repository": ctx.repository}}
-        result = ctx.retry_workflow.invoke(initial_state, config)
+        result = await ctx.retry_workflow.ainvoke(initial_state, config)
         logger.info(f"Retry workflow for job {job_id} completed: {result.get('current_step')}")
     except Exception as e:
         logger.error(f"Retry workflow for job {job_id} failed: {e}", exc_info=True)
@@ -459,7 +457,7 @@ async def submit_job_options():
 
 @app.post("/api/jobs/submit", response_model=JobSubmitResponse)
 async def submit_job(
-    job_request: JobSubmitRequest, http_request: Request, background_tasks: BackgroundTasks
+    job_request: JobSubmitRequest, http_request: Request
 ) -> JobSubmitResponse:
     """
     Submit a job for CV generation.
@@ -534,12 +532,13 @@ async def submit_job(
         await ctx.register_workflow(job_id, thread_id, "preparation")
 
         # Run workflow in background
-        background_tasks.add_task(
-            run_preparation_workflow_async,
-            job_id=job_id,
-            thread_id=thread_id,
-            initial_state=initial_state,
-            ctx=ctx,
+        asyncio.create_task(
+            run_preparation_workflow_async(
+                job_id=job_id,
+                thread_id=thread_id,
+                initial_state=initial_state,
+                ctx=ctx,
+            )
         )
 
         logger.info(f"Job {job_id} submitted: source={job_request.source}, mode={job_request.mode}")
@@ -927,7 +926,7 @@ async def get_hitl_pending(request: Request) -> list[PendingApproval]:
 
 @app.post("/api/hitl/{job_id}/decide", response_model=HITLDecisionResponse)
 async def submit_hitl_decision(
-    job_id: str, decision: HITLDecision, request: Request, background_tasks: BackgroundTasks
+    job_id: str, decision: HITLDecision, request: Request
 ) -> HITLDecisionResponse:
     """
     Submit HITL decision for a pending job.
@@ -1017,12 +1016,13 @@ async def submit_hitl_decision(
             await ctx.register_workflow(job_id, retry_thread_id, "retry")
 
             # Run retry workflow in background
-            background_tasks.add_task(
-                run_retry_workflow_async,
-                job_id=job_id,
-                thread_id=retry_thread_id,
-                initial_state=retry_state,
-                ctx=ctx,
+            asyncio.create_task(
+                run_retry_workflow_async(
+                    job_id=job_id,
+                    thread_id=retry_thread_id,
+                    initial_state=retry_state,
+                    ctx=ctx,
+                )
             )
 
             return HITLDecisionResponse(
