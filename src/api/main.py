@@ -38,7 +38,7 @@ from src.models.unified import (
 )
 from src.services.hitl_processor import HITLProcessor
 from src.services.job_orchestrator import JobOrchestrator
-from src.services.job_queue import process_queue
+from src.services.job_queue import ConsumerManager
 from src.utils.logger import setup_api_logger
 
 settings = get_settings()
@@ -56,7 +56,7 @@ if not _src_logger.handlers:
     _src_logger.setLevel(logging.INFO)
 
 # Module-level state for consumer management (not business state)
-_queue_consumer_task: asyncio.Task | None = None
+_consumer_manager = ConsumerManager()
 _linkedin_init_lock = asyncio.Lock()
 
 def _get_ctx(request: Request) -> AppContext:
@@ -67,13 +67,9 @@ def _get_ctx(request: Request) -> AppContext:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan: create AppContext, initialize, yield, cleanup."""
-    global _queue_consumer_task
-
     ctx = create_app_context(settings)
     app.state.ctx = ctx
-
-    _shutting_down = False
-    _consumer_restart_count = 0
+    app.state.consumer_manager = _consumer_manager
 
     logger.info(f"Starting up with repository type: {settings.repo_type}")
     await ctx.repository.initialize()
@@ -98,7 +94,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             result["enqueued"], result["skipped"], result["total_in_file"],
         )
         if result["enqueued"] > 0:
-            _queue_consumer_task = _start_queue_consumer(ctx)
+            _consumer_manager.start(ctx)
     elif settings.linkedin_search_schedule_enabled:
         try:
             from src.services.browser_automation import LinkedInAutomation
@@ -114,7 +110,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             scheduler.start()
             ctx.scheduler = scheduler
 
-            _queue_consumer_task = _start_queue_consumer(ctx)
+            _consumer_manager.start(ctx)
 
             logger.info("LinkedIn search scheduler started")
         except Exception:
@@ -123,21 +119,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
 
     # Shutdown
-    _shutting_down = True
-
-    if _consumer_restart_handle is not None:
-        _consumer_restart_handle.cancel()
+    _consumer_manager.stop()
+    await _consumer_manager.wait_stopped()
 
     if ctx.scheduler:
         ctx.scheduler.stop()
-
-    if _queue_consumer_task:
-        _queue_consumer_task.cancel()
-        try:
-            await _queue_consumer_task
-        except asyncio.CancelledError:
-            pass
-        _queue_consumer_task = None
 
     if ctx.browser:
         await ctx.browser.close()
@@ -183,78 +169,6 @@ async def log_requests(request: Request, call_next):
     return response
 
 
-_consumer_restart_count = 0
-_MAX_CONSUMER_RESTARTS = 5
-_CONSUMER_BACKOFF_BASE = 2.0  # seconds
-_CONSUMER_STABLE_THRESHOLD = 60.0  # seconds: reset counter if consumer ran this long
-_consumer_restart_handle: asyncio.TimerHandle | None = None
-_shutting_down = False
-
-
-def _start_queue_consumer(ctx: AppContext) -> asyncio.Task:
-    """Create a queue consumer task with automatic restart on failure (with backoff)."""
-    started_at = time.monotonic()
-
-    def _on_consumer_done(task: asyncio.Task) -> None:
-        global _queue_consumer_task, _consumer_restart_count, _consumer_restart_handle
-        if task.cancelled() or _shutting_down:
-            return
-        exc = task.exception()
-        if exc is not None:
-            # If consumer ran long enough, treat as intermittent — reset counter
-            uptime = time.monotonic() - started_at
-            if uptime >= _CONSUMER_STABLE_THRESHOLD:
-                _consumer_restart_count = 0
-
-            _consumer_restart_count += 1
-            if _consumer_restart_count > _MAX_CONSUMER_RESTARTS:
-                logger.error(
-                    "Queue consumer crashed %d times, giving up: %s",
-                    _consumer_restart_count, exc,
-                )
-                return
-            delay = _CONSUMER_BACKOFF_BASE * (2 ** (_consumer_restart_count - 1))
-            logger.error(
-                "Queue consumer crashed (%d/%d): %s — restarting in %.1fs",
-                _consumer_restart_count, _MAX_CONSUMER_RESTARTS, exc, delay,
-            )
-            loop = asyncio.get_running_loop()
-            if _consumer_restart_handle is not None:
-                _consumer_restart_handle.cancel()
-            _consumer_restart_handle = loop.call_later(delay, _restart_consumer, ctx)
-        else:
-            # Successful exit resets the counter
-            _consumer_restart_count = 0
-
-    def _register_linkedin_job(job_id: str, thread_id: str) -> None:
-        """Register a LinkedIn-sourced job for HITL tracking."""
-        asyncio.create_task(
-            ctx.register_workflow(job_id, thread_id, "preparation")
-        )
-
-    task = asyncio.create_task(
-        process_queue(
-            ctx.job_queue,
-            job_repository=ctx.repository,
-            delay_between_jobs=2.0,
-            on_job_processed=_register_linkedin_job,
-        )
-    )
-    task.add_done_callback(_on_consumer_done)
-    return task
-
-
-def _restart_consumer(ctx: AppContext) -> None:
-    """Restart the queue consumer (called from call_later)."""
-    global _queue_consumer_task, _consumer_restart_handle, _consumer_restart_count
-    _consumer_restart_handle = None
-    if _shutting_down:
-        return
-    if _queue_consumer_task is not None and not _queue_consumer_task.done():
-        logger.info("Consumer already running, skipping restart")
-        _consumer_restart_count = 0
-        return
-    _queue_consumer_task = _start_queue_consumer(ctx)
 
 
 async def run_workflow_async(job_id: str, thread_id: str, initial_state: dict, ctx: AppContext):
@@ -272,8 +186,12 @@ async def run_workflow_async(job_id: str, thread_id: str, initial_state: dict, c
 
 @app.get("/api/health")
 async def health():
-    """Health check endpoint"""
-    return {"status": "running", "message": "LinkedIn Job Application Agent API"}
+    """Health check endpoint with consumer health status."""
+    return {
+        "status": "running",
+        "message": "LinkedIn Job Application Agent API",
+        **_consumer_manager.health_check(),
+    }
 
 
 # MVP CV Generation Endpoints
@@ -476,7 +394,6 @@ async def trigger_linkedin_search(request: Request):
 
     Runs search in background and returns immediately.
     """
-    global _queue_consumer_task
     ctx = _get_ctx(request)
 
     if settings.seed_jobs_from_file:
@@ -506,13 +423,10 @@ async def trigger_linkedin_search(request: Request):
                 raise HTTPException(500, "Failed to initialize LinkedIn search components") from None
 
         # Ensure a queue consumer is running
-        if _queue_consumer_task is None or _queue_consumer_task.done():
-            global _consumer_restart_handle, _consumer_restart_count
-            if _consumer_restart_handle is not None:
-                _consumer_restart_handle.cancel()
-                _consumer_restart_handle = None
-            _consumer_restart_count = 0
-            _queue_consumer_task = _start_queue_consumer(ctx)
+        cm = _consumer_manager
+        if cm.task is None or cm.task.done():
+            cm.reset()
+            cm.start(ctx)
 
     async def _run_search():
         try:
@@ -562,7 +476,6 @@ async def replay_fixtures(request: Request, limit: Annotated[int, Query(ge=0)] =
 
     Useful for HITL testing and demos. Jobs already in the repository are skipped.
     """
-    global _queue_consumer_task
     ctx = _get_ctx(request)
 
     from src.services.job_fixtures import enqueue_from_fixtures
@@ -579,8 +492,10 @@ async def replay_fixtures(request: Request, limit: Annotated[int, Query(ge=0)] =
         raise HTTPException(404, f"Fixture file not found or empty: {path}")
 
     # Ensure queue consumer is running to process the enqueued jobs
-    if result["enqueued"] > 0 and (_queue_consumer_task is None or _queue_consumer_task.done()):
-        _queue_consumer_task = _start_queue_consumer(ctx)
+    cm = _consumer_manager
+    if result["enqueued"] > 0 and (cm.task is None or cm.task.done()):
+        cm.reset()
+        cm.start(ctx)
 
     return {
         "status": "ok",

@@ -197,12 +197,12 @@ Addresses **Finding #8** (Queue consumer gives up silently after 5 restarts). Ma
 - Modify: `src/api/main.py` (consumer restart logic)
 - Modify: `src/services/job_queue.py`
 
-- [ ] Extract consumer restart logic from `api/main.py` (lines ~124-200) into a `ConsumerManager` class in `src/services/job_queue.py`. Fields: `max_restarts`, `backoff_base`, `restart_count`, `is_healthy: bool`. Method: `start(queue, workflow, ...)`, `stop()`, `health_check() -> dict`
-- [ ] When max restarts exceeded, set `is_healthy = False` and log at CRITICAL level (not just ERROR). Include instructions in the log message on how to manually restart
-- [ ] Add a `/api/health` enhancement: include `queue_consumer_healthy: bool` in the health check response so monitoring can detect the silent death
-- [ ] In `job_queue.py:put_batch()`, when queue is full and jobs are dropped, emit a WARNING that includes the total jobs dropped AND the job titles/IDs that were dropped (not just a count)
-- [ ] Write tests for `ConsumerManager`: test restart count tracking, test health_check reflects state, test max restarts behavior
-- [ ] Run project test suite — must pass before task 9
+- [x] Extract consumer restart logic from `api/main.py` (lines ~124-200) into a `ConsumerManager` class in `src/services/job_queue.py`. Fields: `max_restarts`, `backoff_base`, `restart_count`, `is_healthy: bool`. Method: `start(queue, workflow, ...)`, `stop()`, `health_check() -> dict`
+- [x] When max restarts exceeded, set `is_healthy = False` and log at CRITICAL level (not just ERROR). Include instructions in the log message on how to manually restart
+- [x] Add a `/api/health` enhancement: include `queue_consumer_healthy: bool` in the health check response so monitoring can detect the silent death
+- [x] In `job_queue.py:put_batch()`, when queue is full and jobs are dropped, emit a WARNING that includes the total jobs dropped AND the job titles/IDs that were dropped (not just a count)
+- [x] Write tests for `ConsumerManager`: test restart count tracking, test health_check reflects state, test max restarts behavior
+- [x] Run project test suite — must pass before task 9
 
 ### Task 9: Deduplicate workflow code
 
