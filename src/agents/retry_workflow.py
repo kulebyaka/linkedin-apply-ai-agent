@@ -14,6 +14,7 @@ Flow:
 import logging
 from typing import TypedDict
 
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 
@@ -80,7 +81,7 @@ def create_retry_workflow() -> StateGraph:
 # Workflow Nodes
 # =============================================================================
 
-async def load_from_db_node(state: RetryWorkflowState, config: dict | None = None) -> RetryWorkflowState:
+async def load_from_db_node(state: RetryWorkflowState, config: RunnableConfig | None = None) -> RetryWorkflowState:
     """Load existing job data from repository.
 
     Args:
@@ -190,7 +191,7 @@ async def generate_pdf_node(state: RetryWorkflowState) -> RetryWorkflowState:
     return state
 
 
-async def update_db_node(state: RetryWorkflowState, config: dict | None = None) -> RetryWorkflowState:
+async def update_db_node(state: RetryWorkflowState, config: RunnableConfig | None = None) -> RetryWorkflowState:
     """Update job record in repository after retry.
 
     Sets status back to "pending" so it appears in HITL queue again.

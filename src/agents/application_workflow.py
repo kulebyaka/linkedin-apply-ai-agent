@@ -21,6 +21,7 @@ import logging
 from typing import TypedDict, Literal
 from datetime import datetime
 
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 
@@ -126,7 +127,7 @@ def route_by_application_type(state: ApplicationWorkflowState) -> str:
 # Workflow Nodes
 # =============================================================================
 
-async def load_from_db_node(state: ApplicationWorkflowState, config: dict | None = None) -> ApplicationWorkflowState:
+async def load_from_db_node(state: ApplicationWorkflowState, config: RunnableConfig | None = None) -> ApplicationWorkflowState:
     """Load job data from repository.
 
     IMPLEMENTATION STATUS: Stub.
@@ -262,7 +263,7 @@ async def apply_manual_node(state: ApplicationWorkflowState) -> ApplicationWorkf
     return state
 
 
-async def update_db_node(state: ApplicationWorkflowState, config: dict | None = None) -> ApplicationWorkflowState:
+async def update_db_node(state: ApplicationWorkflowState, config: RunnableConfig | None = None) -> ApplicationWorkflowState:
     """Update job record in repository after application attempt.
 
     Args:

@@ -261,14 +261,14 @@ Addresses **Finding #12** (Two codepath divergence). Remove legacy `/api/cv/*` e
 
 ### Task 12: Verify acceptance criteria
 
-- [ ] Manual test: start the API server (`uv run uvicorn src.api.main:app --reload`), submit a job via `POST /api/jobs/submit`, verify status via `GET /api/jobs/{id}/status`, verify HITL flow via `GET /api/hitl/pending` and `POST /api/hitl/{id}/decide`
-- [ ] Manual test: verify that invalid state transitions are rejected (e.g., try to approve an already-declined job — should get 400)
-- [ ] Manual test: verify that legacy `/api/cv/*` endpoints return 404
-- [ ] Run full test suite: `uv run pytest tests/ -v`
-- [ ] Run type checker: `uv run mypy src/`
-- [ ] Grep for remaining `asyncio.run(` calls in `src/` — should find zero
-- [ ] Grep for remaining `_repository` globals in `src/agents/` — should find zero
-- [ ] Grep for remaining `NotImplementedError` catches in `src/agents/` — should find zero
+- [x] Manual test: start the API server (`uv run uvicorn src.api.main:app --reload`), submit a job via `POST /api/jobs/submit`, verify status via `GET /api/jobs/{id}/status`, verify HITL flow via `GET /api/hitl/pending` and `POST /api/hitl/{id}/decide`
+- [x] Manual test: verify that invalid state transitions are rejected (e.g., try to approve an already-declined job — should get 400)
+- [x] Manual test: verify that legacy `/api/cv/*` endpoints return 404
+- [x] Run full test suite: `uv run pytest tests/ -v`
+- [x] Run type checker: `uv run mypy src/`
+- [x] Grep for remaining `asyncio.run(` calls in `src/` — should find zero
+- [x] Grep for remaining `_repository` globals in `src/agents/` — should find zero
+- [x] Grep for remaining `NotImplementedError` catches in `src/agents/` — should find zero
 
 ### Task 13: Update documentation
 

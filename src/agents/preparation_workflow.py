@@ -15,6 +15,7 @@ import time
 from datetime import datetime
 from typing import Literal, TypedDict
 
+from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 
@@ -313,7 +314,7 @@ async def generate_pdf_node(state: PreparationWorkflowState) -> PreparationWorkf
     return state
 
 
-async def save_to_db_node(state: PreparationWorkflowState, config: dict | None = None) -> PreparationWorkflowState:
+async def save_to_db_node(state: PreparationWorkflowState, config: RunnableConfig | None = None) -> PreparationWorkflowState:
     """Save job record to repository.
 
     Sets status based on mode:
