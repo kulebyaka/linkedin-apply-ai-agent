@@ -155,15 +155,14 @@ class TestGetPending:
         result = await processor.get_pending()
         assert result == []
 
-    async def test_fallback_on_not_implemented(self):
+    async def test_propagates_repository_error(self):
         repo = AsyncMock()
         repo.get_pending = AsyncMock(side_effect=NotImplementedError)
         ctx = _make_ctx(repository=repo)
         processor = HITLProcessor(ctx)
 
-        # No workflow threads registered, so should return empty
-        result = await processor.get_pending()
-        assert result == []
+        with pytest.raises(NotImplementedError):
+            await processor.get_pending()
 
 
 class TestGetHistory:
@@ -201,11 +200,11 @@ class TestGetHistory:
 
         repo.get_history.assert_awaited_once_with(limit=50, statuses=["declined"])
 
-    async def test_fallback_on_not_implemented(self):
+    async def test_propagates_repository_error(self):
         repo = AsyncMock()
         repo.get_history = AsyncMock(side_effect=NotImplementedError)
         ctx = _make_ctx(repository=repo)
         processor = HITLProcessor(ctx)
 
-        result = await processor.get_history()
-        assert result == []
+        with pytest.raises(NotImplementedError):
+            await processor.get_history()

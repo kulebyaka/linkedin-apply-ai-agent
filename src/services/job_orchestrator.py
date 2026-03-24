@@ -8,7 +8,6 @@ Extracted from api/main.py to keep API handlers thin. Handles:
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -109,7 +108,7 @@ class JobOrchestrator:
         await self._ctx.register_workflow(job_id, thread_id, "preparation")
 
         # Dispatch workflow in background
-        asyncio.create_task(
+        self._ctx.create_background_task(
             self._run_preparation_workflow(job_id, thread_id, initial_state)
         )
 
@@ -145,7 +144,7 @@ class JobOrchestrator:
                     created_at=job_record.created_at,
                     updated_at=job_record.updated_at,
                 )
-        except Exception:
+        except KeyError:
             pass
 
         # Fall back to workflow threads for in-progress jobs

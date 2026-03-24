@@ -181,14 +181,16 @@ async def health():
 def _get_orchestrator(request: Request) -> JobOrchestrator:
     """Helper to retrieve JobOrchestrator from request."""
     ctx = _get_ctx(request)
-    assert ctx.orchestrator is not None, "JobOrchestrator not initialized"
+    if ctx.orchestrator is None:
+        raise RuntimeError("JobOrchestrator not initialized")
     return ctx.orchestrator
 
 
 def _get_hitl(request: Request) -> HITLProcessor:
     """Helper to retrieve HITLProcessor from request."""
     ctx = _get_ctx(request)
-    assert ctx.hitl_processor is not None, "HITLProcessor not initialized"
+    if ctx.hitl_processor is None:
+        raise RuntimeError("HITLProcessor not initialized")
     return ctx.hitl_processor
 
 
@@ -266,7 +268,7 @@ async def trigger_linkedin_search(request: Request):
         except Exception:
             logger.exception("Manual LinkedIn search failed")
 
-    asyncio.create_task(_run_search())
+    ctx.create_background_task(_run_search())
 
     return {"status": "started", "message": "LinkedIn search triggered"}
 
@@ -539,12 +541,13 @@ async def cleanup_jobs(
         if not statuses:
             raise HTTPException(400, "At least one status must be provided")
 
-        invalid = set(statuses) - deletable_statuses
+        deletable_values = {s.value for s in deletable_statuses}
+        invalid = set(statuses) - deletable_values
         if invalid:
             raise HTTPException(
                 400,
                 f"Cannot delete jobs with status: {', '.join(sorted(invalid))}. "
-                f"Allowed: {', '.join(sorted(deletable_statuses))}",
+                f"Allowed: {', '.join(sorted(deletable_values))}",
             )
 
         ctx = _get_ctx(request)

@@ -47,6 +47,8 @@ class AppContext:
     # Thread-safe tracking for in-progress workflows
     _tracking_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     _workflow_threads: dict[str, dict] = field(default_factory=dict)
+    # Background task references to prevent GC of fire-and-forget tasks
+    _background_tasks: set[asyncio.Task] = field(default_factory=set)
 
     async def register_workflow(
         self, job_id: str, thread_id: str, workflow_type: str
@@ -70,6 +72,13 @@ class AppContext:
         """Get a snapshot of all tracked workflows."""
         async with self._tracking_lock:
             return dict(self._workflow_threads)
+
+    def create_background_task(self, coro) -> asyncio.Task:
+        """Create an asyncio task and keep a reference to prevent GC."""
+        task = asyncio.create_task(coro)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+        return task
 
 
 def create_app_context(

@@ -12,7 +12,7 @@ The workflow ends at the HITL boundary. Application is handled by a separate wor
 
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal, TypedDict
 
 from langchain_core.runnables import RunnableConfig
@@ -356,8 +356,8 @@ async def save_to_db_node(state: PreparationWorkflowState, config: RunnableConfi
             current_pdf_path=pdf_path,
             application_url=state.get("job_posting", {}).get("url"),
             error_message=state.get("error_message"),
-            created_at=datetime.now(),
-            updated_at=datetime.now(),
+            created_at=datetime.now(tz=timezone.utc),
+            updated_at=datetime.now(tz=timezone.utc),
         )
 
         # Save to repository

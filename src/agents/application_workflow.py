@@ -19,7 +19,7 @@ Application Types:
 
 import logging
 from typing import TypedDict, Literal
-from datetime import datetime
+from datetime import datetime, timezone
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph, END
@@ -292,7 +292,6 @@ async def update_db_node(state: ApplicationWorkflowState, config: RunnableConfig
         updates = {
             "status": job_status,
             "error_message": state.get("error_message"),
-            "updated_at": datetime.now(),
         }
 
         # Update repository

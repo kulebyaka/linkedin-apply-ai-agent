@@ -8,7 +8,6 @@ Extracted from api/main.py to keep API handlers thin. Handles:
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import uuid
 from typing import TYPE_CHECKING
@@ -104,11 +103,9 @@ class HITLProcessor:
                     )
                 )
             return result
-        except NotImplementedError:
-            logger.warning(
-                "Repository not implemented, scanning workflow states for pending jobs"
-            )
-            return await self._get_pending_from_threads()
+        except Exception:
+            logger.exception("Failed to get pending jobs from repository")
+            raise
 
     async def get_history(
         self, limit: int = 50, status: str | None = None
@@ -133,9 +130,9 @@ class HITLProcessor:
                 )
                 for job in jobs
             ]
-        except NotImplementedError:
-            logger.warning("Repository not implemented, returning empty history")
-            return []
+        except Exception:
+            logger.exception("Failed to get history from repository")
+            raise
 
     # =========================================================================
     # Private helpers
@@ -143,10 +140,7 @@ class HITLProcessor:
 
     async def _handle_approve(self, job_id: str) -> HITLDecisionResponse:
         logger.info("Job %s approved for application (workflow not implemented)", job_id)
-        try:
-            await self._ctx.repository.update(job_id, {"status": BusinessState.APPROVED})
-        except RepositoryError as e:
-            logger.warning("Failed to update repository for job %s: %s", job_id, e)
+        await self._ctx.repository.update(job_id, {"status": BusinessState.APPROVED})
 
         return HITLDecisionResponse(
             job_id=job_id,
@@ -156,10 +150,7 @@ class HITLProcessor:
 
     async def _handle_decline(self, job_id: str) -> HITLDecisionResponse:
         logger.info("Job %s declined by user", job_id)
-        try:
-            await self._ctx.repository.update(job_id, {"status": BusinessState.DECLINED})
-        except RepositoryError as e:
-            logger.warning("Failed to update repository for job %s: %s", job_id, e)
+        await self._ctx.repository.update(job_id, {"status": BusinessState.DECLINED})
 
         return HITLDecisionResponse(
             job_id=job_id,
@@ -197,7 +188,7 @@ class HITLProcessor:
 
         await self._ctx.register_workflow(job_id, retry_thread_id, "retry")
 
-        asyncio.create_task(
+        self._ctx.create_background_task(
             self._run_retry_workflow(job_id, retry_thread_id, retry_state)
         )
 
@@ -229,35 +220,3 @@ class HITLProcessor:
                 "Retry workflow for job %s failed: %s", job_id, e, exc_info=True
             )
 
-    async def _get_pending_from_threads(self) -> list[PendingApproval]:
-        """Fallback: scan workflow threads for pending jobs."""
-        pending = []
-        all_threads = await self._ctx.get_all_workflow_threads()
-
-        for job_id, thread_info in all_threads.items():
-            if thread_info["workflow_type"] != "preparation":
-                continue
-            thread_id = thread_info["thread_id"]
-            config = {"configurable": {"thread_id": thread_id}}
-            try:
-                state_snapshot = self._ctx.prep_workflow.get_state(config)
-                state_values = state_snapshot.values
-                if state_values.get("current_step") == BusinessState.PENDING_REVIEW:
-                    pending.append(
-                        PendingApproval(
-                            job_id=job_id,
-                            job_posting=state_values.get("job_posting", {}),
-                            cv_json=state_values.get("tailored_cv_json", {}),
-                            pdf_path=state_values.get("tailored_cv_pdf_path"),
-                            attempt_count=state_values.get("retry_count", 0),
-                            created_at=thread_info["created_at"],
-                            source=state_values.get("source", "manual"),
-                            application_url=state_values.get("job_posting", {}).get(
-                                "url"
-                            ),
-                        )
-                    )
-            except Exception as e:
-                logger.warning("Failed to get state for job %s: %s", job_id, e)
-
-        return pending
