@@ -179,7 +179,7 @@ class HITLProcessor:
 
         retry_thread_id = str(uuid.uuid4())
 
-        from src.agents.preparation_workflow import load_master_cv
+        from src.agents._shared import load_master_cv
 
         # Derive retry count from CV attempts
         attempts = await self._ctx.repository.get_cv_attempts(job_id)

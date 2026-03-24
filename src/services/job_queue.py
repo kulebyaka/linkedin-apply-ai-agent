@@ -105,10 +105,8 @@ async def process_queue(
         Number of jobs successfully processed.
     """
     if workflow is None or master_cv_loader is None:
-        from ..agents.preparation_workflow import (
-            create_preparation_workflow,
-            load_master_cv,
-        )
+        from ..agents._shared import load_master_cv
+        from ..agents.preparation_workflow import create_preparation_workflow
         if workflow is None:
             workflow = create_preparation_workflow()
         if master_cv_loader is None:

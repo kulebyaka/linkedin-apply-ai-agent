@@ -20,9 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from src.agents.preparation_workflow import (
-    load_master_cv,
-)
+from src.agents._shared import load_master_cv
 from src.config.settings import get_settings
 from src.context import AppContext, create_app_context
 from src.models.mvp import CVGenerationResponse, CVGenerationStatus, JobDescriptionInput

@@ -88,7 +88,7 @@ class JobOrchestrator:
             )
 
         # Load master CV
-        from src.agents.preparation_workflow import load_master_cv
+        from src.agents._shared import load_master_cv
 
         master_cv = load_master_cv()
 

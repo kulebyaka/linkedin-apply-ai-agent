@@ -55,7 +55,7 @@ async def test_extract_job_url_not_implemented_fails():
 
     with (
         patch("src.agents.preparation_workflow.JobSourceFactory", return_value=mock_factory),
-        patch("src.agents.preparation_workflow._init_llm_client"),
+        patch("src.agents.preparation_workflow.create_llm_client"),
     ):
         result = await extract_job_node(state)
 
@@ -87,7 +87,7 @@ async def test_extract_job_linkedin_not_implemented_fails():
 
     with (
         patch("src.agents.preparation_workflow.JobSourceFactory", return_value=mock_factory),
-        patch("src.agents.preparation_workflow._init_llm_client"),
+        patch("src.agents.preparation_workflow.create_llm_client"),
     ):
         result = await extract_job_node(state)
 

@@ -13,19 +13,14 @@ Flow:
 
 import logging
 from typing import TypedDict
-from pathlib import Path
-from datetime import datetime
 
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 
 from ..models.cv_attempt import CVCompositionAttempt
 from ..models.state_machine import BusinessState, WorkflowStep
-from ..services.cv_composer import CVComposer
-from ..services.pdf_generator import PDFGenerator
-from ..services.job_repository import JobRepository
-from ..llm.provider import LLMClientFactory, LLMProvider
 from ..config.settings import get_settings
+from ._shared import compose_cv, generate_pdf, get_repository_from_config, load_master_cv
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -50,18 +45,6 @@ class RetryWorkflowState(TypedDict):
     # Status
     current_step: str
     error_message: str | None
-
-
-def _get_repository_from_config(config: dict) -> JobRepository:
-    """Extract repository from LangGraph config['configurable']."""
-    configurable = config.get("configurable", {})
-    repo = configurable.get("repository")
-    if repo is None:
-        raise RuntimeError(
-            "Repository not found in workflow config. "
-            "Pass it via config={'configurable': {'repository': repo}}"
-        )
-    return repo
 
 
 def create_retry_workflow() -> StateGraph:
@@ -111,7 +94,7 @@ async def load_from_db_node(state: RetryWorkflowState, config: dict | None = Non
     state["current_step"] = WorkflowStep.LOADING
 
     try:
-        repo = _get_repository_from_config(config or {})
+        repo = get_repository_from_config(config or {})
 
         # Load job record
         job_record = await repo.get(job_id)
@@ -126,8 +109,7 @@ async def load_from_db_node(state: RetryWorkflowState, config: dict | None = Non
         attempts = await repo.get_cv_attempts(job_id)
         state["retry_count"] = len(attempts) + 1
 
-        # Load master CV (same as original)
-        from .preparation_workflow import load_master_cv
+        # Load master CV
         state["master_cv"] = load_master_cv()
 
         state["current_step"] = WorkflowStep.LOADED
@@ -163,46 +145,19 @@ async def compose_cv_node(state: RetryWorkflowState) -> RetryWorkflowState:
         logger.warning(f"Skipping CV composition due to previous error: {state['error_message']}")
         return state
 
-    try:
-        # Initialize LLM client
-        llm_client = _init_llm_client()
+    result = await compose_cv(
+        state,
+        job_id=job_id,
+        user_feedback=user_feedback,
+    )
 
-        # Initialize CV composer
-        cv_composer = CVComposer(
-            llm_client=llm_client,
-            prompts_dir=settings.prompts_dir
-        )
-
-        # Get master CV and job posting from state
-        master_cv = state.get("master_cv")
-        job_posting = state.get("job_posting")
-
-        if not master_cv:
-            raise ValueError("Master CV not available for retry")
-        if not job_posting:
-            raise ValueError("Job posting not available for retry")
-
-        # Compose tailored CV with feedback
-        logger.info(
-            f"Recomposing CV for job {job_id}: "
-            f"{job_posting.get('title')} at {job_posting.get('company')}"
-        )
-        tailored_cv = cv_composer.compose_cv(
-            master_cv=master_cv,
-            job_posting=job_posting,
-            user_feedback=user_feedback
-        )
-
-        # Update state - convert Pydantic model to dict
-        state["tailored_cv_json"] = tailored_cv.model_dump()
+    state["tailored_cv_json"] = result["tailored_cv_json"]
+    if result["error_message"]:
+        state["error_message"] = result["error_message"]
+    else:
         state["current_step"] = WorkflowStep.CV_COMPOSED
         state["error_message"] = None
         logger.info(f"CV retry composition completed for job {job_id}")
-
-    except Exception as e:
-        logger.error(f"CV retry composition failed for job {job_id}: {e}", exc_info=True)
-        state["error_message"] = f"CV composition failed: {str(e)}"
-        state["tailored_cv_json"] = None
 
     return state
 
@@ -221,74 +176,16 @@ async def generate_pdf_node(state: RetryWorkflowState) -> RetryWorkflowState:
     logger.info(f"Generating PDF for retry #{retry_count} of job {job_id}")
     state["current_step"] = WorkflowStep.GENERATING_PDF
 
-    # Check if we have CV data
-    cv_json = state.get("tailored_cv_json")
-    if not cv_json:
-        previous_error = state.get("error_message")
-        if previous_error:
-            error_msg = f"PDF generation skipped due to previous error: {previous_error}"
-        else:
-            error_msg = f"PDF generation skipped for job {job_id}: No CV data available"
+    result = generate_pdf(state, job_id=job_id, version_suffix=f"_v{retry_count}")
 
-        logger.error(error_msg)
-        state["error_message"] = error_msg
-        state["tailored_cv_pdf_path"] = None
-        state["current_step"] = BusinessState.FAILED
-        return state
-
-    try:
-        # Get job info for filename
-        job_posting = state.get("job_posting", {})
-        job_title = job_posting.get("title", "unknown")
-        company = job_posting.get("company", "unknown")
-
-        # Generate safe filename with retry indicator
-        safe_company = "".join(
-            c for c in company if c.isalnum() or c in (' ', '-', '_')
-        ).strip()
-        safe_title = "".join(
-            c for c in job_title if c.isalnum() or c in (' ', '-', '_')
-        ).strip()
-
-        # Get candidate name from CV
-        candidate_name = cv_json.get("contact", {}).get("full_name", "Unknown")
-        safe_name = "".join(
-            c for c in candidate_name if c.isalnum() or c in (' ', '-', '_')
-        ).strip()
-
-        # Create filename with retry count
-        pdf_filename = f"{safe_name}_{safe_company}_{safe_title}_v{retry_count}.pdf".replace(" ", "_")
-        output_dir = Path(settings.generated_cvs_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = output_dir / pdf_filename
-
-        # Initialize PDF generator
-        generator = PDFGenerator(
-            template_dir=settings.cv_template_dir,
-            template_name=settings.cv_template_name
-        )
-
-        # Generate PDF
-        logger.info(f"Generating retry PDF for job {job_id}: {output_path}")
-        pdf_path = generator.generate_pdf(
-            cv_json=cv_json,
-            output_path=str(output_path),
-            metadata={
-                "subject": f"Resume for {job_title} at {company} (Retry #{retry_count})",
-                "keywords": f"{company}, {job_title}, retry"
-            }
-        )
-
-        # Update state
-        state["tailored_cv_pdf_path"] = pdf_path
+    state["tailored_cv_pdf_path"] = result["tailored_cv_pdf_path"]
+    if result["error_message"]:
+        state["error_message"] = result["error_message"]
+        if not result["tailored_cv_pdf_path"]:
+            state["current_step"] = BusinessState.FAILED
+    else:
         state["current_step"] = WorkflowStep.PDF_GENERATED
-        logger.info(f"Retry PDF generated for job {job_id}: {pdf_path}")
-
-    except Exception as e:
-        logger.error(f"PDF generation failed for retry of job {job_id}: {e}", exc_info=True)
-        state["error_message"] = f"PDF generation failed: {str(e)}"
-        state["tailored_cv_pdf_path"] = None
-        state["current_step"] = BusinessState.FAILED
+        logger.info(f"Retry PDF generated for job {job_id}: {result['tailored_cv_pdf_path']}")
 
     return state
 
@@ -316,7 +213,7 @@ async def update_db_node(state: RetryWorkflowState, config: dict | None = None) 
         final_status = BusinessState.PENDING_REVIEW  # Back to HITL queue
 
     try:
-        repo = _get_repository_from_config(config or {})
+        repo = get_repository_from_config(config or {})
 
         cv_json = state.get("tailored_cv_json")
         pdf_path = state.get("tailored_cv_pdf_path")
@@ -357,32 +254,3 @@ async def update_db_node(state: RetryWorkflowState, config: dict | None = None) 
     return state
 
 
-# =============================================================================
-# Helper Functions
-# =============================================================================
-
-def _init_llm_client():
-    """Initialize LLM client based on settings."""
-    provider = LLMProvider(settings.primary_llm_provider)
-
-    # Get API key and model based on provider
-    if provider == LLMProvider.OPENAI:
-        api_key = settings.openai_api_key
-        model = settings.openai_model
-    elif provider == LLMProvider.DEEPSEEK:
-        api_key = settings.deepseek_api_key
-        model = settings.deepseek_model
-    elif provider == LLMProvider.GROK:
-        api_key = settings.grok_api_key
-        model = settings.grok_model
-    elif provider == LLMProvider.ANTHROPIC:
-        api_key = settings.anthropic_api_key
-        model = settings.anthropic_model
-    else:
-        raise ValueError(f"Unsupported LLM provider: {provider}")
-
-    if not api_key:
-        raise ValueError(f"API key not configured for provider: {provider}")
-
-    logger.info(f"Using LLM provider: {provider}, model: {model}")
-    return LLMClientFactory.create(provider, api_key, model)

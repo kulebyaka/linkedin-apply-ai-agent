@@ -121,16 +121,12 @@ def main():
     _settings_mod.get_settings = lambda: _test_settings
 
     # Apply patches BEFORE importing the app (which triggers module-level init)
+    # Both preparation and retry workflows now use create_llm_client from _shared
     p1 = patch(
-        "src.agents.preparation_workflow._init_llm_client",
-        side_effect=lambda *a, **kw: _make_mock_llm_client(),
-    )
-    p2 = patch(
-        "src.agents.retry_workflow._init_llm_client",
+        "src.agents._shared.create_llm_client",
         side_effect=lambda *a, **kw: _make_mock_llm_client(),
     )
     p1.start()
-    p2.start()
 
     import uvicorn
 

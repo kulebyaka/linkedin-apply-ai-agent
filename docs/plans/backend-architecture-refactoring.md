@@ -214,14 +214,14 @@ Addresses **Finding #9** (Code duplication across workflows). Extract shared nod
 - Modify: `src/agents/retry_workflow.py`
 - Modify: `src/agents/application_workflow.py`
 
-- [ ] Create `src/agents/_shared.py` with shared utilities extracted from the three workflow files
-- [ ] Extract `_init_llm_client(llm_provider, llm_model)` — identical in all 3 workflows — into `_shared.py` as `create_llm_client()`
-- [ ] Extract `load_master_cv()` from `preparation_workflow.py` into `_shared.py`
-- [ ] Extract the shared CV composition logic (initializing `CVComposer`, calling `compose_cv()`, handling errors) into a shared async function `compose_cv(state, repository, settings) -> dict` in `_shared.py`. Both `preparation_workflow.compose_cv_node` and `retry_workflow.compose_cv_node` should call this
-- [ ] Extract PDF generation logic (filename construction, path sanitization, `PDFGenerator` initialization) into a shared `generate_pdf(state, settings) -> dict` in `_shared.py`. Both workflows' `generate_pdf_node` should call this, with retry_workflow passing an extra version suffix
-- [ ] Remove the now-duplicated code from all three workflow files. Each node function should be a thin wrapper calling into `_shared.py`
-- [ ] Verify no behavior change by running existing tests
-- [ ] Run project test suite — must pass before task 10
+- [x] Create `src/agents/_shared.py` with shared utilities extracted from the three workflow files
+- [x] Extract `_init_llm_client(llm_provider, llm_model)` — identical in all 3 workflows — into `_shared.py` as `create_llm_client()`
+- [x] Extract `load_master_cv()` from `preparation_workflow.py` into `_shared.py`
+- [x] Extract the shared CV composition logic (initializing `CVComposer`, calling `compose_cv()`, handling errors) into a shared async function `compose_cv(state, repository, settings) -> dict` in `_shared.py`. Both `preparation_workflow.compose_cv_node` and `retry_workflow.compose_cv_node` should call this
+- [x] Extract PDF generation logic (filename construction, path sanitization, `PDFGenerator` initialization) into a shared `generate_pdf(state, settings) -> dict` in `_shared.py`. Both workflows' `generate_pdf_node` should call this, with retry_workflow passing an extra version suffix
+- [x] Remove the now-duplicated code from all three workflow files. Each node function should be a thin wrapper calling into `_shared.py`
+- [x] Verify no behavior change by running existing tests
+- [x] Run project test suite — must pass before task 10
 
 ### Task 10: Split CVComposer and fix hallucination checks
 

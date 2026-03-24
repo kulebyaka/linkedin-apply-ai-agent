@@ -25,8 +25,8 @@ from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 
 from ..models.state_machine import BusinessState, WorkflowStep
-from ..services.job_repository import JobRepository
 from ..config.settings import get_settings
+from ._shared import get_repository_from_config
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -52,18 +52,6 @@ class ApplicationWorkflowState(TypedDict):
 
     # Status
     current_step: str
-
-
-def _get_repository_from_config(config: dict) -> JobRepository:
-    """Extract repository from LangGraph config['configurable']."""
-    configurable = config.get("configurable", {})
-    repo = configurable.get("repository")
-    if repo is None:
-        raise RuntimeError(
-            "Repository not found in workflow config. "
-            "Pass it via config={'configurable': {'repository': repo}}"
-        )
-    return repo
 
 
 def create_application_workflow() -> StateGraph:
@@ -154,7 +142,7 @@ async def load_from_db_node(state: ApplicationWorkflowState, config: dict | None
     state["current_step"] = WorkflowStep.LOADING
 
     try:
-        repo = _get_repository_from_config(config or {})
+        repo = get_repository_from_config(config or {})
 
         # Load job record
         job_record = await repo.get(job_id)
@@ -297,7 +285,7 @@ async def update_db_node(state: ApplicationWorkflowState, config: dict | None = 
         job_status = BusinessState.FAILED
 
     try:
-        repo = _get_repository_from_config(config or {})
+        repo = get_repository_from_config(config or {})
 
         # Build update dict
         updates = {
