@@ -235,10 +235,21 @@ class HITLProcessor:
                     job_id, {"status": BusinessState.PENDING_REVIEW}
                 )
             except Exception:
-                logger.warning(
-                    "Failed to rollback job %s to pending_review after retry dispatch failure",
+                # Rollback to pending failed; try marking as failed so the job
+                # isn't stuck in RETRYING with no workflow running.
+                logger.error(
+                    "Failed to rollback job %s to pending_review, attempting FAILED",
                     job_id,
                 )
+                try:
+                    await self._ctx.repository.update(
+                        job_id, {"status": BusinessState.FAILED}
+                    )
+                except Exception:
+                    logger.error(
+                        "Job %s is stuck in RETRYING — both rollback and fail transition failed",
+                        job_id,
+                    )
             raise
 
         return HITLDecisionResponse(
