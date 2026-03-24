@@ -17,6 +17,7 @@ Interface Methods:
 - Specialized: find_by_application_url(), cleanup()
 """
 
+import asyncio
 import json
 import logging
 from abc import ABC, abstractmethod
@@ -280,6 +281,7 @@ class InMemoryJobRepository(JobRepository):
         """Initialize empty in-memory storage."""
         self._jobs: dict[str, JobRecord] = {}
         self._initialized: bool = False
+        self._lock: asyncio.Lock = asyncio.Lock()
 
     # =========================================================================
     # Lifecycle Methods
@@ -310,10 +312,11 @@ class InMemoryJobRepository(JobRepository):
         Raises:
             RepositoryError: If job_id already exists.
         """
-        if job.job_id in self._jobs:
-            raise RepositoryError(f"Job already exists: {job.job_id}", job.job_id)
-        self._jobs[job.job_id] = job
-        return job.job_id
+        async with self._lock:
+            if job.job_id in self._jobs:
+                raise RepositoryError(f"Job already exists: {job.job_id}", job.job_id)
+            self._jobs[job.job_id] = job
+            return job.job_id
 
     async def get(self, job_id: str) -> Optional[JobRecord]:
         """Get a job record by ID.
@@ -337,17 +340,18 @@ class InMemoryJobRepository(JobRepository):
             RepositoryError: If job not found.
             ValueError: If updates contain invalid field names.
         """
-        if job_id not in self._jobs:
-            raise RepositoryError(f"Job not found: {job_id}", job_id)
+        async with self._lock:
+            if job_id not in self._jobs:
+                raise RepositoryError(f"Job not found: {job_id}", job_id)
 
-        # Validate update fields
-        invalid_fields = set(updates.keys()) - UPDATABLE_FIELDS
-        if invalid_fields:
-            raise ValueError(f"Invalid update fields: {invalid_fields}")
+            # Validate update fields
+            invalid_fields = set(updates.keys()) - UPDATABLE_FIELDS
+            if invalid_fields:
+                raise ValueError(f"Invalid update fields: {invalid_fields}")
 
-        # Auto-set updated_at
-        updates["updated_at"] = datetime.now(tz=timezone.utc)
-        self._jobs[job_id] = self._jobs[job_id].model_copy(update=updates)
+            # Auto-set updated_at
+            updates["updated_at"] = datetime.now(tz=timezone.utc)
+            self._jobs[job_id] = self._jobs[job_id].model_copy(update=updates)
 
     async def delete(self, job_id: str) -> bool:
         """Delete a job record.
@@ -358,10 +362,11 @@ class InMemoryJobRepository(JobRepository):
         Returns:
             True if deleted, False if not found.
         """
-        if job_id in self._jobs:
-            del self._jobs[job_id]
-            return True
-        return False
+        async with self._lock:
+            if job_id in self._jobs:
+                del self._jobs[job_id]
+                return True
+            return False
 
     # =========================================================================
     # Query Methods
@@ -481,16 +486,17 @@ class InMemoryJobRepository(JobRepository):
             raise ValueError("statuses list cannot be empty")
 
         cutoff_date = datetime.now(tz=timezone.utc) - timedelta(days=older_than_days)
-        to_delete = [
-            job_id
-            for job_id, job in self._jobs.items()
-            if job.status in statuses and job.created_at < cutoff_date
-        ]
+        async with self._lock:
+            to_delete = [
+                job_id
+                for job_id, job in self._jobs.items()
+                if job.status in statuses and job.created_at < cutoff_date
+            ]
 
-        for job_id in to_delete:
-            del self._jobs[job_id]
+            for job_id in to_delete:
+                del self._jobs[job_id]
 
-        return len(to_delete)
+            return len(to_delete)
 
 
 class SQLiteJobRepository(JobRepository):

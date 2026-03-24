@@ -98,11 +98,11 @@ Addresses **Finding #3** (Race conditions on shared mutable state). Fix the InMe
 - Modify: `src/services/job_repository.py` (InMemoryJobRepository)
 - Modify: `src/api/main.py` (tracking state — if not already removed in Task 1)
 
-- [ ] Add an `asyncio.Lock` to `InMemoryJobRepository`. Wrap `create()`, `update()`, `delete()` in `async with self._lock:` to prevent TOCTOU race conditions on the `_jobs` dict
-- [ ] Ensure `SQLiteJobRepository.update()` uses a single atomic query (verify Piccolo ORM handles this — it should since it's a single UPDATE statement)
-- [ ] If any shared tracking dicts remain after Task 1 (e.g., for in-progress workflow tracking), protect them with `asyncio.Lock` or migrate tracking into the repository itself
-- [ ] Write tests: test concurrent `update()` calls on `InMemoryJobRepository` using `asyncio.gather()` to verify no lost updates
-- [ ] Run project test suite — must pass before task 4
+- [x] Add an `asyncio.Lock` to `InMemoryJobRepository`. Wrap `create()`, `update()`, `delete()` in `async with self._lock:` to prevent TOCTOU race conditions on the `_jobs` dict
+- [x] Ensure `SQLiteJobRepository.update()` uses a single atomic query (verify Piccolo ORM handles this — it should since it's a single UPDATE statement)
+- [x] If any shared tracking dicts remain after Task 1 (e.g., for in-progress workflow tracking), protect them with `asyncio.Lock` or migrate tracking into the repository itself
+- [x] Write tests: test concurrent `update()` calls on `InMemoryJobRepository` using `asyncio.gather()` to verify no lost updates
+- [x] Run project test suite — must pass before task 4
 
 ### Task 4: Remove NotImplementedError swallowing
 
