@@ -132,13 +132,13 @@ Addresses **Finding #5** (115 lines of business logic in API). Create `JobOrches
 - Create: `tests/unit/test_job_orchestrator.py`
 - Create: `tests/unit/test_hitl_processor.py`
 
-- [ ] Create `src/services/job_orchestrator.py` with class `JobOrchestrator(repository, prep_workflow, settings)`. Move job submission logic from `api/main.py:submit_job` endpoint into `orchestrator.submit_job(request) -> JobSubmitResponse`. Move status query logic (including the dual-source-of-truth resolution) into `orchestrator.get_status(job_id) -> JobStatusResponse`. Move workflow dispatch into `orchestrator.trigger_workflow(job_id, state, config)`
-- [ ] Create `src/services/hitl_processor.py` with class `HITLProcessor(repository, retry_workflow)`. Move the 115 lines from `api/main.py:submit_hitl_decision` into `processor.process_decision(job_id, decision) -> HITLDecisionResponse`. Move pending retrieval from `api/main.py:get_hitl_pending` into `processor.get_pending() -> list[PendingApproval]`. Move history retrieval into `processor.get_history() -> list[ApplicationHistoryItem]`
-- [ ] Add both services to `AppContext` dataclass (from Task 1)
-- [ ] Refactor API endpoints to be thin adapters: each endpoint extracts context, calls the appropriate service method, and returns the result. Target: no endpoint handler longer than ~20 lines
-- [ ] Write unit tests for `JobOrchestrator` with mocked repository and workflow
-- [ ] Write unit tests for `HITLProcessor` with mocked repository — test approve/decline/retry flows, test validation (retry without feedback raises error), test that declined jobs can't be re-decided
-- [ ] Run project test suite — must pass before task 6
+- [x] Create `src/services/job_orchestrator.py` with class `JobOrchestrator(repository, prep_workflow, settings)`. Move job submission logic from `api/main.py:submit_job` endpoint into `orchestrator.submit_job(request) -> JobSubmitResponse`. Move status query logic (including the dual-source-of-truth resolution) into `orchestrator.get_status(job_id) -> JobStatusResponse`. Move workflow dispatch into `orchestrator.trigger_workflow(job_id, state, config)`
+- [x] Create `src/services/hitl_processor.py` with class `HITLProcessor(repository, retry_workflow)`. Move the 115 lines from `api/main.py:submit_hitl_decision` into `processor.process_decision(job_id, decision) -> HITLDecisionResponse`. Move pending retrieval from `api/main.py:get_hitl_pending` into `processor.get_pending() -> list[PendingApproval]`. Move history retrieval into `processor.get_history() -> list[ApplicationHistoryItem]`
+- [x] Add both services to `AppContext` dataclass (from Task 1)
+- [x] Refactor API endpoints to be thin adapters: each endpoint extracts context, calls the appropriate service method, and returns the result. Target: no endpoint handler longer than ~20 lines
+- [x] Write unit tests for `JobOrchestrator` with mocked repository and workflow
+- [x] Write unit tests for `HITLProcessor` with mocked repository — test approve/decline/retry flows, test validation (retry without feedback raises error), test that declined jobs can't be re-decided
+- [x] Run project test suite — must pass before task 6
 
 ### Task 6: Split JobRecord and add CV composition history
 

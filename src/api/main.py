@@ -35,8 +35,9 @@ from src.models.unified import (
     JobSubmitResponse,
     PendingApproval,
 )
+from src.services.hitl_processor import HITLProcessor
+from src.services.job_orchestrator import JobOrchestrator
 from src.services.job_queue import process_queue
-from src.services.job_repository import RepositoryError
 from src.utils.logger import setup_api_logger
 
 settings = get_settings()
@@ -427,26 +428,18 @@ async def download_cv(job_id: str, request: Request):
 # =============================================================================
 
 
-async def run_preparation_workflow_async(job_id: str, thread_id: str, initial_state: dict, ctx: AppContext):
-    """Execute Preparation Workflow asynchronously."""
-    try:
-        config = {"configurable": {"thread_id": thread_id, "repository": ctx.repository}}
-        result = await ctx.prep_workflow.ainvoke(initial_state, config)
-        logger.info(
-            f"Preparation workflow for job {job_id} completed: {result.get('current_step')}"
-        )
-    except Exception as e:
-        logger.error(f"Preparation workflow for job {job_id} failed: {e}", exc_info=True)
+def _get_orchestrator(request: Request) -> JobOrchestrator:
+    """Helper to retrieve JobOrchestrator from request."""
+    ctx = _get_ctx(request)
+    assert ctx.orchestrator is not None, "JobOrchestrator not initialized"
+    return ctx.orchestrator
 
 
-async def run_retry_workflow_async(job_id: str, thread_id: str, initial_state: dict, ctx: AppContext):
-    """Execute Retry Workflow asynchronously."""
-    try:
-        config = {"configurable": {"thread_id": thread_id, "repository": ctx.repository}}
-        result = await ctx.retry_workflow.ainvoke(initial_state, config)
-        logger.info(f"Retry workflow for job {job_id} completed: {result.get('current_step')}")
-    except Exception as e:
-        logger.error(f"Retry workflow for job {job_id} failed: {e}", exc_info=True)
+def _get_hitl(request: Request) -> HITLProcessor:
+    """Helper to retrieve HITLProcessor from request."""
+    ctx = _get_ctx(request)
+    assert ctx.hitl_processor is not None, "HITLProcessor not initialized"
+    return ctx.hitl_processor
 
 
 @app.options("/api/jobs/submit")
@@ -459,98 +452,12 @@ async def submit_job_options():
 async def submit_job(
     job_request: JobSubmitRequest, http_request: Request
 ) -> JobSubmitResponse:
-    """
-    Submit a job for CV generation.
-
-    Supports:
-    - URL source: Provide job posting URL (lever.co, greenhouse.io, etc.)
-    - Manual source: Provide job description directly
-
-    Modes:
-    - mvp: Generate CV PDF only (ready for download when complete)
-    - full: Generate CV PDF + queue for HITL review + apply
-    """
+    """Submit a job for CV generation."""
     try:
-        ctx = _get_ctx(http_request)
-
-        # Generate unique IDs
-        job_id = str(uuid.uuid4())
-        thread_id = str(uuid.uuid4())
-
-        # Validate request
-        if job_request.source == "url" and not job_request.url:
-            raise HTTPException(400, "URL is required for source='url'")
-        if job_request.source == "manual" and not job_request.job_description:
-            raise HTTPException(400, "job_description is required for source='manual'")
-
-        # Build raw_input based on source
-        if job_request.source == "url":
-            raw_input = {"url": job_request.url}
-            # If job_description provided, use it as fallback data
-            if job_request.job_description:
-                raw_input.update(
-                    {
-                        "title": job_request.job_description.title,
-                        "company": job_request.job_description.company,
-                        "description": job_request.job_description.description,
-                        "requirements": job_request.job_description.requirements,
-                    }
-                )
-        else:  # manual
-            raw_input = {
-                "title": job_request.job_description.title,
-                "company": job_request.job_description.company,
-                "description": job_request.job_description.description,
-                "requirements": job_request.job_description.requirements,
-                "template_name": job_request.job_description.template_name,
-                "llm_provider": job_request.job_description.llm_provider,
-                "llm_model": job_request.job_description.llm_model,
-            }
-            logger.info(
-                f"API received template_name: {job_request.job_description.template_name}, llm_provider: {job_request.job_description.llm_provider}, llm_model: {job_request.job_description.llm_model}"
-            )
-
-        # Load master CV
-        from src.agents.preparation_workflow import load_master_cv
-
-        master_cv = load_master_cv()
-
-        # Build initial state
-        initial_state = {
-            "job_id": job_id,
-            "source": job_request.source,
-            "mode": job_request.mode,
-            "raw_input": raw_input,
-            "master_cv": master_cv,
-            "current_step": "queued",
-            "retry_count": 0,
-            "user_feedback": None,
-            "error_message": None,
-        }
-
-        # Track thread
-        await ctx.register_workflow(job_id, thread_id, "preparation")
-
-        # Run workflow in background
-        asyncio.create_task(
-            run_preparation_workflow_async(
-                job_id=job_id,
-                thread_id=thread_id,
-                initial_state=initial_state,
-                ctx=ctx,
-            )
-        )
-
-        logger.info(f"Job {job_id} submitted: source={job_request.source}, mode={job_request.mode}")
-
-        return JobSubmitResponse(
-            job_id=job_id,
-            status="queued",
-            message=f"Job submitted successfully. Mode: {job_request.mode}",
-        )
-
-    except HTTPException:
-        raise
+        orchestrator = _get_orchestrator(http_request)
+        return await orchestrator.submit_job(job_request)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from None
     except Exception as e:
         logger.error(f"Failed to submit job: {e}", exc_info=True)
         raise HTTPException(500, "Failed to submit job") from None
@@ -683,72 +590,12 @@ async def replay_fixtures(request: Request, limit: Annotated[int, Query(ge=0)] =
 
 @app.get("/api/jobs/{job_id}/status", response_model=JobStatusResponse)
 async def get_job_status(job_id: str, request: Request) -> JobStatusResponse:
-    """
-    Get status of a submitted job.
-
-    Poll this endpoint every 2-3 seconds until status is 'completed', 'pending', or 'failed'.
-    - completed: Ready for download (MVP mode)
-    - pending: Awaiting HITL review (Full mode)
-    - failed: Job failed with error
-    """
+    """Get status of a submitted job."""
     try:
-        ctx = _get_ctx(request)
-
-        # Check repository first — it has authoritative state for completed jobs
-        # (LangGraph in-memory checkpoints can be stale after server reload)
-        try:
-            job_record = await ctx.repository.get(job_id)
-            if job_record:
-                return JobStatusResponse(
-                    job_id=job_id,
-                    status=job_record.status,
-                    source=job_record.source,
-                    mode=job_record.mode,
-                    job_posting=job_record.job_posting,
-                    cv_json=job_record.cv_json,
-                    pdf_path=job_record.pdf_path,
-                    retry_count=job_record.retry_count,
-                    error_message=job_record.error_message,
-                    created_at=job_record.created_at,
-                    updated_at=job_record.updated_at,
-                )
-        except Exception:
-            pass
-
-        # Fall back to workflow threads (for in-progress jobs not yet saved)
-        thread_info = await ctx.get_workflow_thread(job_id)
-        if thread_info is not None:
-            thread_id = thread_info["thread_id"]
-            config = {"configurable": {"thread_id": thread_id}}
-
-            # Get state from appropriate workflow
-            if thread_info["workflow_type"] == "preparation":
-                state_snapshot = ctx.prep_workflow.get_state(config)
-            elif thread_info["workflow_type"] == "retry":
-                state_snapshot = ctx.retry_workflow.get_state(config)
-            else:
-                raise HTTPException(500, f"Unknown workflow type: {thread_info['workflow_type']}")
-
-            state_values = state_snapshot.values
-
-            return JobStatusResponse(
-                job_id=job_id,
-                status=state_values.get("current_step", "queued"),
-                source=state_values.get("source"),
-                mode=state_values.get("mode"),
-                job_posting=state_values.get("job_posting"),
-                cv_json=state_values.get("tailored_cv_json"),
-                pdf_path=state_values.get("tailored_cv_pdf_path"),
-                retry_count=state_values.get("retry_count", 0),
-                error_message=state_values.get("error_message"),
-                created_at=thread_info["created_at"],
-                updated_at=datetime.now(tz=timezone.utc),
-            )
-
-        raise HTTPException(404, f"Job {job_id} not found")
-
-    except HTTPException:
-        raise
+        orchestrator = _get_orchestrator(request)
+        return await orchestrator.get_status(job_id)
+    except KeyError:
+        raise HTTPException(404, f"Job {job_id} not found") from None
     except Exception as e:
         logger.error(f"Failed to get status for job {job_id}: {e}", exc_info=True)
         raise HTTPException(500, "Failed to get job status") from None
@@ -857,68 +704,10 @@ async def get_job_cv_html(job_id: str, request: Request) -> HTMLResponse:
 
 @app.get("/api/hitl/pending", response_model=list[PendingApproval])
 async def get_hitl_pending(request: Request) -> list[PendingApproval]:
-    """
-    Get all jobs pending HITL review.
-
-    Returns list of jobs with status='pending' for batch review.
-    Frontend can display these in a Tinder-like UI for approve/decline/retry.
-    """
+    """Get all jobs pending HITL review."""
     try:
-        ctx = _get_ctx(request)
-
-        # Get pending jobs from repository
-        pending_jobs = await ctx.repository.get_pending()
-
-        return [
-            PendingApproval(
-                job_id=job.job_id,
-                job_posting=job.job_posting or {},
-                cv_json=job.cv_json or {},
-                pdf_path=job.pdf_path,
-                retry_count=job.retry_count,
-                created_at=job.created_at,
-                source=job.source,
-                application_url=job.application_url or (job.job_posting or {}).get("url"),
-            )
-            for job in pending_jobs
-        ]
-
-    except NotImplementedError:
-        # Repository not implemented - return jobs from in-memory tracking
-        logger.warning("Repository not implemented, scanning workflow states for pending jobs")
-        ctx = _get_ctx(request)
-        pending = []
-
-        all_threads = await ctx.get_all_workflow_threads()
-        for job_id, thread_info in all_threads.items():
-            if thread_info["workflow_type"] != "preparation":
-                continue
-
-            thread_id = thread_info["thread_id"]
-            config = {"configurable": {"thread_id": thread_id}}
-
-            try:
-                state_snapshot = ctx.prep_workflow.get_state(config)
-                state_values = state_snapshot.values
-
-                if state_values.get("current_step") == "pending":
-                    pending.append(
-                        PendingApproval(
-                            job_id=job_id,
-                            job_posting=state_values.get("job_posting", {}),
-                            cv_json=state_values.get("tailored_cv_json", {}),
-                            pdf_path=state_values.get("tailored_cv_pdf_path"),
-                            retry_count=state_values.get("retry_count", 0),
-                            created_at=thread_info["created_at"],
-                            source=state_values.get("source", "manual"),
-                            application_url=state_values.get("job_posting", {}).get("url"),
-                        )
-                    )
-            except Exception as e:
-                logger.warning(f"Failed to get state for job {job_id}: {e}")
-
-        return pending
-
+        hitl = _get_hitl(request)
+        return await hitl.get_pending()
     except Exception as e:
         logger.error(f"Failed to get pending jobs: {e}", exc_info=True)
         raise HTTPException(500, "Failed to get pending jobs") from None
@@ -928,114 +717,16 @@ async def get_hitl_pending(request: Request) -> list[PendingApproval]:
 async def submit_hitl_decision(
     job_id: str, decision: HITLDecision, request: Request
 ) -> HITLDecisionResponse:
-    """
-    Submit HITL decision for a pending job.
-
-    Decisions:
-    - approved: Queue job for application (triggers Application Workflow)
-    - declined: Mark job as declined (no further action)
-    - retry: Regenerate CV with feedback (triggers Retry Workflow)
-
-    For retry, feedback is required.
-    """
+    """Submit HITL decision for a pending job."""
     try:
-        ctx = _get_ctx(request)
-
-        # Validate retry has feedback
-        if decision.decision == "retry" and not decision.feedback:
-            raise HTTPException(400, "Feedback is required for retry decision")
-
-        # Get current job state from repository (authoritative source)
-        job_record = await ctx.repository.get(job_id)
-        if job_record is None:
-            raise HTTPException(404, f"Job {job_id} not found")
-
-        if job_record.status != "pending":
-            raise HTTPException(
-                400,
-                f"Job {job_id} is not pending review (status: {job_record.status})",
-            )
-
-        if decision.decision == "approved":
-            # TODO: Trigger Application Workflow (not implemented yet)
-            # For now, just update status to "approved"
-            logger.info(f"Job {job_id} approved for application (workflow not implemented)")
-
-            # Update status in repository
-            try:
-                await ctx.repository.update(job_id, {"status": "approved"})
-            except RepositoryError as e:
-                logger.warning(f"Failed to update repository for job {job_id}: {e}")
-
-            return HITLDecisionResponse(
-                job_id=job_id,
-                status="approved",
-                message="Job approved. Application workflow not yet implemented.",
-            )
-
-        elif decision.decision == "declined":
-            logger.info(f"Job {job_id} declined by user")
-
-            # Update status in repository
-            try:
-                await ctx.repository.update(job_id, {"status": "declined"})
-            except RepositoryError as e:
-                logger.warning(f"Failed to update repository for job {job_id}: {e}")
-
-            return HITLDecisionResponse(
-                job_id=job_id,
-                status="declined",
-                message="Job declined. No further action will be taken.",
-            )
-
-        elif decision.decision == "retry":
-            logger.info(f"Job {job_id} queued for retry with user feedback")
-
-            # Update repository status to "retrying" so job leaves pending queue
-            try:
-                await ctx.repository.update(job_id, {"status": "retrying"})
-            except RepositoryError as e:
-                logger.warning(f"Failed to update repository for job {job_id}: {e}")
-
-            # Create new thread for retry workflow
-            retry_thread_id = str(uuid.uuid4())
-
-            # Build retry state from repository record (authoritative source)
-            from src.agents.preparation_workflow import load_master_cv
-            retry_state = {
-                "job_id": job_id,
-                "user_feedback": decision.feedback,
-                "job_posting": job_record.job_posting,
-                "master_cv": load_master_cv(),
-                "retry_count": job_record.retry_count,
-                "current_step": "queued",
-                "error_message": None,
-            }
-
-            # Update tracking
-            await ctx.register_workflow(job_id, retry_thread_id, "retry")
-
-            # Run retry workflow in background
-            asyncio.create_task(
-                run_retry_workflow_async(
-                    job_id=job_id,
-                    thread_id=retry_thread_id,
-                    initial_state=retry_state,
-                    ctx=ctx,
-                )
-            )
-
-            return HITLDecisionResponse(
-                job_id=job_id,
-                status="retrying",
-                message="CV regeneration started with your feedback.",
-            )
-
-        else:
-            raise HTTPException(400, f"Invalid decision: {decision.decision}")
-
-    except HTTPException:
-        raise
+        hitl = _get_hitl(request)
+        return await hitl.process_decision(job_id, decision)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from None
+    except KeyError:
+        raise HTTPException(404, f"Job {job_id} not found") from None
+    except RuntimeError as e:
+        raise HTTPException(400, str(e)) from None
     except Exception as e:
         logger.error(f"Failed to process HITL decision for job {job_id}: {e}", exc_info=True)
         raise HTTPException(500, "Failed to process decision") from None
@@ -1045,32 +736,10 @@ async def submit_hitl_decision(
 async def get_application_history(
     request: Request, limit: int = 50, status: str | None = None
 ) -> list[ApplicationHistoryItem]:
-    """
-    Get application history.
-
-    Optional filtering by status: approved, declined, applied, failed.
-    """
+    """Get application history."""
     try:
-        ctx = _get_ctx(request)
-        statuses = [status] if status else None
-        jobs = await ctx.repository.get_history(limit=limit, statuses=statuses)
-
-        return [
-            ApplicationHistoryItem(
-                job_id=job.job_id,
-                job_title=job.job_posting.get("title") if job.job_posting else None,
-                company=job.job_posting.get("company") if job.job_posting else None,
-                status=job.status,
-                applied_at=job.updated_at if job.status == "applied" else None,
-                created_at=job.created_at,
-            )
-            for job in jobs
-        ]
-
-    except NotImplementedError:
-        logger.warning("Repository not implemented, returning empty history")
-        return []
-
+        hitl = _get_hitl(request)
+        return await hitl.get_history(limit=limit, status=status)
     except Exception as e:
         logger.error(f"Failed to get application history: {e}", exc_info=True)
         raise HTTPException(500, "Failed to get history") from None

@@ -15,6 +15,8 @@ if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
 
     from src.services.browser_automation import LinkedInAutomation
+    from src.services.hitl_processor import HITLProcessor
+    from src.services.job_orchestrator import JobOrchestrator
     from src.services.job_queue import JobQueue
     from src.services.job_repository import JobRepository
     from src.services.scheduler import LinkedInSearchScheduler
@@ -39,6 +41,8 @@ class AppContext:
     job_queue: JobQueue | None = None
     scheduler: LinkedInSearchScheduler | None = None
     browser: LinkedInAutomation | None = None
+    orchestrator: JobOrchestrator | None = None
+    hitl_processor: HITLProcessor | None = None
 
     # Thread-safe tracking for in-progress workflows
     _tracking_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
@@ -81,6 +85,8 @@ def create_app_context(
     """
     from src.agents.preparation_workflow import create_preparation_workflow
     from src.agents.retry_workflow import create_retry_workflow
+    from src.services.hitl_processor import HITLProcessor
+    from src.services.job_orchestrator import JobOrchestrator
     from src.services.job_queue import JobQueue
     from src.services.job_repository import get_repository
 
@@ -96,10 +102,16 @@ def create_app_context(
     retry_workflow = create_retry_workflow()  # type: ignore[arg-type]
     job_queue = JobQueue()
 
-    return AppContext(
+    ctx = AppContext(
         repository=repository,
         settings=settings,
         prep_workflow=prep_workflow,
         retry_workflow=retry_workflow,
         job_queue=job_queue,
     )
+
+    # Wire domain services (they need the full context)
+    ctx.orchestrator = JobOrchestrator(ctx)
+    ctx.hitl_processor = HITLProcessor(ctx)
+
+    return ctx
