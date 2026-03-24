@@ -446,7 +446,12 @@ async def get_job_cv_html(job_id: str, request: Request) -> HTMLResponse:
         if thread_info is not None:
             thread_id = thread_info["thread_id"]
             config = {"configurable": {"thread_id": thread_id}}
-            state = ctx.prep_workflow.get_state(config).values
+            workflow_type = thread_info.get("workflow_type", "preparation")
+            if workflow_type == "retry":
+                workflow = ctx.retry_workflow
+            else:
+                workflow = ctx.prep_workflow
+            state = workflow.get_state(config).values
             raw_input = state.get("raw_input", {})
             template_name = raw_input.get("template_name") or "compact"
 

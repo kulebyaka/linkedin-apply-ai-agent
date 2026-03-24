@@ -127,25 +127,22 @@ class JobOrchestrator:
             KeyError: If job_id not found in any source.
         """
         # Check repository first — authoritative for completed jobs
-        try:
-            job_record = await self._ctx.repository.get(job_id)
-            if job_record:
-                attempts = await self._ctx.repository.get_cv_attempts(job_id)
-                return JobStatusResponse(
-                    job_id=job_id,
-                    status=job_record.status,
-                    source=job_record.source,
-                    mode=job_record.mode,
-                    job_posting=job_record.job_posting,
-                    cv_json=job_record.current_cv_json,
-                    pdf_path=job_record.current_pdf_path,
-                    retry_count=len(attempts),
-                    error_message=job_record.error_message,
-                    created_at=job_record.created_at,
-                    updated_at=job_record.updated_at,
-                )
-        except KeyError:
-            pass
+        job_record = await self._ctx.repository.get(job_id)
+        if job_record:
+            attempts = await self._ctx.repository.get_cv_attempts(job_id)
+            return JobStatusResponse(
+                job_id=job_id,
+                status=job_record.status,
+                source=job_record.source,
+                mode=job_record.mode,
+                job_posting=job_record.job_posting,
+                cv_json=job_record.current_cv_json,
+                pdf_path=job_record.current_pdf_path,
+                retry_count=len(attempts),
+                error_message=job_record.error_message,
+                created_at=job_record.created_at,
+                updated_at=job_record.updated_at,
+            )
 
         # Fall back to workflow threads for in-progress jobs
         thread_info = await self._ctx.get_workflow_thread(job_id)
