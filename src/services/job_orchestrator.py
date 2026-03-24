@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 
 from src.models.state_machine import BusinessState
 from src.models.unified import (
+    JobRecord,
     JobStatusResponse,
     JobSubmitRequest,
     JobSubmitResponse,
@@ -195,8 +196,21 @@ class JobOrchestrator:
         except Exception as e:
             logger.error("Preparation workflow for job %s failed: %s", job_id, e, exc_info=True)
             try:
-                await self._ctx.repository.update(
-                    job_id, {"status": BusinessState.FAILED, "error_message": str(e)}
-                )
+                existing = await self._ctx.repository.get(job_id)
+                if existing:
+                    await self._ctx.repository.update(
+                        job_id, {"status": BusinessState.FAILED, "error_message": str(e)}
+                    )
+                else:
+                    # Job failed before save_to_db_node created the record
+                    source = initial_state.get("source", "url")
+                    mode = initial_state.get("mode", "mvp")
+                    await self._ctx.repository.create(JobRecord(
+                        job_id=job_id,
+                        source=source,
+                        mode=mode,
+                        status=BusinessState.FAILED,
+                        error_message=str(e),
+                    ))
             except Exception:
                 logger.warning("Failed to mark job %s as FAILED in repository", job_id)

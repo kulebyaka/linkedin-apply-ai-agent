@@ -13,6 +13,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from src.models.job import ScrapedJob
+from src.models.state_machine import BusinessState
 
 if TYPE_CHECKING:
     from src.context import AppContext
@@ -152,7 +153,7 @@ async def process_queue(
                 "tailored_cv_pdf_path": "",
                 "user_feedback": None,
                 "retry_count": 0,
-                "current_step": "queued",
+                "current_step": BusinessState.QUEUED,
                 "error_message": None,
             }
 
