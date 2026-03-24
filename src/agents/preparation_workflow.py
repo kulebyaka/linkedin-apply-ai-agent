@@ -299,7 +299,7 @@ async def generate_pdf_node(state: PreparationWorkflowState) -> PreparationWorkf
     template_name = raw_input.get("template_name") or settings.cv_template_name
     logger.info(f"Template selection - raw_input: {raw_input.get('template_name')}, using: {template_name}")
 
-    result = generate_pdf(state, job_id=job_id, template_name=template_name)
+    result = await generate_pdf(state, job_id=job_id, template_name=template_name)
 
     state["tailored_cv_pdf_path"] = result["tailored_cv_pdf_path"]
     if result["error_message"]:

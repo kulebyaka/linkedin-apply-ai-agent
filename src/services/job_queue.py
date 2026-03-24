@@ -302,9 +302,13 @@ class ConsumerManager:
                 ctx.register_workflow(job_id, thread_id, "preparation")
             )
 
+        from ..agents._shared import load_master_cv
+
         task = asyncio.create_task(
             process_queue(
                 ctx.job_queue,
+                workflow=ctx.prep_workflow,
+                master_cv_loader=load_master_cv,
                 job_repository=ctx.repository,
                 delay_between_jobs=2.0,
                 on_job_processed=self._on_job_processed or _register_linkedin_job,

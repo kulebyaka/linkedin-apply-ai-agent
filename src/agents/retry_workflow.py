@@ -177,7 +177,7 @@ async def generate_pdf_node(state: RetryWorkflowState) -> RetryWorkflowState:
     logger.info(f"Generating PDF for retry #{retry_count} of job {job_id}")
     state["current_step"] = WorkflowStep.GENERATING_PDF
 
-    result = generate_pdf(state, job_id=job_id, version_suffix=f"_v{retry_count}")
+    result = await generate_pdf(state, job_id=job_id, version_suffix=f"_v{retry_count}")
 
     state["tailored_cv_pdf_path"] = result["tailored_cv_pdf_path"]
     if result["error_message"]:

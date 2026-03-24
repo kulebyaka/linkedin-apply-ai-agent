@@ -9,6 +9,7 @@ to eliminate code duplication. Provides shared functions for:
 - PDF generation
 """
 
+import asyncio
 import json
 import logging
 import time
@@ -166,7 +167,8 @@ async def compose_cv(
             f"Composing CV for job {job_id}: "
             f"{job_posting.get('title')} at {job_posting.get('company')}"
         )
-        tailored_cv = cv_composer.compose_cv(
+        tailored_cv = await asyncio.to_thread(
+            cv_composer.compose_cv,
             master_cv=master_cv,
             job_posting=job_posting,
             user_feedback=user_feedback,
@@ -190,7 +192,7 @@ async def compose_cv(
         }
 
 
-def generate_pdf(
+async def generate_pdf(
     state: dict,
     *,
     job_id: str,
@@ -255,9 +257,10 @@ def generate_pdf(
             template_dir=settings.cv_template_dir, template_name=effective_template
         )
 
-        # Generate PDF
+        # Generate PDF (offload blocking WeasyPrint rendering to thread)
         logger.info(f"Generating PDF for job {job_id}: {output_path}")
-        pdf_path = generator.generate_pdf(
+        pdf_path = await asyncio.to_thread(
+            generator.generate_pdf,
             cv_json=cv_json,
             output_path=str(output_path),
             metadata={
