@@ -163,8 +163,8 @@ async def load_from_db_node(state: ApplicationWorkflowState, config: dict | None
 
         # Update state with loaded data
         state["application_url"] = job_record.application_url or ""
-        state["cv_json"] = job_record.cv_json or {}
-        state["pdf_path"] = job_record.pdf_path or ""
+        state["cv_json"] = job_record.current_cv_json or {}
+        state["pdf_path"] = job_record.current_pdf_path or ""
         state["job_posting"] = job_record.job_posting or {}
 
         state["current_step"] = "loaded"

@@ -86,20 +86,23 @@ class HITLProcessor:
         """
         try:
             pending_jobs = await self._ctx.repository.get_pending()
-            return [
-                PendingApproval(
-                    job_id=job.job_id,
-                    job_posting=job.job_posting or {},
-                    cv_json=job.cv_json or {},
-                    pdf_path=job.pdf_path,
-                    retry_count=job.retry_count,
-                    created_at=job.created_at,
-                    source=job.source,
-                    application_url=job.application_url
-                    or (job.job_posting or {}).get("url"),
+            result = []
+            for job in pending_jobs:
+                attempts = await self._ctx.repository.get_cv_attempts(job.job_id)
+                result.append(
+                    PendingApproval(
+                        job_id=job.job_id,
+                        job_posting=job.job_posting or {},
+                        cv_json=job.current_cv_json or {},
+                        pdf_path=job.current_pdf_path,
+                        attempt_count=len(attempts),
+                        created_at=job.created_at,
+                        source=job.source,
+                        application_url=job.application_url
+                        or (job.job_posting or {}).get("url"),
+                    )
                 )
-                for job in pending_jobs
-            ]
+            return result
         except NotImplementedError:
             logger.warning(
                 "Repository not implemented, scanning workflow states for pending jobs"
@@ -125,7 +128,6 @@ class HITLProcessor:
                     if job.job_posting
                     else None,
                     status=job.status,
-                    applied_at=job.updated_at if job.status == "applied" else None,
                     created_at=job.created_at,
                 )
                 for job in jobs
@@ -178,12 +180,16 @@ class HITLProcessor:
 
         from src.agents.preparation_workflow import load_master_cv
 
+        # Derive retry count from CV attempts
+        attempts = await self._ctx.repository.get_cv_attempts(job_id)
+        retry_count = len(attempts)
+
         retry_state = {
             "job_id": job_id,
             "user_feedback": feedback,
             "job_posting": job_record.job_posting,
             "master_cv": load_master_cv(),
-            "retry_count": job_record.retry_count,
+            "retry_count": retry_count,
             "current_step": "queued",
             "error_message": None,
         }
@@ -242,7 +248,7 @@ class HITLProcessor:
                             job_posting=state_values.get("job_posting", {}),
                             cv_json=state_values.get("tailored_cv_json", {}),
                             pdf_path=state_values.get("tailored_cv_pdf_path"),
-                            retry_count=state_values.get("retry_count", 0),
+                            attempt_count=state_values.get("retry_count", 0),
                             created_at=thread_info["created_at"],
                             source=state_values.get("source", "manual"),
                             application_url=state_values.get("job_posting", {}).get(

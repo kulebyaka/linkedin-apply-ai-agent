@@ -123,11 +123,12 @@ class TestGetStatus:
             source="manual",
             mode="mvp",
             status="completed",
-            cv_json={"name": "Test"},
-            pdf_path="/tmp/test.pdf",
+            current_cv_json={"name": "Test"},
+            current_pdf_path="/tmp/test.pdf",
         )
         repo = AsyncMock()
         repo.get = AsyncMock(return_value=job)
+        repo.get_cv_attempts = AsyncMock(return_value=[])
         ctx = _make_ctx(repository=repo)
         orchestrator = JobOrchestrator(ctx)
 

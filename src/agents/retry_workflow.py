@@ -19,6 +19,7 @@ from datetime import datetime
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 
+from ..models.cv_attempt import CVCompositionAttempt
 from ..services.cv_composer import CVComposer
 from ..services.pdf_generator import PDFGenerator
 from ..services.job_repository import JobRepository
@@ -119,7 +120,10 @@ async def load_from_db_node(state: RetryWorkflowState, config: dict | None = Non
 
         # Update state with loaded data
         state["job_posting"] = job_record.job_posting
-        state["retry_count"] = job_record.retry_count + 1
+
+        # Derive retry count from CV attempts
+        attempts = await repo.get_cv_attempts(job_id)
+        state["retry_count"] = len(attempts) + 1
 
         # Load master CV (same as original)
         from .preparation_workflow import load_master_cv
@@ -313,20 +317,32 @@ async def update_db_node(state: RetryWorkflowState, config: dict | None = None) 
     try:
         repo = _get_repository_from_config(config or {})
 
+        cv_json = state.get("tailored_cv_json")
+        pdf_path = state.get("tailored_cv_pdf_path")
+
         # Build update dict
         updates = {
             "status": final_status,
-            "cv_json": state.get("tailored_cv_json"),
-            "pdf_path": state.get("tailored_cv_pdf_path"),
-            "user_feedback": state.get("user_feedback"),
-            "retry_count": retry_count,
+            "current_cv_json": cv_json,
+            "current_pdf_path": pdf_path,
             "error_message": state.get("error_message"),
-            "updated_at": datetime.now(),
         }
 
         # Update repository
         await repo.update(job_id, updates)
         logger.info(f"Job {job_id} updated after retry: status={final_status}")
+
+        # Create CV composition attempt record if we have CV data
+        if cv_json:
+            attempt = CVCompositionAttempt(
+                job_id=job_id,
+                attempt_number=retry_count,
+                user_feedback=state.get("user_feedback"),
+                cv_json=cv_json,
+                pdf_path=pdf_path,
+            )
+            await repo.create_cv_attempt(attempt)
+            logger.info(f"CV attempt #{retry_count} saved for job {job_id}")
 
         # Update state
         state["current_step"] = final_status

@@ -66,6 +66,14 @@ class HITLDecision(BaseModel):
         None,
         description="User feedback (required if decision='retry')"
     )
+    decided_at: datetime = Field(
+        default_factory=lambda: datetime.now(tz=timezone.utc),
+        description="Timestamp of the decision"
+    )
+    reasoning: str | None = Field(
+        None,
+        description="Optional reasoning for the decision"
+    )
 
 
 class HITLDecisionResponse(BaseModel):
@@ -84,7 +92,7 @@ class PendingApproval(BaseModel):
     job_posting: dict = Field(..., description="Normalized job posting data")
     cv_json: dict = Field(..., description="Generated tailored CV as JSON")
     pdf_path: str | None = Field(None, description="Path to generated PDF file")
-    retry_count: int = Field(0, description="Number of retry attempts")
+    attempt_count: int = Field(0, description="Number of CV composition attempts")
     created_at: datetime
     source: Literal["url", "manual", "linkedin"]
     application_url: str | None = None
@@ -114,6 +122,9 @@ class JobRecord(BaseModel):
     """Job record for database persistence.
 
     This is the main data structure stored in the repository.
+    CV composition history is tracked separately via CVCompositionAttempt.
+    The current_cv_json and current_pdf_path fields are denormalized
+    quick-access copies of the latest CV attempt data.
     """
     job_id: str
     source: Literal["url", "manual", "linkedin"]
@@ -124,18 +135,12 @@ class JobRecord(BaseModel):
     job_posting: dict | None = None
     raw_input: dict | None = None  # Original URL or manual input
 
-    # CV data
-    cv_json: dict | None = None
-    pdf_path: str | None = None
+    # Denormalized quick-access to latest CV attempt
+    current_cv_json: dict | None = None
+    current_pdf_path: str | None = None
 
     # Application data
     application_url: str | None = None
-    application_type: Literal["deep_agent", "linkedin", "manual"] | None = None
-    application_result: dict | None = None
-
-    # HITL data
-    user_feedback: str | None = None
-    retry_count: int = 0
 
     # Error tracking
     error_message: str | None = None
@@ -143,7 +148,6 @@ class JobRecord(BaseModel):
     # Timestamps
     created_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
-    applied_at: datetime | None = None
 
 
 # =============================================================================
@@ -159,12 +163,10 @@ class JobStatusResponse(BaseModel):
     job_posting: dict | None = None
     cv_json: dict | None = None
     pdf_path: str | None = None
-    application_result: dict | None = None
     error_message: str | None = None
     retry_count: int = 0
     created_at: datetime
     updated_at: datetime
-    applied_at: datetime | None = None
 
 
 class ApplicationHistoryItem(BaseModel):
@@ -173,6 +175,4 @@ class ApplicationHistoryItem(BaseModel):
     job_title: str | None = None
     company: str | None = None
     status: str
-    application_type: str | None = None
-    applied_at: datetime | None = None
     created_at: datetime

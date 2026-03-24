@@ -98,13 +98,9 @@ async def test_create_with_full_data(temp_db):
         status="pending",
         job_posting={"title": "Software Engineer", "company": "TechCorp"},
         raw_input={"url": "https://example.com/job/123"},
-        cv_json={"name": "John Doe", "skills": ["Python", "FastAPI"]},
-        pdf_path="/data/generated_cvs/full-1.pdf",
+        current_cv_json={"name": "John Doe", "skills": ["Python", "FastAPI"]},
+        current_pdf_path="/data/generated_cvs/full-1.pdf",
         application_url="https://example.com/apply/123",
-        application_type="deep_agent",
-        application_result={"success": True},
-        user_feedback="Please add more Python experience",
-        retry_count=2,
         error_message=None,
     )
 
@@ -114,8 +110,7 @@ async def test_create_with_full_data(temp_db):
     retrieved = await temp_db.get("full-1")
     assert retrieved is not None
     assert retrieved.job_posting["title"] == "Software Engineer"
-    assert retrieved.cv_json["skills"] == ["Python", "FastAPI"]
-    assert retrieved.retry_count == 2
+    assert retrieved.current_cv_json["skills"] == ["Python", "FastAPI"]
 
 
 @pytest.mark.asyncio
@@ -157,14 +152,12 @@ async def test_update_multiple_fields(temp_db):
 
     await temp_db.update("test-3", {
         "status": "applied",
-        "pdf_path": "/data/cv.pdf",
-        "retry_count": 3,
+        "current_pdf_path": "/data/cv.pdf",
     })
 
     updated = await temp_db.get("test-3")
     assert updated.status == "applied"
-    assert updated.pdf_path == "/data/cv.pdf"
-    assert updated.retry_count == 3
+    assert updated.current_pdf_path == "/data/cv.pdf"
 
 
 @pytest.mark.asyncio

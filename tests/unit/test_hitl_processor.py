@@ -33,8 +33,8 @@ def _make_pending_job(job_id: str = "job-1") -> JobRecord:
         mode="full",
         status="pending",
         job_posting={"title": "Engineer", "company": "Acme"},
-        cv_json={"name": "Test CV"},
-        pdf_path="/tmp/test.pdf",
+        current_cv_json={"name": "Test CV"},
+        current_pdf_path="/tmp/test.pdf",
     )
 
 
@@ -75,6 +75,7 @@ class TestProcessDecision:
         job = _make_pending_job()
         repo = AsyncMock()
         repo.get = AsyncMock(return_value=job)
+        repo.get_cv_attempts = AsyncMock(return_value=[])
         ctx = _make_ctx(repository=repo)
         processor = HITLProcessor(ctx)
 
@@ -133,6 +134,7 @@ class TestGetPending:
         jobs = [_make_pending_job("job-1"), _make_pending_job("job-2")]
         repo = AsyncMock()
         repo.get_pending = AsyncMock(return_value=jobs)
+        repo.get_cv_attempts = AsyncMock(return_value=[])
         ctx = _make_ctx(repository=repo)
         processor = HITLProcessor(ctx)
 
@@ -142,6 +144,7 @@ class TestGetPending:
         assert result[0].job_id == "job-1"
         assert result[1].job_id == "job-2"
         assert result[0].job_posting == {"title": "Engineer", "company": "Acme"}
+        assert result[0].attempt_count == 0
 
     async def test_returns_empty_list(self):
         repo = AsyncMock()

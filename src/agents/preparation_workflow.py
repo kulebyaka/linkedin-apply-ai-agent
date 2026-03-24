@@ -22,6 +22,7 @@ from langgraph.graph import END, StateGraph
 
 from ..config.settings import get_settings
 from ..llm.provider import LLMClientFactory, LLMProvider
+from ..models.cv_attempt import CVCompositionAttempt
 from ..models.unified import JobRecord
 from ..services.cv_composer import CVComposer
 from ..services.job_fixtures import get_cached_llm_response, save_llm_response
@@ -432,6 +433,9 @@ async def save_to_db_node(state: PreparationWorkflowState, config: dict | None =
         final_status = "pending"  # Awaiting HITL review
 
     try:
+        cv_json = state.get("tailored_cv_json")
+        pdf_path = state.get("tailored_cv_pdf_path")
+
         # Build job record
         job_record = JobRecord(
             job_id=job_id,
@@ -440,11 +444,9 @@ async def save_to_db_node(state: PreparationWorkflowState, config: dict | None =
             status=final_status,
             job_posting=state.get("job_posting"),
             raw_input=state.get("raw_input"),
-            cv_json=state.get("tailored_cv_json"),
-            pdf_path=state.get("tailored_cv_pdf_path"),
+            current_cv_json=cv_json,
+            current_pdf_path=pdf_path,
             application_url=state.get("job_posting", {}).get("url"),
-            user_feedback=state.get("user_feedback"),
-            retry_count=state.get("retry_count", 0),
             error_message=state.get("error_message"),
             created_at=datetime.now(),
             updated_at=datetime.now(),
@@ -454,6 +456,18 @@ async def save_to_db_node(state: PreparationWorkflowState, config: dict | None =
         repo = _get_repository_from_config(config or {})
         await repo.create(job_record)
         logger.info(f"Job {job_id} saved to repository with status: {final_status}")
+
+        # Create CV composition attempt record if we have CV data
+        if cv_json:
+            attempt = CVCompositionAttempt(
+                job_id=job_id,
+                attempt_number=1,
+                user_feedback=state.get("user_feedback"),
+                cv_json=cv_json,
+                pdf_path=pdf_path,
+            )
+            await repo.create_cv_attempt(attempt)
+            logger.info(f"CV attempt #1 saved for job {job_id}")
 
         # Update state
         state["current_step"] = final_status

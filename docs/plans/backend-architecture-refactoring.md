@@ -153,16 +153,16 @@ Addresses **Finding #6** (God-object JobRecord). Split `JobRecord` into focused 
 - Modify: `src/agents/preparation_workflow.py`
 - Modify: `src/agents/retry_workflow.py`
 
-- [ ] Refactor `JobRecord` in `unified.py`: remove CV-specific fields (`cv_json`, `pdf_path`, `user_feedback`, `retry_count`) and application fields (`application_url`, `application_type`, `application_result`, `applied_at`). Keep: `job_id`, `source`, `mode`, `status`, `workflow_step`, `job_posting`, `raw_input`, `created_at`, `updated_at`, `error_message`. Add `current_cv_json: dict | None` and `current_pdf_path: str | None` as denormalized quick-access fields
-- [ ] Create `src/models/cv_attempt.py` with `CVCompositionAttempt(BaseModel)`: `job_id: str`, `attempt_number: int`, `user_feedback: str | None`, `cv_json: dict`, `pdf_path: str | None`, `created_at: datetime`
-- [ ] Enrich `HITLDecision` in `unified.py`: add `decided_at: datetime = Field(default_factory=datetime.utcnow)` and `reasoning: str | None = None`
-- [ ] Add `create_cv_attempt()`, `get_cv_attempts(job_id)`, and `get_latest_cv_attempt(job_id)` methods to the `JobRepository` abstract class
-- [ ] Implement the new methods in `InMemoryJobRepository` (using a `_cv_attempts: dict[str, list[CVCompositionAttempt]]`)
-- [ ] Implement the new methods in `SQLiteJobRepository` (new Piccolo table `CVAttempt`)
-- [ ] Update `preparation_workflow.py:save_to_db_node` and `retry_workflow.py:update_db_node` to create a `CVCompositionAttempt` record alongside updating `JobRecord`
-- [ ] Update `HITLProcessor` and `JobOrchestrator` to use the new model structure
-- [ ] Update existing tests and add tests for the new repository methods
-- [ ] Run project test suite — must pass before task 7
+- [x] Refactor `JobRecord` in `unified.py`: remove CV-specific fields (`cv_json`, `pdf_path`, `user_feedback`, `retry_count`) and application fields (`application_url`, `application_type`, `application_result`, `applied_at`). Keep: `job_id`, `source`, `mode`, `status`, `workflow_step`, `job_posting`, `raw_input`, `created_at`, `updated_at`, `error_message`. Add `current_cv_json: dict | None` and `current_pdf_path: str | None` as denormalized quick-access fields
+- [x] Create `src/models/cv_attempt.py` with `CVCompositionAttempt(BaseModel)`: `job_id: str`, `attempt_number: int`, `user_feedback: str | None`, `cv_json: dict`, `pdf_path: str | None`, `created_at: datetime`
+- [x] Enrich `HITLDecision` in `unified.py`: add `decided_at: datetime = Field(default_factory=datetime.utcnow)` and `reasoning: str | None = None`
+- [x] Add `create_cv_attempt()`, `get_cv_attempts(job_id)`, and `get_latest_cv_attempt(job_id)` methods to the `JobRepository` abstract class
+- [x] Implement the new methods in `InMemoryJobRepository` (using a `_cv_attempts: dict[str, list[CVCompositionAttempt]]`)
+- [x] Implement the new methods in `SQLiteJobRepository` (new Piccolo table `CVAttempt`)
+- [x] Update `preparation_workflow.py:save_to_db_node` and `retry_workflow.py:update_db_node` to create a `CVCompositionAttempt` record alongside updating `JobRecord`
+- [x] Update `HITLProcessor` and `JobOrchestrator` to use the new model structure
+- [x] Update existing tests and add tests for the new repository methods
+- [x] Run project test suite — must pass before task 7
 
 ### Task 7: Define job lifecycle state machine
 

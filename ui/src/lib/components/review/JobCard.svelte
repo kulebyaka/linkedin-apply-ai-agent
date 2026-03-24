@@ -45,7 +45,7 @@
 		</span>
 		<span class="h-1 w-1 bg-[var(--color-muted-foreground)]"></span>
 		<span class="font-mono text-xs uppercase tracking-wider text-[var(--color-muted-foreground)]">
-			Retry: {job.retry_count}
+			Attempts: {job.attempt_count}
 		</span>
 		<span class="h-1 w-1 bg-[var(--color-muted-foreground)]"></span>
 		<span class="font-mono text-xs uppercase tracking-wider text-[var(--color-muted-foreground)]">

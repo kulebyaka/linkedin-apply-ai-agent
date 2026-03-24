@@ -40,7 +40,7 @@ class TestInMemoryLockProtection:
         results = []
 
         async def update_status(i: int):
-            await repo.update("job-1", {"retry_count": i})
+            await repo.update("job-1", {"error_message": f"attempt-{i}"})
             results.append(i)
 
         await asyncio.gather(*[update_status(i) for i in range(50)])
@@ -48,8 +48,8 @@ class TestInMemoryLockProtection:
         assert len(results) == 50
         job = await repo.get("job-1")
         assert job is not None
-        # retry_count should be one of the values we set
-        assert job.retry_count in range(50)
+        # error_message should be one of the values we set
+        assert job.error_message.startswith("attempt-")
 
     async def test_concurrent_create_duplicate_rejected(self):
         """Concurrent creates with same ID: exactly one succeeds."""

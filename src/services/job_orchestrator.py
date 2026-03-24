@@ -130,15 +130,16 @@ class JobOrchestrator:
         try:
             job_record = await self._ctx.repository.get(job_id)
             if job_record:
+                attempts = await self._ctx.repository.get_cv_attempts(job_id)
                 return JobStatusResponse(
                     job_id=job_id,
                     status=job_record.status,
                     source=job_record.source,
                     mode=job_record.mode,
                     job_posting=job_record.job_posting,
-                    cv_json=job_record.cv_json,
-                    pdf_path=job_record.pdf_path,
-                    retry_count=job_record.retry_count,
+                    cv_json=job_record.current_cv_json,
+                    pdf_path=job_record.current_pdf_path,
+                    retry_count=len(attempts),
                     error_message=job_record.error_message,
                     created_at=job_record.created_at,
                     updated_at=job_record.updated_at,
