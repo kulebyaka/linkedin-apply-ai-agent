@@ -183,37 +183,21 @@ async def extract_job_node(state: PreparationWorkflowState) -> PreparationWorkfl
             state["current_step"] = "job_extracted"
             logger.info(f"Manual job data processed for {job_id}")
         else:
-            # URL and LinkedIn extraction - currently raises NotImplementedError
-            # In the future, this will use async extraction
-            # For now, we catch the NotImplementedError and provide a stub response
-            try:
-                job_posting = await adapter.extract(raw_input)
-                state["job_posting"] = job_posting
-                state["current_step"] = "job_extracted"
-            except NotImplementedError:
-                # Stub: For URL source, try to use raw_input directly if it has required fields
-                if source == "url" and "url" in raw_input:
-                    logger.warning(f"URL extraction not implemented, using stub for {job_id}")
-                    state["job_posting"] = {
-                        "id": job_id,
-                        "title": raw_input.get("title", "Position"),
-                        "company": raw_input.get("company", "Company"),
-                        "description": raw_input.get("description", ""),
-                        "requirements": raw_input.get("requirements"),
-                        "location": "Remote",
-                        "url": raw_input.get("url", ""),
-                        "is_remote": True,
-                    }
-                    state["current_step"] = "job_extracted"
-                    state["error_message"] = (
-                        "Note: URL extraction pending implementation. Using provided data."
-                    )
-                else:
-                    raise
+            # URL and LinkedIn extraction
+            job_posting = await adapter.extract(raw_input)
+            state["job_posting"] = job_posting
+            state["current_step"] = "job_extracted"
 
     except JobExtractionError as e:
         logger.error(f"Job extraction failed for {job_id}: {e}")
         state["error_message"] = f"Job extraction failed: {e.message}"
+        state["current_step"] = "failed"
+    except NotImplementedError as e:
+        logger.error(f"Job extraction not implemented for source '{source}': {e}")
+        state["error_message"] = (
+            f"Job extraction for source '{source}' is not yet implemented. "
+            f"Use source='manual' instead."
+        )
         state["current_step"] = "failed"
     except Exception as e:
         logger.error(f"Job extraction failed for {job_id}: {e}", exc_info=True)
@@ -468,12 +452,8 @@ async def save_to_db_node(state: PreparationWorkflowState, config: dict | None =
 
         # Save to repository
         repo = _get_repository_from_config(config or {})
-        try:
-            await repo.create(job_record)
-            logger.info(f"Job {job_id} saved to repository with status: {final_status}")
-        except NotImplementedError:
-            # Repository not implemented yet - log and continue
-            logger.warning(f"Repository not implemented, job {job_id} not persisted")
+        await repo.create(job_record)
+        logger.info(f"Job {job_id} saved to repository with status: {final_status}")
 
         # Update state
         state["current_step"] = final_status

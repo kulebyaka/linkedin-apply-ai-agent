@@ -113,13 +113,13 @@ Addresses **Finding #4** (Silent stub failures). Replace `except NotImplementedE
 - Modify: `src/agents/retry_workflow.py`
 - Modify: `src/agents/application_workflow.py`
 
-- [ ] In `preparation_workflow.py:extract_job_node`: remove the `except NotImplementedError` block (lines ~193-222) that fabricates stub data with `title="Position"`. Instead, let `NotImplementedError` propagate. The node's outer try/except for general `Exception` at the end will catch it and set `error_message` + `current_step="failed"` properly
-- [ ] In `preparation_workflow.py:save_to_db_node`: remove the `except NotImplementedError` block (lines ~483-488) that silently drops repo.create(). If the repository doesn't support `create()`, this is a fatal configuration error — let it raise
-- [ ] Apply the same pattern to `retry_workflow.py`: remove `except NotImplementedError` in `load_from_db_node` (lines ~122-135) and `update_db_node` (lines ~349-353). These should fail with clear errors, not silently proceed with stale state
-- [ ] Apply the same pattern to `application_workflow.py`: remove `except NotImplementedError` in `load_from_db_node` and `update_db_node`
-- [ ] Add specific, descriptive error messages when `NotImplementedError` is the root cause (e.g., `"URL job extraction is not yet implemented. Use source='manual' instead."`)
-- [ ] Update tests that relied on stub fallback behavior
-- [ ] Run project test suite — must pass before task 5
+- [x] In `preparation_workflow.py:extract_job_node`: remove the `except NotImplementedError` block (lines ~193-222) that fabricates stub data with `title="Position"`. Instead, let `NotImplementedError` propagate. The node's outer try/except for general `Exception` at the end will catch it and set `error_message` + `current_step="failed"` properly
+- [x] In `preparation_workflow.py:save_to_db_node`: remove the `except NotImplementedError` block (lines ~483-488) that silently drops repo.create(). If the repository doesn't support `create()`, this is a fatal configuration error — let it raise
+- [x] Apply the same pattern to `retry_workflow.py`: remove `except NotImplementedError` in `load_from_db_node` (lines ~122-135) and `update_db_node` (lines ~349-353). These should fail with clear errors, not silently proceed with stale state
+- [x] Apply the same pattern to `application_workflow.py`: remove `except NotImplementedError` in `load_from_db_node` and `update_db_node`
+- [x] Add specific, descriptive error messages when `NotImplementedError` is the root cause (e.g., `"URL job extraction is not yet implemented. Use source='manual' instead."`)
+- [x] Update tests that relied on stub fallback behavior
+- [x] Run project test suite — must pass before task 5
 
 ### Task 5: Extract domain services from API handlers
 

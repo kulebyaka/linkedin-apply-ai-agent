@@ -112,19 +112,7 @@ async def load_from_db_node(state: RetryWorkflowState, config: dict | None = Non
         repo = _get_repository_from_config(config or {})
 
         # Load job record
-        try:
-            job_record = await repo.get(job_id)
-        except NotImplementedError:
-            # Repository not implemented - use stub data
-            logger.warning(f"Repository not implemented, using stub for retry {job_id}")
-            # For development, we'll need to pass data through state
-            if not state.get("job_posting") or not state.get("master_cv"):
-                raise ValueError(
-                    "Repository not implemented and job_posting/master_cv not in state. "
-                    "Pass these in the initial state for retry."
-                )
-            state["current_step"] = "loaded"
-            return state
+        job_record = await repo.get(job_id)
 
         if not job_record:
             raise ValueError(f"Job {job_id} not found in repository")
@@ -337,11 +325,8 @@ async def update_db_node(state: RetryWorkflowState, config: dict | None = None) 
         }
 
         # Update repository
-        try:
-            await repo.update(job_id, updates)
-            logger.info(f"Job {job_id} updated after retry: status={final_status}")
-        except NotImplementedError:
-            logger.warning(f"Repository not implemented, job {job_id} not updated")
+        await repo.update(job_id, updates)
+        logger.info(f"Job {job_id} updated after retry: status={final_status}")
 
         # Update state
         state["current_step"] = final_status

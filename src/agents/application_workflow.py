@@ -156,13 +156,7 @@ async def load_from_db_node(state: ApplicationWorkflowState, config: dict | None
         repo = _get_repository_from_config(config or {})
 
         # Load job record
-        try:
-            job_record = await repo.get(job_id)
-        except NotImplementedError:
-            logger.warning(f"Repository not implemented for job {job_id}")
-            state["error_message"] = "Repository not implemented"
-            state["current_step"] = "failed"
-            return state
+        job_record = await repo.get(job_id)
 
         if not job_record:
             raise ValueError(f"Job {job_id} not found in repository")
@@ -312,11 +306,8 @@ async def update_db_node(state: ApplicationWorkflowState, config: dict | None = 
         }
 
         # Update repository
-        try:
-            await repo.update(job_id, updates)
-            logger.info(f"Job {job_id} updated after application: status={job_status}")
-        except NotImplementedError:
-            logger.warning(f"Repository not implemented, job {job_id} not updated")
+        await repo.update(job_id, updates)
+        logger.info(f"Job {job_id} updated after application: status={job_status}")
 
         # Update state
         state["current_step"] = job_status
