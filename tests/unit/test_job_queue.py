@@ -233,7 +233,7 @@ class TestProcessQueue:
         cv_loader = lambda: {"contact": {"full_name": "Test"}}
 
         count = await process_queue(
-            q, workflow=wf, master_cv_loader=cv_loader, delay_between_jobs=0, stop_event=stop
+            q, workflow=wf, master_cv_loader=cv_loader, job_repository=AsyncMock(get=AsyncMock(return_value=None)), delay_between_jobs=0, stop_event=stop
         )
 
         assert count == 2
@@ -266,7 +266,7 @@ class TestProcessQueue:
         cv_loader = lambda: {"contact": {"full_name": "Test"}}
 
         count = await process_queue(
-            q, workflow=wf, master_cv_loader=cv_loader, delay_between_jobs=0, stop_event=stop
+            q, workflow=wf, master_cv_loader=cv_loader, job_repository=AsyncMock(get=AsyncMock(return_value=None)), delay_between_jobs=0, stop_event=stop
         )
 
         assert count == 1
@@ -281,7 +281,7 @@ class TestProcessQueue:
         cv_loader = lambda: {}
 
         count = await process_queue(
-            q, workflow=wf, master_cv_loader=cv_loader, delay_between_jobs=0, stop_event=stop
+            q, workflow=wf, master_cv_loader=cv_loader, job_repository=AsyncMock(get=AsyncMock(return_value=None)), delay_between_jobs=0, stop_event=stop
         )
 
         assert count == 0
@@ -298,7 +298,7 @@ class TestProcessQueue:
         cv_loader = lambda: master
 
         await process_queue(
-            q, workflow=wf, master_cv_loader=cv_loader, delay_between_jobs=0, stop_event=stop
+            q, workflow=wf, master_cv_loader=cv_loader, job_repository=AsyncMock(get=AsyncMock(return_value=None)), delay_between_jobs=0, stop_event=stop
         )
 
         state = wf.ainvoke.call_args[0][0]

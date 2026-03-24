@@ -8,6 +8,7 @@ Extracted from api/main.py to keep API handlers thin. Handles:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from typing import TYPE_CHECKING
@@ -33,15 +34,41 @@ class HITLProcessor:
     - Validating and applying HITL decisions (approve/decline/retry)
     - Querying pending jobs for review
     - Querying application history
+
+    Uses per-job locks to prevent concurrent decisions on the same job
+    (e.g., two retry requests racing past the PENDING_REVIEW check).
     """
 
     def __init__(self, ctx: AppContext) -> None:
         self._ctx = ctx
+        self._job_locks: dict[str, asyncio.Lock] = {}
+        self._locks_lock = asyncio.Lock()
+
+    async def _get_job_lock(self, job_id: str) -> asyncio.Lock:
+        """Get or create a per-job lock for serializing decisions.
+
+        Callers must verify the job exists before calling this method
+        to prevent unbounded lock growth from nonexistent job IDs.
+
+        Locks are retained for the lifetime of this processor instance.
+        The number of locks is bounded by the number of jobs in the
+        repository. Eager cleanup was removed because asyncio.Lock.release()
+        schedules waiters rather than running them synchronously, creating
+        a window where a released-but-not-yet-reacquired lock appears
+        unlocked and gets deleted, allowing concurrent decisions on the
+        same job.
+        """
+        async with self._locks_lock:
+            if job_id not in self._job_locks:
+                self._job_locks[job_id] = asyncio.Lock()
+            return self._job_locks[job_id]
 
     async def process_decision(
         self, job_id: str, decision: HITLDecision
     ) -> HITLDecisionResponse:
         """Process a HITL decision for a pending job.
+
+        Uses a per-job lock to prevent concurrent decisions on the same job.
 
         Args:
             job_id: The job to decide on.
@@ -55,28 +82,37 @@ class HITLProcessor:
             KeyError: If job not found.
             RuntimeError: If job is not in pending status.
         """
-        # Validate retry has feedback
+        # Validate retry has feedback (before acquiring lock)
         if decision.decision == "retry" and not decision.feedback:
             raise ValueError("Feedback is required for retry decision")
 
-        # Get current job state from repository
+        # Check job exists before creating a per-job lock to prevent
+        # unbounded lock growth from requests with nonexistent job IDs.
         job_record = await self._ctx.repository.get(job_id)
         if job_record is None:
             raise KeyError(f"Job {job_id} not found")
 
-        if job_record.status != BusinessState.PENDING_REVIEW:
-            raise RuntimeError(
-                f"Job {job_id} is not pending review (status: {job_record.status})"
-            )
+        # Serialize decisions per job to prevent race conditions
+        lock = await self._get_job_lock(job_id)
+        async with lock:
+            # Re-read under lock to ensure consistent state
+            job_record = await self._ctx.repository.get(job_id)
+            if job_record is None:
+                raise KeyError(f"Job {job_id} not found")
 
-        if decision.decision == "approved":
-            return await self._handle_approve(job_id)
-        elif decision.decision == "declined":
-            return await self._handle_decline(job_id)
-        elif decision.decision == "retry":
-            return await self._handle_retry(job_id, job_record, decision.feedback)
-        else:
-            raise ValueError(f"Invalid decision: {decision.decision}")
+            if job_record.status != BusinessState.PENDING_REVIEW:
+                raise RuntimeError(
+                    f"Job {job_id} is not pending review (status: {job_record.status})"
+                )
+
+            if decision.decision == "approved":
+                return await self._handle_approve(job_id)
+            elif decision.decision == "declined":
+                return await self._handle_decline(job_id)
+            elif decision.decision == "retry":
+                return await self._handle_retry(job_id, job_record, decision.feedback)
+            else:
+                raise ValueError(f"Invalid decision: {decision.decision}")
 
     async def get_pending(self) -> list[PendingApproval]:
         """Get all jobs pending HITL review.
@@ -164,29 +200,46 @@ class HITLProcessor:
 
         await self._ctx.repository.update(job_id, {"status": BusinessState.RETRYING})
 
-        retry_thread_id = str(uuid.uuid4())
+        try:
+            retry_thread_id = str(uuid.uuid4())
 
-        from src.agents._shared import load_master_cv
+            from src.agents._shared import load_master_cv
 
-        # Derive retry count from CV attempts
-        attempts = await self._ctx.repository.get_cv_attempts(job_id)
-        retry_count = len(attempts)
+            # Derive retry count from CV attempts
+            attempts = await self._ctx.repository.get_cv_attempts(job_id)
+            retry_count = len(attempts)
 
-        retry_state = {
-            "job_id": job_id,
-            "user_feedback": feedback,
-            "job_posting": job_record.job_posting,
-            "master_cv": load_master_cv(),
-            "retry_count": retry_count,
-            "current_step": BusinessState.QUEUED,
-            "error_message": None,
-        }
+            retry_state = {
+                "job_id": job_id,
+                "user_feedback": feedback,
+                "job_posting": job_record.job_posting,
+                "master_cv": load_master_cv(),
+                "retry_count": retry_count,
+                "current_step": BusinessState.QUEUED,
+                "error_message": None,
+            }
 
-        await self._ctx.register_workflow(job_id, retry_thread_id, "retry")
+            await self._ctx.register_workflow(job_id, retry_thread_id, "retry")
 
-        self._ctx.create_background_task(
-            self._run_retry_workflow(job_id, retry_thread_id, retry_state)
-        )
+            self._ctx.create_background_task(
+                self._run_retry_workflow(job_id, retry_thread_id, retry_state)
+            )
+        except Exception as e:
+            # Rollback status to pending_review so the job isn't stuck in retrying
+            logger.error(
+                "Failed to dispatch retry workflow for job %s, rolling back to pending: %s",
+                job_id, e, exc_info=True,
+            )
+            try:
+                await self._ctx.repository.update(
+                    job_id, {"status": BusinessState.PENDING_REVIEW}
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to rollback job %s to pending_review after retry dispatch failure",
+                    job_id,
+                )
+            raise
 
         return HITLDecisionResponse(
             job_id=job_id,

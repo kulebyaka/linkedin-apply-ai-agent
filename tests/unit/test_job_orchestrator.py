@@ -192,4 +192,4 @@ class TestGetStatus:
 
         status = await orchestrator.get_status("job-3")
         assert status.status == "composing_cv"
-        assert status.retry_count == 1
+        assert status.attempt_count == 1

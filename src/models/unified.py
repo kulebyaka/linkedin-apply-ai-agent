@@ -160,7 +160,7 @@ class JobStatusResponse(BaseModel):
     cv_json: dict | None = None
     pdf_path: str | None = None
     error_message: str | None = None
-    retry_count: int = 0
+    attempt_count: int = 0
     created_at: datetime
     updated_at: datetime
 

@@ -626,6 +626,10 @@ class SQLiteJobRepository(JobRepository):
         try:
             await Job.create_table(if_not_exists=True).run()
             await CVAttemptTable.create_table(if_not_exists=True).run()
+
+            # Migrate legacy schema: rename cv_json -> current_cv_json, pdf_path -> current_pdf_path
+            await self._migrate_legacy_columns()
+
             logger.info(f"SQLite repository initialized at {self.db_path}")
             self._initialized = True
         except Exception as e:
@@ -644,6 +648,35 @@ class SQLiteJobRepository(JobRepository):
         """Ensure repository is initialized before operations."""
         if not self._initialized:
             raise RepositoryError("Repository not initialized. Call initialize() first.")
+
+    async def _migrate_legacy_columns(self) -> None:
+        """Migrate legacy schema columns if upgrading from an older database.
+
+        Renames cv_json -> current_cv_json and pdf_path -> current_pdf_path
+        in the job table if the old columns exist.
+
+        Raises:
+            RepositoryError: If migration detection or execution fails.
+        """
+        conn = await self._engine.get_connection()
+        try:
+            cursor = await conn.execute("PRAGMA table_info(job)")
+            rows = await cursor.fetchall()
+            column_names = {row["name"] for row in rows}
+
+            if "cv_json" in column_names and "current_cv_json" not in column_names:
+                logger.info("Migrating legacy column: cv_json -> current_cv_json")
+                await conn.execute(
+                    "ALTER TABLE job RENAME COLUMN cv_json TO current_cv_json"
+                )
+
+            if "pdf_path" in column_names and "current_pdf_path" not in column_names:
+                logger.info("Migrating legacy column: pdf_path -> current_pdf_path")
+                await conn.execute(
+                    "ALTER TABLE job RENAME COLUMN pdf_path TO current_pdf_path"
+                )
+        finally:
+            await conn.close()
 
     # =========================================================================
     # Conversion Helpers

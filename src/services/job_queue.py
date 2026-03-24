@@ -75,7 +75,7 @@ async def process_queue(
     *,
     workflow: Any | None = None,
     master_cv_loader: Any | None = None,
-    job_repository: Any | None = None,
+    job_repository: Any,
     delay_between_jobs: float = 2.0,
     stop_event: asyncio.Event | None = None,
     on_job_processed: Any | None = None,
@@ -92,8 +92,8 @@ async def process_queue(
     master_cv_loader:
         Callable returning a master-CV dict. Defaults to ``load_master_cv``.
     job_repository:
-        Optional repository for cross-cycle dedup. If provided, jobs that already
-        exist in the repository are skipped.
+        Repository for job persistence and cross-cycle dedup. Required because
+        workflow nodes depend on it for state persistence.
     delay_between_jobs:
         Seconds to wait between successive workflow runs (avoids LLM rate-limits).
     stop_event:
@@ -105,6 +105,10 @@ async def process_queue(
     int
         Number of jobs successfully processed.
     """
+    if job_repository is None:
+        raise ValueError(
+            "job_repository is required: workflow nodes depend on it for state persistence"
+        )
     if workflow is None or master_cv_loader is None:
         from ..agents._shared import load_master_cv
         from ..agents.preparation_workflow import create_preparation_workflow
