@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from src.models.job import ScrapedJob
-from src.services.job_queue import JobQueue, get_job_queue, set_job_queue, process_queue
+from src.services.job_queue import JobQueue, process_queue
 from src.services.job_source import LinkedInJobAdapter
 
 pytestmark = pytest.mark.asyncio
@@ -77,24 +77,6 @@ class TestJobQueueBatch:
         count = await q.put_batch([])
         assert count == 0
         assert q.is_empty()
-
-
-class TestJobQueueSingleton:
-    """Test module-level singleton accessors."""
-
-    def test_get_creates_default(self):
-        set_job_queue(None)  # type: ignore[arg-type]
-        # Reset by directly manipulating the module global
-        import src.services.job_queue as mod
-
-        mod._job_queue = None
-        q = get_job_queue()
-        assert isinstance(q, JobQueue)
-
-    def test_set_and_get(self):
-        custom = JobQueue(max_size=5)
-        set_job_queue(custom)
-        assert get_job_queue() is custom
 
 
 # ---------------------------------------------------------------------------

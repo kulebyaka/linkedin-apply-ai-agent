@@ -25,7 +25,7 @@ from ..llm.provider import LLMClientFactory, LLMProvider
 from ..models.unified import JobRecord
 from ..services.cv_composer import CVComposer
 from ..services.job_fixtures import get_cached_llm_response, save_llm_response
-from ..services.job_repository import InMemoryJobRepository, JobRepository
+from ..services.job_repository import JobRepository
 from ..services.job_source import JobExtractionError, JobSourceFactory
 from ..services.pdf_generator import PDFGenerator
 
@@ -57,34 +57,26 @@ class PreparationWorkflowState(TypedDict):
     error_message: str | None
 
 
-# Global repository instance (will be injected in production)
-_repository: JobRepository | None = None
-
-
-def set_repository(repo: JobRepository) -> None:
-    """Set the repository instance for the workflow.
+def _get_repository_from_config(config: dict) -> JobRepository:
+    """Extract repository from LangGraph config['configurable'].
 
     Args:
-        repo: JobRepository instance to use for persistence.
-    """
-    global _repository
-    _repository = repo
-
-
-def get_repository() -> JobRepository:
-    """Get the current repository instance.
+        config: LangGraph RunnableConfig dict.
 
     Returns:
         JobRepository instance.
 
     Raises:
-        RuntimeError: If repository not configured.
+        RuntimeError: If repository not found in config.
     """
-    global _repository
-    if _repository is None:
-        # Default to in-memory for development
-        _repository = InMemoryJobRepository()
-    return _repository
+    configurable = config.get("configurable", {})
+    repo = configurable.get("repository")
+    if repo is None:
+        raise RuntimeError(
+            "Repository not found in workflow config. "
+            "Pass it via config={'configurable': {'repository': repo}}"
+        )
+    return repo
 
 
 def create_preparation_workflow() -> StateGraph:
@@ -431,7 +423,7 @@ def generate_pdf_node(state: PreparationWorkflowState) -> PreparationWorkflowSta
     return state
 
 
-def save_to_db_node(state: PreparationWorkflowState) -> PreparationWorkflowState:
+def save_to_db_node(state: PreparationWorkflowState, config: dict | None = None) -> PreparationWorkflowState:
     """Save job record to repository.
 
     Sets status based on mode:
@@ -477,7 +469,7 @@ def save_to_db_node(state: PreparationWorkflowState) -> PreparationWorkflowState
         )
 
         # Save to repository
-        repo = get_repository()
+        repo = _get_repository_from_config(config or {})
         try:
             import asyncio
 

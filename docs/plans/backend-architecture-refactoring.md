@@ -60,15 +60,15 @@ Addresses **Finding #1** (Global State Antipattern). Replace 9+ module-level glo
 - Modify: `src/services/job_queue.py`
 - Create: `tests/unit/test_context.py`
 
-- [ ] Create `src/context.py` with a frozen `AppContext` dataclass holding: `repository: JobRepository`, `settings: Settings`, `prep_workflow: CompiledStateGraph`, `retry_workflow: CompiledStateGraph`, `job_queue: JobQueue | None`, `scheduler: LinkedInSearchScheduler | None`, `browser: LinkedInAutomation | None`. Add a `create_app_context()` factory function that builds and returns a fully initialized `AppContext`
-- [ ] Remove `_repository` global, `set_repository()`, and `get_repository()` from `preparation_workflow.py`. Instead, accept `repository` as a parameter in each node function via LangGraph's `config["configurable"]` dict. Update `create_preparation_workflow()` to not depend on module globals
-- [ ] Apply the same removal of `_repository` global, `set_repository()`, `get_repo()` from `retry_workflow.py` and `application_workflow.py`. Remove the circular import where `retry_workflow` imports `get_repository` from `preparation_workflow`
-- [ ] Remove `_job_queue` global, `get_job_queue()`, `set_job_queue()` from `job_queue.py`. The queue is now held by `AppContext`
-- [ ] Refactor `api/main.py`: remove all module-level globals (`preparation_workflow`, `retry_workflow`, `job_repository`, `workflow_threads`, `workflow_created_at`, `unified_threads`, `_linkedin_scheduler`, `_linkedin_browser`, `_queue_consumer_task`, `_linkedin_init_lock`, `_consumer_restart_count`, etc.). Replace with FastAPI lifespan that creates `AppContext` and stores it in `app.state.ctx`. Each endpoint retrieves context via `request.app.state.ctx`
-- [ ] Replace `workflow_threads` and `unified_threads` plain dicts with a single thread-safe tracking structure (e.g., use `asyncio.Lock` around a dict, or store tracking info in the repository instead)
-- [ ] Write unit tests in `tests/unit/test_context.py`: test `AppContext` creation, test that `create_app_context()` returns a properly wired context, test that all fields are accessible
-- [ ] Update existing tests that use `set_repository()` or mock module globals to use the new DI pattern
-- [ ] Run project test suite — must pass before task 2
+- [x] Create `src/context.py` with a frozen `AppContext` dataclass holding: `repository: JobRepository`, `settings: Settings`, `prep_workflow: CompiledStateGraph`, `retry_workflow: CompiledStateGraph`, `job_queue: JobQueue | None`, `scheduler: LinkedInSearchScheduler | None`, `browser: LinkedInAutomation | None`. Add a `create_app_context()` factory function that builds and returns a fully initialized `AppContext`
+- [x] Remove `_repository` global, `set_repository()`, and `get_repository()` from `preparation_workflow.py`. Instead, accept `repository` as a parameter in each node function via LangGraph's `config["configurable"]` dict. Update `create_preparation_workflow()` to not depend on module globals
+- [x] Apply the same removal of `_repository` global, `set_repository()`, `get_repo()` from `retry_workflow.py` and `application_workflow.py`. Remove the circular import where `retry_workflow` imports `get_repository` from `preparation_workflow`
+- [x] Remove `_job_queue` global, `get_job_queue()`, `set_job_queue()` from `job_queue.py`. The queue is now held by `AppContext`
+- [x] Refactor `api/main.py`: remove all module-level globals (`preparation_workflow`, `retry_workflow`, `job_repository`, `workflow_threads`, `workflow_created_at`, `unified_threads`, `_linkedin_scheduler`, `_linkedin_browser`, `_queue_consumer_task`, `_linkedin_init_lock`, `_consumer_restart_count`, etc.). Replace with FastAPI lifespan that creates `AppContext` and stores it in `app.state.ctx`. Each endpoint retrieves context via `request.app.state.ctx`
+- [x] Replace `workflow_threads` and `unified_threads` plain dicts with a single thread-safe tracking structure (e.g., use `asyncio.Lock` around a dict, or store tracking info in the repository instead)
+- [x] Write unit tests in `tests/unit/test_context.py`: test `AppContext` creation, test that `create_app_context()` returns a properly wired context, test that all fields are accessible
+- [x] Update existing tests that use `set_repository()` or mock module globals to use the new DI pattern
+- [x] Run project test suite — must pass before task 2
 
 ### Task 2: Make workflow nodes async-native
 

@@ -55,27 +55,6 @@ class JobQueue:
 
 
 # ---------------------------------------------------------------------------
-# Module-level singleton
-# ---------------------------------------------------------------------------
-
-_job_queue: JobQueue | None = None
-
-
-def get_job_queue() -> JobQueue:
-    """Return the global JobQueue singleton, creating it if needed."""
-    global _job_queue
-    if _job_queue is None:
-        _job_queue = JobQueue()
-    return _job_queue
-
-
-def set_job_queue(queue: JobQueue) -> None:
-    """Replace the global JobQueue singleton (useful for testing)."""
-    global _job_queue
-    _job_queue = queue
-
-
-# ---------------------------------------------------------------------------
 # Queue consumer — pulls jobs and runs the preparation workflow
 # ---------------------------------------------------------------------------
 

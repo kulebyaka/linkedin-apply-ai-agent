@@ -21,7 +21,7 @@ from langgraph.checkpoint.memory import MemorySaver
 
 from ..services.cv_composer import CVComposer
 from ..services.pdf_generator import PDFGenerator
-from ..services.job_repository import JobRepository, get_repository
+from ..services.job_repository import JobRepository
 from ..llm.provider import LLMClientFactory, LLMProvider
 from ..config.settings import get_settings
 
@@ -50,23 +50,16 @@ class RetryWorkflowState(TypedDict):
     error_message: str | None
 
 
-# Reference to repository (shared with preparation workflow)
-_repository: JobRepository | None = None
-
-
-def set_repository(repo: JobRepository) -> None:
-    """Set the repository instance."""
-    global _repository
-    _repository = repo
-
-
-def get_repo() -> JobRepository:
-    """Get repository instance."""
-    global _repository
-    if _repository is None:
-        from .preparation_workflow import get_repository as get_prep_repo
-        _repository = get_prep_repo()
-    return _repository
+def _get_repository_from_config(config: dict) -> JobRepository:
+    """Extract repository from LangGraph config['configurable']."""
+    configurable = config.get("configurable", {})
+    repo = configurable.get("repository")
+    if repo is None:
+        raise RuntimeError(
+            "Repository not found in workflow config. "
+            "Pass it via config={'configurable': {'repository': repo}}"
+        )
+    return repo
 
 
 def create_retry_workflow() -> StateGraph:
@@ -102,7 +95,7 @@ def create_retry_workflow() -> StateGraph:
 # Workflow Nodes
 # =============================================================================
 
-def load_from_db_node(state: RetryWorkflowState) -> RetryWorkflowState:
+def load_from_db_node(state: RetryWorkflowState, config: dict | None = None) -> RetryWorkflowState:
     """Load existing job data from repository.
 
     Args:
@@ -116,7 +109,7 @@ def load_from_db_node(state: RetryWorkflowState) -> RetryWorkflowState:
     state["current_step"] = "loading"
 
     try:
-        repo = get_repo()
+        repo = _get_repository_from_config(config or {})
 
         # Load job record
         import asyncio
@@ -308,7 +301,7 @@ def generate_pdf_node(state: RetryWorkflowState) -> RetryWorkflowState:
     return state
 
 
-def update_db_node(state: RetryWorkflowState) -> RetryWorkflowState:
+def update_db_node(state: RetryWorkflowState, config: dict | None = None) -> RetryWorkflowState:
     """Update job record in repository after retry.
 
     Sets status back to "pending" so it appears in HITL queue again.
@@ -331,7 +324,7 @@ def update_db_node(state: RetryWorkflowState) -> RetryWorkflowState:
         final_status = "pending"  # Back to HITL queue
 
     try:
-        repo = get_repo()
+        repo = _get_repository_from_config(config or {})
 
         # Build update dict
         updates = {

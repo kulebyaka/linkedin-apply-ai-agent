@@ -24,7 +24,7 @@ from datetime import datetime
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 
-from ..services.job_repository import JobRepository, get_repository
+from ..services.job_repository import JobRepository
 from ..config.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -53,22 +53,16 @@ class ApplicationWorkflowState(TypedDict):
     current_step: str
 
 
-# Reference to repository (shared with other workflows)
-_repository: JobRepository | None = None
-
-
-def set_repository(repo: JobRepository) -> None:
-    """Set the repository instance."""
-    global _repository
-    _repository = repo
-
-
-def get_repo() -> JobRepository:
-    """Get repository instance."""
-    global _repository
-    if _repository is None:
-        _repository = get_repository()
-    return _repository
+def _get_repository_from_config(config: dict) -> JobRepository:
+    """Extract repository from LangGraph config['configurable']."""
+    configurable = config.get("configurable", {})
+    repo = configurable.get("repository")
+    if repo is None:
+        raise RuntimeError(
+            "Repository not found in workflow config. "
+            "Pass it via config={'configurable': {'repository': repo}}"
+        )
+    return repo
 
 
 def create_application_workflow() -> StateGraph:
@@ -143,7 +137,7 @@ def route_by_application_type(state: ApplicationWorkflowState) -> str:
 # Workflow Nodes
 # =============================================================================
 
-def load_from_db_node(state: ApplicationWorkflowState) -> ApplicationWorkflowState:
+def load_from_db_node(state: ApplicationWorkflowState, config: dict | None = None) -> ApplicationWorkflowState:
     """Load job data from repository.
 
     IMPLEMENTATION STATUS: Stub.
@@ -159,7 +153,7 @@ def load_from_db_node(state: ApplicationWorkflowState) -> ApplicationWorkflowSta
     state["current_step"] = "loading"
 
     try:
-        repo = get_repo()
+        repo = _get_repository_from_config(config or {})
 
         # Load job record
         import asyncio
@@ -286,7 +280,7 @@ def apply_manual_node(state: ApplicationWorkflowState) -> ApplicationWorkflowSta
     return state
 
 
-def update_db_node(state: ApplicationWorkflowState) -> ApplicationWorkflowState:
+def update_db_node(state: ApplicationWorkflowState, config: dict | None = None) -> ApplicationWorkflowState:
     """Update job record in repository after application attempt.
 
     Args:
@@ -309,7 +303,7 @@ def update_db_node(state: ApplicationWorkflowState) -> ApplicationWorkflowState:
         job_status = "failed"
 
     try:
-        repo = get_repo()
+        repo = _get_repository_from_config(config or {})
 
         # Build update dict
         updates = {
