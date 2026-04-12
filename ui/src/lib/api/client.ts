@@ -37,6 +37,7 @@ export async function submitJob(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(requestBody),
+    credentials: "include",
   });
 
   if (!response.ok) {
@@ -48,7 +49,9 @@ export async function submitJob(
 }
 
 export async function getJobStatus(jobId: string): Promise<JobStatusResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/jobs/${jobId}/status`);
+  const response = await fetch(`${API_BASE_URL}/api/jobs/${jobId}/status`, {
+    credentials: "include",
+  });
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -59,7 +62,9 @@ export async function getJobStatus(jobId: string): Promise<JobStatusResponse> {
 }
 
 export async function downloadPDF(jobId: string): Promise<Blob> {
-  const response = await fetch(`${API_BASE_URL}/api/jobs/${jobId}/pdf`);
+  const response = await fetch(`${API_BASE_URL}/api/jobs/${jobId}/pdf`, {
+    credentials: "include",
+  });
 
   if (!response.ok) {
     const errorText = await response.text();

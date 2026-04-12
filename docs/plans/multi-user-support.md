@@ -166,15 +166,15 @@ Add login page, magic link callback, auth state management, and protected route 
 - Modify: `ui/src/routes/+layout.svelte`
 - Modify: `ui/src/routes/+layout.ts`
 
-- [ ] Create `ui/src/lib/stores/auth.svelte.ts`: auth state store with `user` (User | null), `loading` (boolean), `isAuthenticated` (derived). Methods: `checkAuth()` (calls GET /api/auth/me, updates user or sets null), `logout()` (calls POST /api/auth/logout, clears user)
-- [ ] Create `ui/src/lib/api/auth.ts`: `requestMagicLink(email: string)`, `verifyToken(token: string)`, `getCurrentUser()`, `logout()`. All calls use `credentials: 'include'`
-- [ ] Update `ui/src/lib/api/client.ts` and `ui/src/lib/api/hitl.ts`: add `credentials: 'include'` to all `fetch()` calls so the httpOnly cookie is sent
-- [ ] Change `ui/src/routes/+layout.ts`: set `prerender = false` (needed for dynamic auth state). Keep `ssr = false`
-- [ ] Create `ui/src/routes/login/+page.svelte`: email input form, submit calls `requestMagicLink()`, shows "Check your email" confirmation. Minimal styling matching existing design system (Tailwind, monospace, border-heavy aesthetic)
-- [ ] Create `ui/src/routes/auth/verify/+page.svelte`: reads `token` from URL query params on mount, calls `verifyToken()`, on success redirects to `/`, on failure shows error with link back to `/login`
-- [ ] Update `ui/src/routes/+layout.svelte`: on mount call `auth.checkAuth()`. If not authenticated and not on `/login` or `/auth/verify`, redirect to `/login`. Add user display name + logout button to nav bar (only when authenticated). Add "Settings" nav link
-- [ ] Test manually: full magic link flow (request → email → click → redirect → authenticated session). Test 401 redirect to login. Test logout clears session
-- [ ] Run `cd ui && npm run check` (svelte-check) — must pass before task 6
+- [x] Create `ui/src/lib/stores/auth.svelte.ts`: auth state store with `user` (User | null), `loading` (boolean), `isAuthenticated` (derived). Methods: `checkAuth()` (calls GET /api/auth/me, updates user or sets null), `logout()` (calls POST /api/auth/logout, clears user)
+- [x] Create `ui/src/lib/api/auth.ts`: `requestMagicLink(email: string)`, `verifyToken(token: string)`, `getCurrentUser()`, `logout()`. All calls use `credentials: 'include'`
+- [x] Update `ui/src/lib/api/client.ts` and `ui/src/lib/api/hitl.ts`: add `credentials: 'include'` to all `fetch()` calls so the httpOnly cookie is sent
+- [x] Change `ui/src/routes/+layout.ts`: set `prerender = false` (needed for dynamic auth state). Keep `ssr = false`
+- [x] Create `ui/src/routes/login/+page.svelte`: email input form, submit calls `requestMagicLink()`, shows "Check your email" confirmation. Minimal styling matching existing design system (Tailwind, monospace, border-heavy aesthetic)
+- [x] Create `ui/src/routes/auth/verify/+page.svelte`: reads `token` from URL query params on mount, calls `verifyToken()`, on success redirects to `/`, on failure shows error with link back to `/login`
+- [x] Update `ui/src/routes/+layout.svelte`: on mount call `auth.checkAuth()`. If not authenticated and not on `/login` or `/auth/verify`, redirect to `/login`. Add user display name + logout button to nav bar (only when authenticated). Add "Settings" nav link
+- [x] Test manually: full magic link flow (request → email → click → redirect → authenticated session). Test 401 redirect to login. Test logout clears session
+- [x] Run `cd ui && npm run check` (svelte-check) — must pass before task 6
 
 ### Task 6: Settings UI page
 
