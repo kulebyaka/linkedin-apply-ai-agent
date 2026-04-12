@@ -187,13 +187,13 @@ Build the /settings page with profile editing, master CV upload (JSON), and Link
 - Create: `ui/src/lib/components/settings/CVUploadSection.svelte`
 - Create: `ui/src/lib/components/settings/SearchPreferencesSection.svelte`
 
-- [ ] Create `ui/src/lib/api/settings.ts`: `updateProfile(data)`, `updateCV(cvJson)`, `getSearchPreferences()`, `updateSearchPreferences(prefs)`. All use `credentials: 'include'`
-- [ ] Create `ui/src/lib/components/settings/ProfileSection.svelte`: display name edit field with save button. Shows current email (read-only)
-- [ ] Create `ui/src/lib/components/settings/CVUploadSection.svelte`: textarea for pasting master CV JSON with syntax validation (try JSON.parse on input), file upload button for `.json` files, save button. Show validation status (valid/invalid JSON). Display current CV summary (name from contact section, number of experiences/skills) if CV exists
-- [ ] Create `ui/src/lib/components/settings/SearchPreferencesSection.svelte`: form fields for all `LinkedInSearchParams` values: keywords (text input), location (text input), remote filter (select: on-site/remote/hybrid/any), date posted (select: 24h/week/month/any), experience level (multi-select checkboxes: internship/entry/associate/mid-senior/director/executive), job type (multi-select checkboxes: full-time/part-time/contract/temporary/internship/volunteer), easy apply only (toggle), max jobs per search (number input, default 50). Save button
-- [ ] Create `ui/src/routes/settings/+page.svelte`: page layout with three sections (Profile, Master CV, Search Preferences) using the components above. Load current user data on mount via `GET /api/auth/me` and `GET /api/users/me/search-preferences`. Follow the existing design system
-- [ ] Test manually: upload a master CV JSON, configure search preferences, verify data persists across page reloads
-- [ ] Run `cd ui && npm run check` — must pass before task 7
+- [x] Create `ui/src/lib/api/settings.ts`: `updateProfile(data)`, `updateCV(cvJson)`, `getSearchPreferences()`, `updateSearchPreferences(prefs)`. All use `credentials: 'include'`
+- [x] Create `ui/src/lib/components/settings/ProfileSection.svelte`: display name edit field with save button. Shows current email (read-only)
+- [x] Create `ui/src/lib/components/settings/CVUploadSection.svelte`: textarea for pasting master CV JSON with syntax validation (try JSON.parse on input), file upload button for `.json` files, save button. Show validation status (valid/invalid JSON). Display current CV summary (name from contact section, number of experiences/skills) if CV exists
+- [x] Create `ui/src/lib/components/settings/SearchPreferencesSection.svelte`: form fields for all `LinkedInSearchParams` values: keywords (text input), location (text input), remote filter (select: on-site/remote/hybrid/any), date posted (select: 24h/week/month/any), experience level (multi-select checkboxes: internship/entry/associate/mid-senior/director/executive), job type (multi-select checkboxes: full-time/part-time/contract/temporary/internship/volunteer), easy apply only (toggle), max jobs per search (number input, default 50). Save button
+- [x] Create `ui/src/routes/settings/+page.svelte`: page layout with three sections (Profile, Master CV, Search Preferences) using the components above. Load current user data on mount via `GET /api/auth/me` and `GET /api/users/me/search-preferences`. Follow the existing design system
+- [x] Test manually: upload a master CV JSON, configure search preferences, verify data persists across page reloads
+- [x] Run `cd ui && npm run check` — must pass before task 7
 
 ### Task 7: Verification + documentation
 
