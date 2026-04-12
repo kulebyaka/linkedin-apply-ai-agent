@@ -258,13 +258,17 @@ python -m uvicorn src.api.main:app --reload
 
 ```powershell
 $body = @{
-    title = "Senior Python Engineer"
-    company = "TechCorp"
-    description = "We need a Python expert with FastAPI and AWS experience."
-    requirements = "Python, FastAPI, Docker, AWS"
-} | ConvertTo-Json
+    source = "manual"
+    mode = "mvp"
+    job_description = @{
+        title = "Senior Python Engineer"
+        company = "TechCorp"
+        description = "We need a Python expert with FastAPI and AWS experience."
+        requirements = "Python, FastAPI, Docker, AWS"
+    }
+} | ConvertTo-Json -Depth 3
 
-$response = Invoke-RestMethod -Uri "http://localhost:8000/api/cv/generate" -Method Post -Body $body -ContentType "application/json"
+$response = Invoke-RestMethod -Uri "http://localhost:8000/api/jobs/submit" -Method Post -Body $body -ContentType "application/json"
 $job_id = $response.job_id
 Write-Host "Job submitted. ID: $job_id"
 ```
@@ -275,7 +279,7 @@ Run this loop to check status until completion (~3-5 minutes):
 
 ```powershell
 while ($true) {
-    $status = Invoke-RestMethod -Uri "http://localhost:8000/api/cv/status/$job_id"
+    $status = Invoke-RestMethod -Uri "http://localhost:8000/api/jobs/$job_id/status"
     Write-Host "Status: $($status.status) | Step: $($status.current_step)"
     
     if ($status.status -eq "completed") {
@@ -293,7 +297,7 @@ while ($true) {
 ### 4. Download PDF
 
 ```powershell
-$downloadUrl = "http://localhost:8000/api/cv/download/$job_id"
+$downloadUrl = "http://localhost:8000/api/jobs/$job_id/pdf"
 Invoke-RestMethod -Uri $downloadUrl -OutFile "tailored_cv.pdf"
 Write-Host "PDF downloaded to tailored_cv.pdf"
 ```

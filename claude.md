@@ -29,32 +29,38 @@ This document provides context for Claude Code (or any AI assistant) to effectiv
 
 ```
 src/
-├── agents/                     # LangGraph workflow definitions
+├── context.py                  # AppContext DI container (replaces module globals)
+├── agents/                     # LangGraph workflow definitions (async-native)
+│   ├── _shared.py              # Shared workflow utilities (LLM init, CV compose, PDF gen)
 │   ├── preparation_workflow.py # Main pipeline: job → CV → PDF → DB
 │   ├── application_workflow.py # Apply to jobs after HITL approval (stubs)
 │   └── retry_workflow.py       # Re-compose CV with user feedback
 ├── llm/                        # LLM provider integrations
 │   └── provider.py             # Abstract base + provider implementations
 ├── services/                   # Business logic services
+│   ├── job_orchestrator.py     # Domain service: job submission & status queries
+│   ├── hitl_processor.py       # Domain service: HITL decision processing
 │   ├── job_source.py           # Job source adapters (URL, manual, LinkedIn)
 │   ├── job_filter.py           # LLM-based job filtering (skeleton)
-│   ├── job_repository.py       # Data access layer (in-memory implementation)
+│   ├── job_repository.py       # Data access layer (in-memory + SQLite via Piccolo)
 │   ├── cv_composer.py          # LLM-powered CV tailoring
+│   ├── cv_validator.py         # CV validation with configurable hallucination policy
 │   ├── cv_prompts.py           # CV composition prompts
 │   ├── pdf_generator.py        # PDF generation from JSON (WeasyPrint)
 │   ├── browser_automation.py   # Playwright stealth browser with cookie auth
 │   ├── linkedin_scraper.py     # LinkedIn job search results scraper
 │   ├── linkedin_search.py      # LinkedIn search URL builder + filters
-│   ├── job_queue.py            # Async job queue for workflow integration
+│   ├── job_queue.py            # Async job queue + ConsumerManager for lifecycle
 │   ├── scheduler.py            # APScheduler-based LinkedIn search scheduler
 │   └── notification.py         # Webhook/email notifications (skeleton)
 ├── models/                     # Pydantic data models
 │   ├── job.py                  # Job posting models
 │   ├── cv.py                   # CV data models
-│   ├── unified.py              # Unified models for two-workflow architecture
-│   └── mvp.py                  # MVP-specific models
-├── api/                        # FastAPI endpoints
-│   └── main.py                 # REST API for HITL UI
+│   ├── cv_attempt.py           # CVCompositionAttempt for retry history tracking
+│   ├── state_machine.py        # BusinessState + WorkflowStep enums, transition validation
+│   └── unified.py              # Unified models for two-workflow architecture
+├── api/                        # FastAPI endpoints (thin adapters)
+│   └── main.py                 # REST API — delegates to domain services
 ├── config/                     # Configuration
 │   └── settings.py             # Pydantic settings with env vars
 └── utils/                      # Utilities
@@ -120,27 +126,54 @@ The system uses a **two-workflow pipeline** split at the HITL boundary, enabling
 | Preparation | `src/agents/preparation_workflow.py` | Main pipeline: job input → CV PDF → DB |
 | Retry | `src/agents/retry_workflow.py` | Re-compose CV with user feedback |
 | Application | `src/agents/application_workflow.py` | Apply to job (stubs only) |
+| Shared | `src/agents/_shared.py` | Common utilities: LLM init, CV compose, PDF gen, master CV loading |
 
 ## Key Design Patterns
 
-### 1. LangGraph Workflows
-- Defined as directed graphs with nodes for each step
-- Supports conditional routing based on state
-- Built-in checkpointing with MemorySaver
-- State management with TypedDict classes
+### 1. Dependency Injection via AppContext
+- `src/context.py` defines a single `AppContext` dataclass holding all shared dependencies
+- Created once at startup via `create_app_context()` and stored in `app.state.ctx`
+- No module-level globals — all dependencies are explicit and injected
+- Workflow nodes receive `repository` via LangGraph's `config["configurable"]` dict
+- Domain services (`JobOrchestrator`, `HITLProcessor`) receive the full `AppContext`
 
-### 2. Multi-LLM Support
+### 2. LangGraph Workflows (Async-Native)
+- All workflow node functions are `async def` — use `await` directly, no `asyncio.run()` hacks
+- Invoked via `workflow.ainvoke()` / `workflow.astream()`
+- Shared logic extracted to `src/agents/_shared.py` to eliminate duplication
+- State management with TypedDict classes
+- Repository passed via `config["configurable"]["repository"]`
+
+### 3. Job Lifecycle State Machine
+- `src/models/state_machine.py` defines `BusinessState` and `WorkflowStep` enums
+- `BusinessState`: queued → processing → cv_ready/pending_review → approved/declined/retrying → applied/failed
+- `WorkflowStep`: transient step tracking (extracting, composing_cv, generating_pdf, etc.)
+- `ALLOWED_TRANSITIONS` map enforces valid state changes; raises `InvalidStateTransition` on violations
+- Both `InMemoryJobRepository` and `SQLiteJobRepository` validate transitions on `update()`
+
+### 4. Domain Services (Thin API Handlers)
+- `JobOrchestrator`: job submission, status queries, workflow dispatch
+- `HITLProcessor`: approve/decline/retry decisions, pending retrieval, history
+- API endpoints are thin adapters — extract context, call service, return result
+
+### 5. Multi-LLM Support
 - Factory pattern for provider instantiation (`LLMClientFactory`)
 - Abstract `BaseLLMClient` interface
 - Easy switching via environment variables
 - Fallback support for reliability
 
-### 3. Repository Pattern
+### 6. Repository Pattern
 - `JobRepository` abstract interface for data persistence
-- `InMemoryJobRepository` implementation for development
-- Future: SQLite/PostgreSQL persistence
+- `InMemoryJobRepository` (with `asyncio.Lock` for thread safety) for development
+- `SQLiteJobRepository` via Piccolo ORM for production
+- Supports `CVCompositionAttempt` tracking for retry history
 
-### 4. Job Source Adapters
+### 7. CV Validation (Extracted from Composer)
+- `CVValidator` in `src/services/cv_validator.py` handles hallucination checks
+- Configurable `HallucinationPolicy`: STRICT (raises), WARN (logs), DISABLED (skips)
+- `CVComposer` delegates validation to `CVValidator` after composition
+
+### 8. Job Source Adapters
 - Abstract interface in `src/services/job_source.py`
 - Adapters for URL extraction, manual input, LinkedIn API
 - Factory pattern: `JobSourceFactory.get_adapter(source)`
@@ -183,8 +216,6 @@ See `src/llm/provider.py` module documentation for detailed implementation.
 
 ## API Endpoints
 
-### Unified Endpoints
-
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/api/jobs/submit` | Submit job for CV generation (URL or manual input) |
@@ -195,46 +226,57 @@ See `src/llm/provider.py` module documentation for detailed implementation.
 | GET | `/api/hitl/history` | Get application history |
 | POST | `/api/jobs/linkedin-search` | Trigger LinkedIn job search manually |
 | GET | `/api/jobs/linkedin-search/status` | Get scheduler state and last run info |
-
-### Legacy Endpoints (Backward Compatible)
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/cv/generate` | Submit CV generation (MVP mode) |
-| GET | `/api/cv/status/{job_id}` | Get CV generation status |
-| GET | `/api/cv/download/{job_id}` | Download generated CV PDF |
+| GET | `/api/health` | Health check (includes queue consumer status) |
 
 ## Data Models
 
-Defined in `src/models/unified.py`:
+### Core Models (`src/models/unified.py`)
 
 - `JobSubmitRequest` - Input for job submission (source, mode, url/job_description)
 - `JobSubmitResponse` - Response with job_id and status
-- `HITLDecision` - User decision (approved/declined/retry + feedback)
+- `HITLDecision` - User decision (approved/declined/retry + feedback + reasoning)
 - `HITLDecisionResponse` - Response after decision processed
 - `PendingApproval` - Job details for HITL review UI
 - `JobStatusResponse` - Full job status with CV and PDF info
-- `JobRecord` - Database record for job persistence
+- `JobRecord` - Database record (focused: job metadata + current CV pointer, no CV history)
 - `ApplicationHistoryItem` - History entry for completed jobs
+
+### State Machine (`src/models/state_machine.py`)
+
+- `BusinessState` - Job lifecycle states: queued, processing, cv_ready, pending_review, approved, declined, retrying, applying, applied, failed
+- `WorkflowStep` - Transient step tracking: extracting, filtering, composing_cv, generating_pdf, etc.
+- `ALLOWED_TRANSITIONS` - Valid state change map, enforced by repository
+- `InvalidStateTransition` - Raised on illegal transitions
+
+### CV Attempt History (`src/models/cv_attempt.py`)
+
+- `CVCompositionAttempt` - Tracks each CV composition: attempt_number, user_feedback, cv_json, pdf_path
 
 ## Implementation Status
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| **Two-Workflow Architecture** | ✅ Complete | Preparation + Application workflows with HITL boundary |
+| **AppContext DI** | ✅ Complete | `src/context.py` - replaces all module-level globals |
+| **Async-Native Workflows** | ✅ Complete | All workflow nodes are `async def`, use `ainvoke()` |
+| **Shared Workflow Utils** | ✅ Complete | `src/agents/_shared.py` - deduplicated across 3 workflows |
+| **Job Lifecycle State Machine** | ✅ Complete | `src/models/state_machine.py` - BusinessState + WorkflowStep + transition validation |
+| **Domain Services** | ✅ Complete | `JobOrchestrator` + `HITLProcessor` - thin API handlers |
+| **CV Validator** | ✅ Complete | `src/services/cv_validator.py` - configurable hallucination policy |
+| **CV Attempt History** | ✅ Complete | `src/models/cv_attempt.py` + repository methods |
+| **Consumer Manager** | ✅ Complete | `src/services/job_queue.py` - resilient queue consumer lifecycle |
 | **LLM Provider Layer** | ✅ Complete | `src/llm/provider.py` |
 | **Preparation Workflow** | ✅ Complete | `src/agents/preparation_workflow.py` |
 | **Retry Workflow** | ✅ Complete | `src/agents/retry_workflow.py` |
 | **Compose Tailored CV** | ✅ Complete | `src/services/cv_composer.py` |
 | **Generate PDF** | ✅ Complete | `src/services/pdf_generator.py` (WeasyPrint + Jinja2) |
-| **HITL API Endpoints** | ✅ Complete | `src/api/main.py` |
+| **HITL API Endpoints** | ✅ Complete | `src/api/main.py` (thin adapters to domain services) |
 | **Unified Data Models** | ✅ Complete | `src/models/unified.py` |
-| **Job Repository (DAL)** | ✅ Complete | `src/services/job_repository.py` (in-memory + SQLite via Piccolo ORM) |
+| **Job Repository (DAL)** | ✅ Complete | `src/services/job_repository.py` (in-memory + SQLite, thread-safe) |
 | **Job Source Adapters** | ✅ Complete | `src/services/job_source.py` - LinkedIn adapter with field mapping |
 | **Browser Automation** | ✅ Complete | `src/services/browser_automation.py` - stealth Playwright with cookie auth |
 | **LinkedIn Job Scraper** | ✅ Complete | `src/services/linkedin_scraper.py` - search results parser with dedup |
 | **LinkedIn Search Builder** | ✅ Complete | `src/services/linkedin_search.py` - URL builder with filter models |
-| **Async Job Queue** | ✅ Complete | `src/services/job_queue.py` - queue with workflow consumer |
+| **Async Job Queue** | ✅ Complete | `src/services/job_queue.py` - queue with ConsumerManager |
 | **LinkedIn Search Scheduler** | ✅ Complete | `src/services/scheduler.py` - APScheduler with API endpoints |
 | **Application Workflow** | 🟡 Stubs | `src/agents/application_workflow.py` - stubs only |
 | **Job Filter (LLM)** | 🔴 Pending | `src/services/job_filter.py` skeleton |
@@ -290,16 +332,20 @@ All settings in `.env`:
 
 1. Update prompts in `src/services/cv_prompts.py`
 2. Adjust `CVComposer` methods in `src/services/cv_composer.py`
-3. Test with various job descriptions
-4. Consider adding user feedback loop
+3. Validation logic is in `src/services/cv_validator.py` — update `CVValidator` if changing what gets checked
+4. Test with various job descriptions
+5. Consider adding user feedback loop
 
 ### Adding New Workflow Step
 
-1. Define node function in appropriate workflow file
-2. Add node to workflow graph
-3. Update state TypedDict if needed
-4. Add routing logic
-5. Update tests
+1. If the logic is shared across workflows, add it to `src/agents/_shared.py`
+2. Define `async def` node function in the appropriate workflow file — receive repository via `config["configurable"]["repository"]`
+3. Add node to workflow graph
+4. Update state TypedDict if needed
+5. Use `BusinessState` and `WorkflowStep` enums from `src/models/state_machine.py` for status updates
+6. If adding a new state, update `ALLOWED_TRANSITIONS` in `state_machine.py`
+7. Add routing logic
+8. Update tests
 
 ### Debugging Workflow Issues
 

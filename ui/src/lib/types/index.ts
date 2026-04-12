@@ -37,7 +37,7 @@ export interface JobStatusResponse {
 	};
 	pdf_path?: string;
 	error_message?: string;
-	retry_count: number;
+	attempt_count: number;
 	created_at: string;
 }
 
@@ -85,7 +85,7 @@ export interface PendingApproval {
 	job_posting: JobPosting;
 	cv_json: Record<string, unknown>;
 	pdf_path: string;
-	retry_count: number;
+	attempt_count: number;
 	created_at: string;
 	source: 'url' | 'manual' | 'linkedin';
 	application_url: string;

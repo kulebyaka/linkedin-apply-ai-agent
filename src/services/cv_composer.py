@@ -5,18 +5,18 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.config.settings import Settings
 from src.llm.provider import BaseLLMClient
 from src.models.cv import (
-    ContactInfo,
     CVLLMOutput,
-    Interests,
     JobSummary,
-    Language,
 )
 from src.services.cv_prompts import CVPromptManager
+
+if TYPE_CHECKING:
+    from src.services.cv_validator import CVValidator
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +76,7 @@ class CVComposer:
         master_cv: dict[str, Any],
         job_posting: dict[str, Any],
         user_feedback: str | None = None,
+        validator: CVValidator | None = None,
     ) -> CVLLMOutput:
         """
         Generate a tailored CV for a specific job posting
@@ -84,6 +85,8 @@ class CVComposer:
             master_cv: Complete CV data in JSON format
             job_posting: Job posting information with keys: title, company, description, requirements
             user_feedback: Optional feedback from user for retry/refinement
+            validator: Optional CVValidator instance for output validation.
+                       If None, uses legacy inline validation (warn-only).
 
         Returns:
             Tailored CV as validated Pydantic model
@@ -100,32 +103,49 @@ class CVComposer:
         logger.debug("Job analysis completed")
 
         # Step 2: Generate all CV sections in a single LLM call (optimized)
-        # This replaces 6 separate LLM calls with 1, reducing latency by ~3.5x
         generated_sections = self._compose_all_sections(master_cv, job_summary, user_feedback)
 
         # Step 2.5: Apply length limits to ensure 2-page target
         generated_sections = self._apply_length_limits(generated_sections)
 
-        # Step 3: Validate and build pass-through fields from master CV
-        contact = self._validate_contact(master_cv.get("contact", {}))
-        languages = self._validate_languages(master_cv.get("languages", []))
-        interests = self._validate_interests(master_cv.get("interests"))
+        if validator:
+            # Use the injected CVValidator for all validation
+            contact = validator.validate_contact(master_cv.get("contact", {}))
+            languages = validator.validate_languages(master_cv.get("languages", []))
+            interests = validator.validate_interests(master_cv.get("interests"))
 
-        # Step 4: Build complete tailored CV
-        tailored_cv = {
-            "contact": contact,
-            "summary": generated_sections.get("summary", ""),
-            "experiences": generated_sections.get("experiences", []),
-            "education": generated_sections.get("education", []),
-            "skills": generated_sections.get("skills", []),
-            "projects": generated_sections.get("projects", []),
-            "certifications": generated_sections.get("certifications", []),
-            "languages": languages,
-            "interests": interests,
-        }
+            tailored_cv = {
+                "contact": contact,
+                "summary": generated_sections.get("summary", ""),
+                "experiences": generated_sections.get("experiences", []),
+                "education": generated_sections.get("education", []),
+                "skills": generated_sections.get("skills", []),
+                "projects": generated_sections.get("projects", []),
+                "certifications": generated_sections.get("certifications", []),
+                "languages": languages,
+                "interests": interests,
+            }
 
-        # Step 5: Validate output against master CV
-        validated_cv = self._validate_output(tailored_cv, master_cv)
+            validated_cv = validator.validate_output(tailored_cv)
+        else:
+            # Legacy path: inline validation with warn-only hallucination checks
+            contact = self._validate_contact(master_cv.get("contact", {}))
+            languages = self._validate_languages(master_cv.get("languages", []))
+            interests = self._validate_interests(master_cv.get("interests"))
+
+            tailored_cv = {
+                "contact": contact,
+                "summary": generated_sections.get("summary", ""),
+                "experiences": generated_sections.get("experiences", []),
+                "education": generated_sections.get("education", []),
+                "skills": generated_sections.get("skills", []),
+                "projects": generated_sections.get("projects", []),
+                "certifications": generated_sections.get("certifications", []),
+                "languages": languages,
+                "interests": interests,
+            }
+
+            validated_cv = self._validate_output(tailored_cv, master_cv)
 
         logger.info("CV composition completed successfully")
         return validated_cv
@@ -138,15 +158,7 @@ class CVComposer:
             job_posting: Job posting with description and requirements
 
         Returns:
-            Dictionary with structured job requirements:
-            {
-                "technical_skills": [...],
-                "soft_skills": [...],
-                "education_reqs": [...],
-                "experience_reqs": {"years": int, "level": str},
-                "responsibilities": [...],
-                "nice_to_have": [...]
-            }
+            Dictionary with structured job requirements
 
         Raises:
             CVCompositionError: If job analysis fails
@@ -199,22 +211,13 @@ Requirements:
         """
         Generate complete tailored CV in a single LLM call.
 
-        This method replaces 6 separate LLM calls with a single unified call,
-        reducing latency by approximately 3.5x.
-
         Args:
             master_cv: Complete master CV data
             job_summary: Structured job requirements from _summarize_job()
             user_feedback: Optional user feedback for retry/refinement
 
         Returns:
-            Dictionary containing all tailored CV sections:
-            - summary: str
-            - experiences: list[dict]
-            - education: list[dict]
-            - skills: list[dict]
-            - projects: list[dict]
-            - certifications: list[dict]
+            Dictionary containing all tailored CV sections
 
         Raises:
             CVCompositionError: If CV generation fails
@@ -249,9 +252,6 @@ Requirements:
     def _apply_length_limits(self, generated_sections: dict[str, Any]) -> dict[str, Any]:
         """
         Apply configured length limits to CV sections.
-
-        This acts as a safety net after LLM generation to ensure CV stays within
-        target page count. Truncates sections to maximum configured lengths.
 
         Args:
             generated_sections: CV sections from LLM generation
@@ -320,19 +320,11 @@ Requirements:
 
         return generated_sections
 
+    # Legacy validation methods kept for backward compatibility when no CVValidator is provided
+
     def _validate_contact(self, contact_data: dict[str, Any]) -> dict[str, Any]:
-        """
-        Validate contact information from master CV.
+        from src.models.cv import ContactInfo
 
-        Args:
-            contact_data: Raw contact data from master CV
-
-        Returns:
-            Validated contact data as dict
-
-        Raises:
-            CVCompositionError: If contact data is invalid
-        """
         try:
             contact = ContactInfo(**contact_data)
             return contact.model_dump()
@@ -341,18 +333,8 @@ Requirements:
             raise CVCompositionError(f"Invalid contact data: {e}") from e
 
     def _validate_languages(self, languages_data: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """
-        Validate languages from master CV.
+        from src.models.cv import Language
 
-        Args:
-            languages_data: Raw languages list from master CV
-
-        Returns:
-            Validated languages as list of dicts
-
-        Raises:
-            CVCompositionError: If languages data is invalid
-        """
         try:
             languages = [Language(**lang) for lang in languages_data]
             return [lang.model_dump() for lang in languages]
@@ -361,18 +343,8 @@ Requirements:
             raise CVCompositionError(f"Invalid languages data: {e}") from e
 
     def _validate_interests(self, interests_data: dict[str, Any] | None) -> dict[str, Any] | None:
-        """
-        Validate interests from master CV.
+        from src.models.cv import Interests
 
-        Args:
-            interests_data: Raw interests data from master CV (optional)
-
-        Returns:
-            Validated interests as dict, or None if not provided
-
-        Raises:
-            CVCompositionError: If interests data is invalid
-        """
         if interests_data is None:
             return None
 
@@ -384,35 +356,16 @@ Requirements:
             raise CVCompositionError(f"Invalid interests data: {e}") from e
 
     def _validate_output(self, tailored_cv: dict[str, Any], master_cv: dict[str, Any]) -> CVLLMOutput:
-        """
-        Validate tailored CV against master CV to prevent hallucinations
-
-        Checks:
-        1. All companies/institutions exist in master CV
-        2. Dates are within valid ranges
-        3. No new skills/tech not in master CV (with some flexibility)
-        4. Schema matches CV model
-
-        Args:
-            tailored_cv: Generated tailored CV
-            master_cv: Original master CV
-
-        Returns:
-            Validated CV as Pydantic model
-
-        Raises:
-            CVCompositionError: If validation fails
-        """
+        """Legacy validation with warn-only hallucination checks."""
         logger.debug("Validating tailored CV output")
 
-        # Validate schema with Pydantic (use relaxed CVLLMOutput since LLM uses string dates/enums)
         try:
             validated = CVLLMOutput(**tailored_cv)
         except Exception as e:
             logger.error(f"Schema validation failed: {e}")
             raise CVCompositionError(f"Tailored CV does not match expected schema: {e}") from e
 
-        # Hallucination check: Companies
+        # Hallucination check: Companies (warn only)
         master_companies = {
             exp.get("company", "").lower() for exp in master_cv.get("experiences", [])
         }
@@ -422,12 +375,9 @@ Requirements:
 
         if not tailored_companies.issubset(master_companies):
             invalid_companies = tailored_companies - master_companies
-            # TODO: Make hallucination check configurable (strict mode raises error)
-            # In strict mode, this should raise:
-            # raise CVCompositionError(f"CV contains fabricated companies: {invalid_companies}")
             logger.warning(f"Tailored CV contains new companies: {invalid_companies}")
 
-        # Hallucination check: Institutions
+        # Hallucination check: Institutions (warn only)
         master_institutions = {
             edu.get("institution", "").lower() for edu in master_cv.get("education", [])
         }
@@ -437,15 +387,7 @@ Requirements:
 
         if not tailored_institutions.issubset(master_institutions):
             invalid_institutions = tailored_institutions - master_institutions
-            # TODO: Make hallucination check configurable (strict mode raises error)
             logger.warning(f"Tailored CV contains new institutions: {invalid_institutions}")
 
-        # TODO: Implement retry logic for validation failures
-        # When validation fails (especially for hallucinations), we could:
-        # 1. Retry with lower temperature
-        # 2. Add explicit anti-hallucination instructions to the prompt
-        # 3. Use a configurable max_retries parameter
-
         logger.info("Validation completed successfully")
-
         return validated

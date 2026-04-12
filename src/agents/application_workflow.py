@@ -19,13 +19,15 @@ Application Types:
 
 import logging
 from typing import TypedDict, Literal
-from datetime import datetime
+from datetime import datetime, timezone
 
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 
-from ..services.job_repository import JobRepository, get_repository
+from ..models.state_machine import BusinessState, WorkflowStep
 from ..config.settings import get_settings
+from ._shared import get_repository_from_config
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -51,24 +53,6 @@ class ApplicationWorkflowState(TypedDict):
 
     # Status
     current_step: str
-
-
-# Reference to repository (shared with other workflows)
-_repository: JobRepository | None = None
-
-
-def set_repository(repo: JobRepository) -> None:
-    """Set the repository instance."""
-    global _repository
-    _repository = repo
-
-
-def get_repo() -> JobRepository:
-    """Get repository instance."""
-    global _repository
-    if _repository is None:
-        _repository = get_repository()
-    return _repository
 
 
 def create_application_workflow() -> StateGraph:
@@ -143,7 +127,7 @@ def route_by_application_type(state: ApplicationWorkflowState) -> str:
 # Workflow Nodes
 # =============================================================================
 
-def load_from_db_node(state: ApplicationWorkflowState) -> ApplicationWorkflowState:
+async def load_from_db_node(state: ApplicationWorkflowState, config: RunnableConfig | None = None) -> ApplicationWorkflowState:
     """Load job data from repository.
 
     IMPLEMENTATION STATUS: Stub.
@@ -156,42 +140,35 @@ def load_from_db_node(state: ApplicationWorkflowState) -> ApplicationWorkflowSta
     """
     job_id = state.get("job_id", "unknown")
     logger.info(f"Loading job data for application: {job_id}")
-    state["current_step"] = "loading"
+    state["current_step"] = WorkflowStep.LOADING
 
     try:
-        repo = get_repo()
+        repo = get_repository_from_config(config or {})
 
         # Load job record
-        import asyncio
-        try:
-            job_record = asyncio.run(repo.get(job_id))
-        except NotImplementedError:
-            logger.warning(f"Repository not implemented for job {job_id}")
-            state["error_message"] = "Repository not implemented"
-            state["current_step"] = "failed"
-            return state
+        job_record = await repo.get(job_id)
 
         if not job_record:
             raise ValueError(f"Job {job_id} not found in repository")
 
         # Update state with loaded data
         state["application_url"] = job_record.application_url or ""
-        state["cv_json"] = job_record.cv_json or {}
-        state["pdf_path"] = job_record.pdf_path or ""
+        state["cv_json"] = job_record.current_cv_json or {}
+        state["pdf_path"] = job_record.current_pdf_path or ""
         state["job_posting"] = job_record.job_posting or {}
 
-        state["current_step"] = "loaded"
+        state["current_step"] = WorkflowStep.LOADED
         logger.info(f"Loaded job data for application: {job_id}")
 
     except Exception as e:
         logger.error(f"Failed to load job {job_id} for application: {e}", exc_info=True)
         state["error_message"] = f"Failed to load job data: {str(e)}"
-        state["current_step"] = "failed"
+        state["current_step"] = BusinessState.FAILED
 
     return state
 
 
-def apply_deep_agent_node(state: ApplicationWorkflowState) -> ApplicationWorkflowState:
+async def apply_deep_agent_node(state: ApplicationWorkflowState) -> ApplicationWorkflowState:
     """Apply using Deep Agent (Playwright MCP browser automation).
 
     IMPLEMENTATION STATUS: Stub only - future feature.
@@ -210,7 +187,7 @@ def apply_deep_agent_node(state: ApplicationWorkflowState) -> ApplicationWorkflo
     """
     job_id = state.get("job_id", "unknown")
     logger.info(f"Starting Deep Agent application for job {job_id}")
-    state["current_step"] = "applying_deep_agent"
+    state["current_step"] = WorkflowStep.APPLYING_DEEP_AGENT
 
     # STUB: Deep Agent not implemented yet
     logger.warning(f"Deep Agent application not implemented for job {job_id}")
@@ -224,7 +201,7 @@ def apply_deep_agent_node(state: ApplicationWorkflowState) -> ApplicationWorkflo
     return state
 
 
-def apply_linkedin_node(state: ApplicationWorkflowState) -> ApplicationWorkflowState:
+async def apply_linkedin_node(state: ApplicationWorkflowState) -> ApplicationWorkflowState:
     """Apply using LinkedIn Easy Apply automation.
 
     IMPLEMENTATION STATUS: Stub only - future feature.
@@ -244,7 +221,7 @@ def apply_linkedin_node(state: ApplicationWorkflowState) -> ApplicationWorkflowS
     """
     job_id = state.get("job_id", "unknown")
     logger.info(f"Starting LinkedIn Easy Apply for job {job_id}")
-    state["current_step"] = "applying_linkedin"
+    state["current_step"] = WorkflowStep.APPLYING_LINKEDIN
 
     # STUB: LinkedIn automation not implemented yet
     logger.warning(f"LinkedIn Easy Apply not implemented for job {job_id}")
@@ -258,7 +235,7 @@ def apply_linkedin_node(state: ApplicationWorkflowState) -> ApplicationWorkflowS
     return state
 
 
-def apply_manual_node(state: ApplicationWorkflowState) -> ApplicationWorkflowState:
+async def apply_manual_node(state: ApplicationWorkflowState) -> ApplicationWorkflowState:
     """Mark job as requiring manual application.
 
     For jobs that require manual application (e.g., external job boards
@@ -274,7 +251,7 @@ def apply_manual_node(state: ApplicationWorkflowState) -> ApplicationWorkflowSta
     job_id = state.get("job_id", "unknown")
     application_url = state.get("application_url", "")
     logger.info(f"Job {job_id} marked for manual application: {application_url}")
-    state["current_step"] = "manual_required"
+    state["current_step"] = WorkflowStep.MANUAL_REQUIRED
 
     state["application_status"] = "manual_required"
     state["application_result"] = {
@@ -286,7 +263,7 @@ def apply_manual_node(state: ApplicationWorkflowState) -> ApplicationWorkflowSta
     return state
 
 
-def update_db_node(state: ApplicationWorkflowState) -> ApplicationWorkflowState:
+async def update_db_node(state: ApplicationWorkflowState, config: RunnableConfig | None = None) -> ApplicationWorkflowState:
     """Update job record in repository after application attempt.
 
     Args:
@@ -298,33 +275,28 @@ def update_db_node(state: ApplicationWorkflowState) -> ApplicationWorkflowState:
     job_id = state.get("job_id", "unknown")
     app_status = state.get("application_status", "failed")
     logger.info(f"Updating job {job_id} after application: {app_status}")
-    state["current_step"] = "saving"
+    state["current_step"] = WorkflowStep.SAVING
 
     # Map application_status to job status
     if app_status == "success":
-        job_status = "applied"
+        job_status = BusinessState.APPLIED
     elif app_status == "manual_required":
-        job_status = "manual_required"
+        job_status = BusinessState.FAILED  # Stub: manual_required maps to failed until implemented
     else:
-        job_status = "failed"
+        job_status = BusinessState.FAILED
 
     try:
-        repo = get_repo()
+        repo = get_repository_from_config(config or {})
 
         # Build update dict
         updates = {
             "status": job_status,
             "error_message": state.get("error_message"),
-            "updated_at": datetime.now(),
         }
 
         # Update repository
-        import asyncio
-        try:
-            asyncio.run(repo.update(job_id, updates))
-            logger.info(f"Job {job_id} updated after application: status={job_status}")
-        except NotImplementedError:
-            logger.warning(f"Repository not implemented, job {job_id} not updated")
+        await repo.update(job_id, updates)
+        logger.info(f"Job {job_id} updated after application: status={job_status}")
 
         # Update state
         state["current_step"] = job_status
@@ -333,6 +305,6 @@ def update_db_node(state: ApplicationWorkflowState) -> ApplicationWorkflowState:
     except Exception as e:
         logger.error(f"Failed to update job {job_id} after application: {e}", exc_info=True)
         state["error_message"] = f"Failed to update job: {str(e)}"
-        state["current_step"] = "failed"
+        state["current_step"] = BusinessState.FAILED
 
     return state

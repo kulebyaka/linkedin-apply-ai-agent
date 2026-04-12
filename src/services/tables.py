@@ -1,6 +1,7 @@
 """Piccolo ORM table definitions for job persistence.
 
-This module defines the database schema for storing job records.
+This module defines the database schema for storing job records
+and CV composition attempts.
 """
 
 from piccolo.table import Table
@@ -17,7 +18,7 @@ class Job(Table):
     """Piccolo ORM model for job persistence.
 
     Maps to the SQLite database table storing job records.
-    Uses JSON columns for complex nested data (job_posting, cv_json, etc.).
+    Uses JSON columns for complex nested data (job_posting, etc.).
     """
 
     # Primary key
@@ -32,18 +33,12 @@ class Job(Table):
     job_posting = JSON(null=True)
     raw_input = JSON(null=True)
 
-    # CV data
-    cv_json = JSON(null=True)
-    pdf_path = Varchar(length=500, null=True)
+    # Denormalized quick-access to latest CV attempt
+    current_cv_json = JSON(null=True)
+    current_pdf_path = Varchar(length=500, null=True)
 
     # Application data
     application_url = Varchar(length=500, null=True, index=True)
-    application_type = Varchar(length=20, null=True)  # deep_agent, linkedin, manual
-    application_result = JSON(null=True)
-
-    # HITL data
-    user_feedback = Text(null=True)
-    retry_count = Integer(default=0)
 
     # Error tracking
     error_message = Text(null=True)
@@ -51,4 +46,22 @@ class Job(Table):
     # Timestamps
     created_at = Timestamptz(index=True)  # Index for sorting
     updated_at = Timestamptz()
-    applied_at = Timestamptz(null=True)
+
+
+class CVAttemptTable(Table, tablename="cv_attempt"):
+    """Piccolo ORM model for CV composition attempt history.
+
+    Tracks each CV composition (initial + retries) for a job.
+    """
+
+    # Composite identity: job_id + attempt_number
+    job_id = Varchar(length=36, index=True)
+    attempt_number = Integer()
+
+    # Attempt data
+    user_feedback = Text(null=True)
+    cv_json = JSON()
+    pdf_path = Varchar(length=500, null=True)
+
+    # Timestamp
+    created_at = Timestamptz()

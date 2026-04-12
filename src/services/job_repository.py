@@ -17,6 +17,7 @@ Interface Methods:
 - Specialized: find_by_application_url(), cleanup()
 """
 
+import asyncio
 import json
 import logging
 from abc import ABC, abstractmethod
@@ -24,6 +25,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
+from ..models.cv_attempt import CVCompositionAttempt
+from ..models.state_machine import BusinessState, InvalidStateTransition, validate_transition
 from ..models.unified import JobRecord
 
 logger = logging.getLogger(__name__)
@@ -32,17 +35,13 @@ logger = logging.getLogger(__name__)
 # Valid fields that can be updated via update() method
 UPDATABLE_FIELDS = frozenset({
     "status",
+    "workflow_step",
     "job_posting",
     "raw_input",
-    "cv_json",
-    "pdf_path",
+    "current_cv_json",
+    "current_pdf_path",
     "application_url",
-    "application_type",
-    "application_result",
-    "user_feedback",
-    "retry_count",
     "error_message",
-    "applied_at",
     "updated_at",
 })
 
@@ -218,6 +217,46 @@ class JobRepository(ABC):
         pass
 
     # =========================================================================
+    # CV Attempt Methods
+    # =========================================================================
+
+    @abstractmethod
+    async def create_cv_attempt(self, attempt: CVCompositionAttempt) -> None:
+        """Create a new CV composition attempt record.
+
+        Args:
+            attempt: CVCompositionAttempt to persist.
+
+        Raises:
+            RepositoryError: If creation fails.
+        """
+        pass
+
+    @abstractmethod
+    async def get_cv_attempts(self, job_id: str) -> list[CVCompositionAttempt]:
+        """Get all CV composition attempts for a job, ordered by attempt_number.
+
+        Args:
+            job_id: Unique job identifier.
+
+        Returns:
+            List of CVCompositionAttempt objects, ordered by attempt_number asc.
+        """
+        pass
+
+    @abstractmethod
+    async def get_latest_cv_attempt(self, job_id: str) -> Optional[CVCompositionAttempt]:
+        """Get the most recent CV composition attempt for a job.
+
+        Args:
+            job_id: Unique job identifier.
+
+        Returns:
+            The latest CVCompositionAttempt, or None if no attempts exist.
+        """
+        pass
+
+    # =========================================================================
     # Specialized Methods
     # =========================================================================
 
@@ -279,7 +318,9 @@ class InMemoryJobRepository(JobRepository):
     def __init__(self):
         """Initialize empty in-memory storage."""
         self._jobs: dict[str, JobRecord] = {}
+        self._cv_attempts: dict[str, list[CVCompositionAttempt]] = {}
         self._initialized: bool = False
+        self._lock: asyncio.Lock = asyncio.Lock()
 
     # =========================================================================
     # Lifecycle Methods
@@ -292,6 +333,7 @@ class InMemoryJobRepository(JobRepository):
     async def close(self) -> None:
         """Close repository and clear data."""
         self._jobs.clear()
+        self._cv_attempts.clear()
         self._initialized = False
 
     # =========================================================================
@@ -310,10 +352,11 @@ class InMemoryJobRepository(JobRepository):
         Raises:
             RepositoryError: If job_id already exists.
         """
-        if job.job_id in self._jobs:
-            raise RepositoryError(f"Job already exists: {job.job_id}", job.job_id)
-        self._jobs[job.job_id] = job
-        return job.job_id
+        async with self._lock:
+            if job.job_id in self._jobs:
+                raise RepositoryError(f"Job already exists: {job.job_id}", job.job_id)
+            self._jobs[job.job_id] = job
+            return job.job_id
 
     async def get(self, job_id: str) -> Optional[JobRecord]:
         """Get a job record by ID.
@@ -336,18 +379,31 @@ class InMemoryJobRepository(JobRepository):
         Raises:
             RepositoryError: If job not found.
             ValueError: If updates contain invalid field names.
+            InvalidStateTransition: If status transition is not allowed.
         """
-        if job_id not in self._jobs:
-            raise RepositoryError(f"Job not found: {job_id}", job_id)
+        async with self._lock:
+            if job_id not in self._jobs:
+                raise RepositoryError(f"Job not found: {job_id}", job_id)
 
-        # Validate update fields
-        invalid_fields = set(updates.keys()) - UPDATABLE_FIELDS
-        if invalid_fields:
-            raise ValueError(f"Invalid update fields: {invalid_fields}")
+            # Validate update fields
+            invalid_fields = set(updates.keys()) - UPDATABLE_FIELDS
+            if invalid_fields:
+                raise ValueError(f"Invalid update fields: {invalid_fields}")
 
-        # Auto-set updated_at
-        updates["updated_at"] = datetime.now(tz=timezone.utc)
-        self._jobs[job_id] = self._jobs[job_id].model_copy(update=updates)
+            # Validate state transition if status is being changed
+            if "status" in updates:
+                current_status = self._jobs[job_id].status
+                new_status = updates["status"]
+                # Coerce to BusinessState for validation
+                if not isinstance(current_status, BusinessState):
+                    current_status = BusinessState(current_status)
+                if not isinstance(new_status, BusinessState):
+                    new_status = BusinessState(new_status)
+                validate_transition(current_status, new_status, job_id)
+
+            # Auto-set updated_at
+            updates["updated_at"] = datetime.now(tz=timezone.utc)
+            self._jobs[job_id] = self._jobs[job_id].model_copy(update=updates)
 
     async def delete(self, job_id: str) -> bool:
         """Delete a job record.
@@ -358,10 +414,11 @@ class InMemoryJobRepository(JobRepository):
         Returns:
             True if deleted, False if not found.
         """
-        if job_id in self._jobs:
-            del self._jobs[job_id]
-            return True
-        return False
+        async with self._lock:
+            if job_id in self._jobs:
+                del self._jobs[job_id]
+                return True
+            return False
 
     # =========================================================================
     # Query Methods
@@ -373,7 +430,7 @@ class InMemoryJobRepository(JobRepository):
         Returns:
             List of jobs with status='pending', sorted by created_at desc.
         """
-        jobs = [j for j in self._jobs.values() if j.status == "pending"]
+        jobs = [j for j in self._jobs.values() if j.status == BusinessState.PENDING_REVIEW]
         jobs.sort(key=lambda j: j.created_at, reverse=True)
         return jobs
 
@@ -441,6 +498,29 @@ class InMemoryJobRepository(JobRepository):
         return jobs[:limit]
 
     # =========================================================================
+    # CV Attempt Methods
+    # =========================================================================
+
+    async def create_cv_attempt(self, attempt: CVCompositionAttempt) -> None:
+        """Create a new CV composition attempt record."""
+        async with self._lock:
+            if attempt.job_id not in self._cv_attempts:
+                self._cv_attempts[attempt.job_id] = []
+            self._cv_attempts[attempt.job_id].append(attempt)
+
+    async def get_cv_attempts(self, job_id: str) -> list[CVCompositionAttempt]:
+        """Get all CV attempts for a job, ordered by attempt_number."""
+        attempts = self._cv_attempts.get(job_id, [])
+        return sorted(attempts, key=lambda a: a.attempt_number)
+
+    async def get_latest_cv_attempt(self, job_id: str) -> Optional[CVCompositionAttempt]:
+        """Get the most recent CV attempt for a job."""
+        attempts = self._cv_attempts.get(job_id, [])
+        if not attempts:
+            return None
+        return max(attempts, key=lambda a: a.attempt_number)
+
+    # =========================================================================
     # Specialized Methods
     # =========================================================================
 
@@ -481,16 +561,18 @@ class InMemoryJobRepository(JobRepository):
             raise ValueError("statuses list cannot be empty")
 
         cutoff_date = datetime.now(tz=timezone.utc) - timedelta(days=older_than_days)
-        to_delete = [
-            job_id
-            for job_id, job in self._jobs.items()
-            if job.status in statuses and job.created_at < cutoff_date
-        ]
+        async with self._lock:
+            to_delete = [
+                job_id
+                for job_id, job in self._jobs.items()
+                if job.status in statuses and job.created_at < cutoff_date
+            ]
 
-        for job_id in to_delete:
-            del self._jobs[job_id]
+            for job_id in to_delete:
+                del self._jobs[job_id]
+                self._cv_attempts.pop(job_id, None)
 
-        return len(to_delete)
+            return len(to_delete)
 
 
 class SQLiteJobRepository(JobRepository):
@@ -527,7 +609,7 @@ class SQLiteJobRepository(JobRepository):
         """
         from piccolo.engine.sqlite import SQLiteEngine
 
-        from .tables import Job
+        from .tables import CVAttemptTable, Job
 
         # Ensure data directory exists
         db_dir = Path(self.db_path).parent
@@ -536,12 +618,18 @@ class SQLiteJobRepository(JobRepository):
         # Create engine for this specific database
         self._engine = SQLiteEngine(path=self.db_path)
 
-        # Set the engine on the Job table for this repository instance
+        # Set the engine on tables for this repository instance
         Job._meta._db = self._engine
+        CVAttemptTable._meta._db = self._engine
 
         # Create tables if they don't exist
         try:
             await Job.create_table(if_not_exists=True).run()
+            await CVAttemptTable.create_table(if_not_exists=True).run()
+
+            # Migrate legacy schema: rename cv_json -> current_cv_json, pdf_path -> current_pdf_path
+            await self._migrate_legacy_columns()
+
             logger.info(f"SQLite repository initialized at {self.db_path}")
             self._initialized = True
         except Exception as e:
@@ -561,6 +649,35 @@ class SQLiteJobRepository(JobRepository):
         if not self._initialized:
             raise RepositoryError("Repository not initialized. Call initialize() first.")
 
+    async def _migrate_legacy_columns(self) -> None:
+        """Migrate legacy schema columns if upgrading from an older database.
+
+        Renames cv_json -> current_cv_json and pdf_path -> current_pdf_path
+        in the job table if the old columns exist.
+
+        Raises:
+            RepositoryError: If migration detection or execution fails.
+        """
+        conn = await self._engine.get_connection()
+        try:
+            cursor = await conn.execute("PRAGMA table_info(job)")
+            rows = await cursor.fetchall()
+            column_names = {row["name"] for row in rows}
+
+            if "cv_json" in column_names and "current_cv_json" not in column_names:
+                logger.info("Migrating legacy column: cv_json -> current_cv_json")
+                await conn.execute(
+                    "ALTER TABLE job RENAME COLUMN cv_json TO current_cv_json"
+                )
+
+            if "pdf_path" in column_names and "current_pdf_path" not in column_names:
+                logger.info("Migrating legacy column: pdf_path -> current_pdf_path")
+                await conn.execute(
+                    "ALTER TABLE job RENAME COLUMN pdf_path TO current_pdf_path"
+                )
+        finally:
+            await conn.close()
+
     # =========================================================================
     # Conversion Helpers
     # =========================================================================
@@ -574,17 +691,12 @@ class SQLiteJobRepository(JobRepository):
             "status": job.status,
             "job_posting": job.job_posting,
             "raw_input": job.raw_input,
-            "cv_json": job.cv_json,
-            "pdf_path": job.pdf_path,
+            "current_cv_json": job.current_cv_json,
+            "current_pdf_path": job.current_pdf_path,
             "application_url": job.application_url,
-            "application_type": job.application_type,
-            "application_result": job.application_result,
-            "user_feedback": job.user_feedback,
-            "retry_count": job.retry_count,
             "error_message": job.error_message,
             "created_at": job.created_at,
             "updated_at": job.updated_at,
-            "applied_at": job.applied_at,
         }
 
     def _parse_json_field(self, value) -> dict | None:
@@ -616,17 +728,34 @@ class SQLiteJobRepository(JobRepository):
             status=row["status"],
             job_posting=self._parse_json_field(row.get("job_posting")),
             raw_input=self._parse_json_field(row.get("raw_input")),
-            cv_json=self._parse_json_field(row.get("cv_json")),
-            pdf_path=row.get("pdf_path"),
+            current_cv_json=self._parse_json_field(row.get("current_cv_json")),
+            current_pdf_path=row.get("current_pdf_path"),
             application_url=row.get("application_url"),
-            application_type=row.get("application_type"),
-            application_result=self._parse_json_field(row.get("application_result")),
-            user_feedback=row.get("user_feedback"),
-            retry_count=row.get("retry_count", 0),
             error_message=row.get("error_message"),
             created_at=self._normalize_datetime(row.get("created_at")) or datetime.now(tz=timezone.utc),
             updated_at=self._normalize_datetime(row.get("updated_at")) or datetime.now(tz=timezone.utc),
-            applied_at=self._normalize_datetime(row.get("applied_at")),
+        )
+
+    def _cv_attempt_to_row(self, attempt: CVCompositionAttempt) -> dict:
+        """Convert CVCompositionAttempt to database row dict."""
+        return {
+            "job_id": attempt.job_id,
+            "attempt_number": attempt.attempt_number,
+            "user_feedback": attempt.user_feedback,
+            "cv_json": attempt.cv_json,
+            "pdf_path": attempt.pdf_path,
+            "created_at": attempt.created_at,
+        }
+
+    def _row_to_cv_attempt(self, row: dict) -> CVCompositionAttempt:
+        """Convert database row dict to CVCompositionAttempt."""
+        return CVCompositionAttempt(
+            job_id=row["job_id"],
+            attempt_number=row["attempt_number"],
+            user_feedback=row.get("user_feedback"),
+            cv_json=self._parse_json_field(row.get("cv_json")) or {},
+            pdf_path=row.get("pdf_path"),
+            created_at=self._normalize_datetime(row.get("created_at")) or datetime.now(tz=timezone.utc),
         )
 
     # =========================================================================
@@ -688,6 +817,7 @@ class SQLiteJobRepository(JobRepository):
         Raises:
             RepositoryError: If job not found.
             ValueError: If updates contain invalid field names.
+            InvalidStateTransition: If status transition is not allowed.
         """
         self._ensure_initialized()
         from .tables import Job
@@ -701,6 +831,16 @@ class SQLiteJobRepository(JobRepository):
         invalid_fields = set(updates.keys()) - UPDATABLE_FIELDS
         if invalid_fields:
             raise ValueError(f"Invalid update fields: {invalid_fields}")
+
+        # Validate state transition if status is being changed
+        if "status" in updates:
+            current_status = existing["status"]
+            new_status = updates["status"]
+            if not isinstance(current_status, BusinessState):
+                current_status = BusinessState(current_status)
+            if not isinstance(new_status, BusinessState):
+                new_status = BusinessState(new_status)
+            validate_transition(current_status, new_status, job_id)
 
         # Auto-set updated_at
         updates["updated_at"] = datetime.now(tz=timezone.utc)
@@ -747,7 +887,7 @@ class SQLiteJobRepository(JobRepository):
 
         rows = (
             await Job.select()
-            .where(Job.status == "pending")
+            .where(Job.status == BusinessState.PENDING_REVIEW)
             .order_by(Job.created_at, ascending=False)
             .run()
         )
@@ -840,6 +980,50 @@ class SQLiteJobRepository(JobRepository):
         return [self._row_to_job_record(row) for row in rows]
 
     # =========================================================================
+    # CV Attempt Methods
+    # =========================================================================
+
+    async def create_cv_attempt(self, attempt: CVCompositionAttempt) -> None:
+        """Create a new CV composition attempt record."""
+        self._ensure_initialized()
+        from .tables import CVAttemptTable
+
+        row_data = self._cv_attempt_to_row(attempt)
+        await CVAttemptTable.insert(CVAttemptTable(**row_data)).run()
+        logger.debug(
+            f"Created CV attempt {attempt.attempt_number} for job {attempt.job_id}"
+        )
+
+    async def get_cv_attempts(self, job_id: str) -> list[CVCompositionAttempt]:
+        """Get all CV attempts for a job, ordered by attempt_number."""
+        self._ensure_initialized()
+        from .tables import CVAttemptTable
+
+        rows = (
+            await CVAttemptTable.select()
+            .where(CVAttemptTable.job_id == job_id)
+            .order_by(CVAttemptTable.attempt_number, ascending=True)
+            .run()
+        )
+        return [self._row_to_cv_attempt(row) for row in rows]
+
+    async def get_latest_cv_attempt(self, job_id: str) -> Optional[CVCompositionAttempt]:
+        """Get the most recent CV attempt for a job."""
+        self._ensure_initialized()
+        from .tables import CVAttemptTable
+
+        row = (
+            await CVAttemptTable.select()
+            .where(CVAttemptTable.job_id == job_id)
+            .order_by(CVAttemptTable.attempt_number, ascending=False)
+            .first()
+            .run()
+        )
+        if not row:
+            return None
+        return self._row_to_cv_attempt(row)
+
+    # =========================================================================
     # Specialized Methods
     # =========================================================================
 
@@ -879,7 +1063,7 @@ class SQLiteJobRepository(JobRepository):
             ValueError: If older_than_days < 1 or statuses is empty.
         """
         self._ensure_initialized()
-        from .tables import Job
+        from .tables import CVAttemptTable, Job
 
         if older_than_days < 1:
             raise ValueError("older_than_days must be >= 1")
@@ -898,6 +1082,13 @@ class SQLiteJobRepository(JobRepository):
         count = len(to_delete)
 
         if count > 0:
+            # Delete associated CV attempts first
+            job_ids = [row["job_id"] for row in to_delete]
+            await (
+                CVAttemptTable.delete()
+                .where(CVAttemptTable.job_id.is_in(job_ids))
+                .run()
+            )
             await (
                 Job.delete()
                 .where(Job.status.is_in(statuses))

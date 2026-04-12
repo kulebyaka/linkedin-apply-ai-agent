@@ -8,11 +8,22 @@ This module contains models for:
 """
 
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
-from .mvp import JobDescriptionInput
+from .state_machine import BusinessState, WorkflowStep
+
+
+class JobDescriptionInput(BaseModel):
+    """User input for CV generation."""
+    title: str = Field(..., description="Job title")
+    company: str = Field(..., description="Company name")
+    description: str = Field(..., description="Full job description")
+    requirements: Optional[str] = Field(None, description="Job requirements section")
+    template_name: Optional[str] = Field(None, description="CV template: modern, compact, classic, minimal, profile-card")
+    llm_provider: Optional[Literal["openai", "anthropic"]] = Field(None, description="LLM provider: openai, anthropic")
+    llm_model: Optional[str] = Field(None, description="LLM model name (e.g., gpt-4.1-nano, claude-haiku-4.5)")
 
 # =============================================================================
 # Job Submission Models
@@ -48,7 +59,7 @@ class JobSubmitRequest(BaseModel):
 class JobSubmitResponse(BaseModel):
     """Response after job submission."""
     job_id: str
-    status: Literal["queued"] = "queued"
+    status: str = BusinessState.QUEUED
     message: str = "Job submitted successfully"
 
 
@@ -66,12 +77,20 @@ class HITLDecision(BaseModel):
         None,
         description="User feedback (required if decision='retry')"
     )
+    decided_at: datetime = Field(
+        default_factory=lambda: datetime.now(tz=timezone.utc),
+        description="Timestamp of the decision"
+    )
+    reasoning: str | None = Field(
+        None,
+        description="Optional reasoning for the decision"
+    )
 
 
 class HITLDecisionResponse(BaseModel):
     """Response after HITL decision submission."""
     job_id: str
-    status: Literal["approved", "applying", "declined", "retrying"]
+    status: str
     message: str
 
 
@@ -84,7 +103,7 @@ class PendingApproval(BaseModel):
     job_posting: dict = Field(..., description="Normalized job posting data")
     cv_json: dict = Field(..., description="Generated tailored CV as JSON")
     pdf_path: str | None = Field(None, description="Path to generated PDF file")
-    retry_count: int = Field(0, description="Number of retry attempts")
+    attempt_count: int = Field(0, description="Number of CV composition attempts")
     created_at: datetime
     source: Literal["url", "manual", "linkedin"]
     application_url: str | None = None
@@ -94,48 +113,30 @@ class PendingApproval(BaseModel):
 # Job Record Models (for DB persistence)
 # =============================================================================
 
-class JobStatus(str):
-    """Job status enum values."""
-    QUEUED = "queued"
-    EXTRACTING = "extracting"
-    FILTERING = "filtering"
-    COMPOSING_CV = "composing_cv"
-    GENERATING_PDF = "generating_pdf"
-    PENDING = "pending"  # Waiting for HITL
-    APPROVED = "approved"
-    APPLYING = "applying"
-    APPLIED = "applied"
-    FAILED = "failed"
-    DECLINED = "declined"
-    COMPLETED = "completed"  # MVP mode - PDF ready for download
-
-
 class JobRecord(BaseModel):
     """Job record for database persistence.
 
     This is the main data structure stored in the repository.
+    CV composition history is tracked separately via CVCompositionAttempt.
+    The current_cv_json and current_pdf_path fields are denormalized
+    quick-access copies of the latest CV attempt data.
     """
     job_id: str
     source: Literal["url", "manual", "linkedin"]
     mode: Literal["mvp", "full"]
-    status: str = Field(default="queued")
+    status: BusinessState = Field(default=BusinessState.QUEUED)
+    workflow_step: WorkflowStep | None = None
 
     # Job data
     job_posting: dict | None = None
     raw_input: dict | None = None  # Original URL or manual input
 
-    # CV data
-    cv_json: dict | None = None
-    pdf_path: str | None = None
+    # Denormalized quick-access to latest CV attempt
+    current_cv_json: dict | None = None
+    current_pdf_path: str | None = None
 
     # Application data
     application_url: str | None = None
-    application_type: Literal["deep_agent", "linkedin", "manual"] | None = None
-    application_result: dict | None = None
-
-    # HITL data
-    user_feedback: str | None = None
-    retry_count: int = 0
 
     # Error tracking
     error_message: str | None = None
@@ -143,7 +144,6 @@ class JobRecord(BaseModel):
     # Timestamps
     created_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
-    applied_at: datetime | None = None
 
 
 # =============================================================================
@@ -159,12 +159,10 @@ class JobStatusResponse(BaseModel):
     job_posting: dict | None = None
     cv_json: dict | None = None
     pdf_path: str | None = None
-    application_result: dict | None = None
     error_message: str | None = None
-    retry_count: int = 0
+    attempt_count: int = 0
     created_at: datetime
     updated_at: datetime
-    applied_at: datetime | None = None
 
 
 class ApplicationHistoryItem(BaseModel):
@@ -173,6 +171,4 @@ class ApplicationHistoryItem(BaseModel):
     job_title: str | None = None
     company: str | None = None
     status: str
-    application_type: str | None = None
-    applied_at: datetime | None = None
     created_at: datetime

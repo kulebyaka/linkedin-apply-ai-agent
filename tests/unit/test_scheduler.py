@@ -160,20 +160,45 @@ class TestLinkedInSearchAPI:
 
     @pytest.fixture
     def client(self):
-        """Create a test client with mocked scheduler state."""
+        """Create a test client with mocked AppContext."""
         try:
             from fastapi.testclient import TestClient
 
             import src.api.main as main_module
+            from src.config.settings import Settings
+            from src.context import AppContext
+            from src.services.job_queue import JobQueue
 
-            return TestClient(main_module.app), main_module
+            # Create test settings that disable fixture replay mode
+            test_settings = Settings(_env_file=None, seed_jobs_from_file=False)
+
+            # Create a mock AppContext and attach to app.state
+            mock_repo = MagicMock()
+            mock_repo.initialize = AsyncMock()
+            mock_repo.close = AsyncMock()
+            ctx = AppContext(
+                repository=mock_repo,
+                settings=test_settings,
+                prep_workflow=MagicMock(),
+                retry_workflow=MagicMock(),
+                job_queue=JobQueue(),
+            )
+            main_module.app.state.ctx = ctx
+
+            # Override module-level settings for the trigger_search endpoint check
+            original_settings = main_module.settings
+            main_module.settings = test_settings
+
+            yield TestClient(main_module.app, raise_server_exceptions=False), ctx
+
+            main_module.settings = original_settings
         except OSError:
             pytest.skip("WeasyPrint system libraries not available")
 
     def test_search_status_no_scheduler(self, client):
-        test_client, main_module = client
-        original = main_module._linkedin_scheduler
-        main_module._linkedin_scheduler = None
+        test_client, ctx = client
+        original = ctx.scheduler
+        ctx.scheduler = None
         try:
             response = test_client.get("/api/jobs/linkedin-search/status")
             assert response.status_code == 200
@@ -182,18 +207,18 @@ class TestLinkedInSearchAPI:
             assert data["last_run_time"] is None
             assert data["last_run_jobs"] == 0
         finally:
-            main_module._linkedin_scheduler = original
+            ctx.scheduler = original
 
     def test_search_status_with_scheduler(self, client):
-        test_client, main_module = client
+        test_client, ctx = client
         mock_scheduler = MagicMock()
         mock_scheduler.is_running = True
         mock_scheduler.last_run_time = datetime(2026, 3, 6, 12, 0, 0)
         mock_scheduler.last_run_jobs = 5
         mock_scheduler.next_run_time = datetime(2026, 3, 6, 13, 0, 0)
 
-        original = main_module._linkedin_scheduler
-        main_module._linkedin_scheduler = mock_scheduler
+        original = ctx.scheduler
+        ctx.scheduler = mock_scheduler
         try:
             response = test_client.get("/api/jobs/linkedin-search/status")
             assert response.status_code == 200
@@ -202,16 +227,16 @@ class TestLinkedInSearchAPI:
             assert data["last_run_jobs"] == 5
             assert "2026-03-06" in data["last_run_time"]
         finally:
-            main_module._linkedin_scheduler = original
+            ctx.scheduler = original
 
     def test_trigger_search_returns_started(self, client):
-        test_client, main_module = client
+        test_client, ctx = client
 
         mock_scheduler = MagicMock()
         mock_scheduler.run_search = AsyncMock(return_value=3)
 
-        original = main_module._linkedin_scheduler
-        main_module._linkedin_scheduler = mock_scheduler
+        original = ctx.scheduler
+        ctx.scheduler = mock_scheduler
         try:
             response = test_client.post("/api/jobs/linkedin-search")
             assert response.status_code == 200
@@ -219,4 +244,4 @@ class TestLinkedInSearchAPI:
             assert data["status"] == "started"
             assert data["message"] == "LinkedIn search triggered"
         finally:
-            main_module._linkedin_scheduler = original
+            ctx.scheduler = original

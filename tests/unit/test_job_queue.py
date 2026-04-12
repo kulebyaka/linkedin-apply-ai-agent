@@ -1,12 +1,13 @@
-"""Tests for async job queue, LinkedInJobAdapter, and queue consumer."""
+"""Tests for async job queue, LinkedInJobAdapter, queue consumer, and ConsumerManager."""
 
 import asyncio
-from unittest.mock import MagicMock
+import logging
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from src.models.job import ScrapedJob
-from src.services.job_queue import JobQueue, get_job_queue, set_job_queue, process_queue
+from src.services.job_queue import ConsumerManager, JobQueue, process_queue
 from src.services.job_source import LinkedInJobAdapter
 
 pytestmark = pytest.mark.asyncio
@@ -77,24 +78,6 @@ class TestJobQueueBatch:
         count = await q.put_batch([])
         assert count == 0
         assert q.is_empty()
-
-
-class TestJobQueueSingleton:
-    """Test module-level singleton accessors."""
-
-    def test_get_creates_default(self):
-        set_job_queue(None)  # type: ignore[arg-type]
-        # Reset by directly manipulating the module global
-        import src.services.job_queue as mod
-
-        mod._job_queue = None
-        q = get_job_queue()
-        assert isinstance(q, JobQueue)
-
-    def test_set_and_get(self):
-        custom = JobQueue(max_size=5)
-        set_job_queue(custom)
-        assert get_job_queue() is custom
 
 
 # ---------------------------------------------------------------------------
@@ -233,9 +216,9 @@ class TestProcessQueue:
     """Test the queue consumer function."""
 
     def _make_workflow_mock(self):
-        """Create a mock compiled workflow."""
+        """Create a mock compiled workflow with async ainvoke."""
         wf = MagicMock()
-        wf.stream.return_value = [{"step": "done"}]
+        wf.ainvoke = AsyncMock(return_value={"step": "done"})
         return wf
 
     async def test_processes_jobs_in_order(self):
@@ -250,15 +233,15 @@ class TestProcessQueue:
         cv_loader = lambda: {"contact": {"full_name": "Test"}}
 
         count = await process_queue(
-            q, workflow=wf, master_cv_loader=cv_loader, delay_between_jobs=0, stop_event=stop
+            q, workflow=wf, master_cv_loader=cv_loader, job_repository=AsyncMock(get=AsyncMock(return_value=None)), delay_between_jobs=0, stop_event=stop
         )
 
         assert count == 2
-        assert wf.stream.call_count == 2
+        assert wf.ainvoke.call_count == 2
 
-        first_call_state = wf.stream.call_args_list[0][0][0]
+        first_call_state = wf.ainvoke.call_args_list[0][0][0]
         assert first_call_state["job_id"] == "a"
-        second_call_state = wf.stream.call_args_list[1][0][0]
+        second_call_state = wf.ainvoke.call_args_list[1][0][0]
         assert second_call_state["job_id"] == "b"
 
     async def test_handles_workflow_failure_gracefully(self):
@@ -272,18 +255,18 @@ class TestProcessQueue:
         wf = MagicMock()
         call_count = 0
 
-        def side_effect(state, config=None):
+        async def side_effect(state, config=None):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
                 raise RuntimeError("LLM error")
-            return [{"step": "done"}]
+            return {"step": "done"}
 
-        wf.stream.side_effect = side_effect
+        wf.ainvoke = AsyncMock(side_effect=side_effect)
         cv_loader = lambda: {"contact": {"full_name": "Test"}}
 
         count = await process_queue(
-            q, workflow=wf, master_cv_loader=cv_loader, delay_between_jobs=0, stop_event=stop
+            q, workflow=wf, master_cv_loader=cv_loader, job_repository=AsyncMock(get=AsyncMock(return_value=None)), delay_between_jobs=0, stop_event=stop
         )
 
         assert count == 1
@@ -294,10 +277,11 @@ class TestProcessQueue:
         stop.set()
 
         wf = MagicMock()
+        wf.ainvoke = AsyncMock()
         cv_loader = lambda: {}
 
         count = await process_queue(
-            q, workflow=wf, master_cv_loader=cv_loader, delay_between_jobs=0, stop_event=stop
+            q, workflow=wf, master_cv_loader=cv_loader, job_repository=AsyncMock(get=AsyncMock(return_value=None)), delay_between_jobs=0, stop_event=stop
         )
 
         assert count == 0
@@ -314,10 +298,10 @@ class TestProcessQueue:
         cv_loader = lambda: master
 
         await process_queue(
-            q, workflow=wf, master_cv_loader=cv_loader, delay_between_jobs=0, stop_event=stop
+            q, workflow=wf, master_cv_loader=cv_loader, job_repository=AsyncMock(get=AsyncMock(return_value=None)), delay_between_jobs=0, stop_event=stop
         )
 
-        state = wf.stream.call_args[0][0]
+        state = wf.ainvoke.call_args[0][0]
         assert state["source"] == "linkedin"
         assert state["mode"] == "full"
         assert state["master_cv"] == master
@@ -325,3 +309,166 @@ class TestProcessQueue:
         # raw_input should be a dict (model_dump output)
         assert isinstance(state["raw_input"], dict)
         assert state["raw_input"]["job_id"] == "x"
+
+
+# ---------------------------------------------------------------------------
+# put_batch dropped-job logging
+# ---------------------------------------------------------------------------
+
+
+class TestPutBatchDroppedDetails:
+    """Test that put_batch logs dropped job IDs and titles."""
+
+    async def test_dropped_jobs_include_ids_and_titles(self, caplog):
+        q = JobQueue(max_size=2)
+        jobs = [
+            _job("a", title="Engineer"),
+            _job("b", title="Designer"),
+            _job("c", title="PM"),
+            _job("d", title="Analyst"),
+        ]
+        with caplog.at_level(logging.WARNING, logger="src.services.job_queue"):
+            count = await q.put_batch(jobs)
+
+        assert count == 2
+        assert "dropping 2 jobs" in caplog.text
+        assert "c (PM)" in caplog.text
+        assert "d (Analyst)" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# ConsumerManager
+# ---------------------------------------------------------------------------
+
+
+def _make_mock_ctx():
+    """Create a minimal mock AppContext for ConsumerManager tests."""
+    ctx = MagicMock()
+    ctx.job_queue = JobQueue()
+    ctx.repository = AsyncMock()
+    ctx.register_workflow = AsyncMock()
+    return ctx
+
+
+class TestConsumerManagerHealthCheck:
+    """Test health_check reflects state correctly."""
+
+    def test_initial_health(self):
+        cm = ConsumerManager()
+        health = cm.health_check()
+        assert health["queue_consumer_healthy"] is True
+        assert health["consumer_restart_count"] == 0
+        assert health["consumer_running"] is False
+
+    def test_health_after_reset(self):
+        cm = ConsumerManager()
+        cm.restart_count = 3
+        cm.is_healthy = False
+        cm.reset()
+        health = cm.health_check()
+        assert health["queue_consumer_healthy"] is True
+        assert health["consumer_restart_count"] == 0
+
+
+class TestConsumerManagerRestartTracking:
+    """Test restart count tracking and max restarts behavior."""
+
+    def test_restart_count_increments(self):
+        cm = ConsumerManager(max_restarts=3)
+        assert cm.restart_count == 0
+        cm.restart_count = 1
+        assert cm.restart_count == 1
+
+    def test_max_restarts_sets_unhealthy(self):
+        cm = ConsumerManager(max_restarts=2)
+        # Simulate exceeding max restarts
+        cm.restart_count = 3
+        cm.is_healthy = False
+        health = cm.health_check()
+        assert health["queue_consumer_healthy"] is False
+
+    def test_reset_restores_health(self):
+        cm = ConsumerManager(max_restarts=2)
+        cm.restart_count = 5
+        cm.is_healthy = False
+        cm.reset()
+        assert cm.is_healthy is True
+        assert cm.restart_count == 0
+
+
+class TestConsumerManagerStartStop:
+    """Test start/stop lifecycle."""
+
+    async def test_start_creates_task(self):
+        cm = ConsumerManager()
+        ctx = _make_mock_ctx()
+
+        # Patch process_queue to exit immediately
+        with patch("src.services.job_queue.process_queue", new_callable=AsyncMock, return_value=0):
+            task = cm.start(ctx)
+            assert task is not None
+            assert cm.task is task
+            health = cm.health_check()
+            assert health["consumer_running"] is True
+
+            # Let the task finish
+            await task
+            health = cm.health_check()
+            assert health["consumer_running"] is False
+
+    async def test_stop_cancels_task(self):
+        cm = ConsumerManager()
+        ctx = _make_mock_ctx()
+
+        async def _hang_forever(queue, **kwargs):
+            await asyncio.sleep(3600)
+            return 0
+
+        with patch("src.services.job_queue.process_queue", side_effect=_hang_forever):
+            cm.start(ctx)
+            assert cm.task is not None
+            assert not cm.task.done()
+
+            cm.stop()
+            await cm.wait_stopped()
+            assert cm.task is None
+
+    async def test_consumer_crash_increments_restart_count(self):
+        cm = ConsumerManager(max_restarts=5, backoff_base=0.01)
+        ctx = _make_mock_ctx()
+
+        call_count = 0
+
+        async def _crash_then_stop(queue, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise RuntimeError("boom")
+            # Second call: exit cleanly
+            await asyncio.sleep(0.05)
+            return 0
+
+        with patch("src.services.job_queue.process_queue", side_effect=_crash_then_stop):
+            cm.start(ctx)
+            # Wait for crash and restart cycle
+            await asyncio.sleep(0.3)
+
+        assert cm.restart_count == 0  # reset after successful exit
+        assert cm.is_healthy is True
+
+    async def test_exceeding_max_restarts_marks_unhealthy(self, caplog):
+        cm = ConsumerManager(max_restarts=2, backoff_base=0.01)
+        ctx = _make_mock_ctx()
+
+        async def _always_crash(queue, **kwargs):
+            raise RuntimeError("persistent failure")
+
+        with patch("src.services.job_queue.process_queue", side_effect=_always_crash):
+            with caplog.at_level(logging.CRITICAL, logger="src.services.job_queue"):
+                cm.start(ctx)
+                # Wait for crashes to exhaust restarts: crash 1 (delay 0.01), crash 2 (delay 0.02), crash 3 gives up
+                await asyncio.sleep(0.5)
+
+        assert cm.is_healthy is False
+        assert cm.restart_count > cm.max_restarts
+        assert "giving up" in caplog.text.lower()

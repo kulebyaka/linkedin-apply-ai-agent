@@ -89,6 +89,7 @@ class Settings(BaseSettings):
     cv_composer_temperature_sections: float = 0.4  # Balanced for CV sections
     cv_composer_max_retries: int = 3  # Max retries for JSON generation
     cv_composer_enable_hallucination_checks: bool = True  # Validate against master CV
+    cv_composer_hallucination_policy: str = "strict"  # Fine-grained control: "strict", "warn", "disabled"
     cv_composer_model_override: str | None = None  # Override LLM model for CV composition
 
     # CV Length Limits (for 2-page target)
