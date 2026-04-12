@@ -78,13 +78,13 @@ Create the database schema for users and magic link tokens, and the Pydantic mod
 - Create: `src/models/user.py`
 - Modify: `pyproject.toml`
 
-- [ ] Add `resend` and `pyjwt` to `pyproject.toml` dependencies, run `uv sync`
-- [ ] Add `UserTable` Piccolo table to `src/services/tables.py` with columns: `id` (UUID VARCHAR 36, PK), `email` (Varchar 255, unique, indexed), `display_name` (Varchar 100), `master_cv_json` (JSON, null=True), `search_preferences` (JSON, null=True — stores serialized `LinkedInSearchParams`), `created_at` (Timestamptz, indexed), `updated_at` (Timestamptz)
-- [ ] Add `MagicLinkTable` Piccolo table to `src/services/tables.py` with columns: `token` (Varchar 64, PK), `email` (Varchar 255, indexed), `expires_at` (Timestamptz), `used` (Boolean, default=False)
-- [ ] Add `user_id` column (Varchar 36, indexed, null=False) to `Job` table and `CVAttemptTable` in `src/services/tables.py`
-- [ ] Create `src/models/user.py` with Pydantic models: `User` (id, email, display_name, master_cv_json, search_preferences, created_at, updated_at), `LoginRequest` (email), `LoginResponse` (message), `VerifyRequest` (token), `AuthResponse` (user: User, message), `UserUpdateRequest` (display_name, master_cv_json, search_preferences — all optional), `UserSearchPreferences` (mirrors `LinkedInSearchParams` fields: keywords, location, remote_filter, date_posted, experience_level, job_type, easy_apply_only, max_jobs)
-- [ ] Write unit tests for Pydantic models in `tests/unit/test_user_models.py`: validate serialization, optional fields, search preferences defaults
-- [ ] Run project test suite — must pass before task 2
+- [x] Add `resend` and `pyjwt` to `pyproject.toml` dependencies, run `uv sync`
+- [x] Add `UserTable` Piccolo table to `src/services/tables.py` with columns: `id` (UUID VARCHAR 36, PK), `email` (Varchar 255, unique, indexed), `display_name` (Varchar 100), `master_cv_json` (JSON, null=True), `search_preferences` (JSON, null=True — stores serialized `LinkedInSearchParams`), `created_at` (Timestamptz, indexed), `updated_at` (Timestamptz)
+- [x] Add `MagicLinkTable` Piccolo table to `src/services/tables.py` with columns: `token` (Varchar 64, PK), `email` (Varchar 255, indexed), `expires_at` (Timestamptz), `used` (Boolean, default=False)
+- [x] Add `user_id` column (Varchar 36, indexed, null=False) to `Job` table and `CVAttemptTable` in `src/services/tables.py`
+- [x] Create `src/models/user.py` with Pydantic models: `User` (id, email, display_name, master_cv_json, search_preferences, created_at, updated_at), `LoginRequest` (email), `LoginResponse` (message), `VerifyRequest` (token), `AuthResponse` (user: User, message), `UserUpdateRequest` (display_name, master_cv_json, search_preferences — all optional), `UserSearchPreferences` (mirrors `LinkedInSearchParams` fields: keywords, location, remote_filter, date_posted, experience_level, job_type, easy_apply_only, max_jobs)
+- [x] Write unit tests for Pydantic models in `tests/unit/test_user_models.py`: validate serialization, optional fields, search preferences defaults
+- [x] Run project test suite — must pass before task 2
 
 ### Task 2: Auth service + User repository + API endpoints
 

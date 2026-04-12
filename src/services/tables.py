@@ -1,17 +1,45 @@
-"""Piccolo ORM table definitions for job persistence.
+"""Piccolo ORM table definitions for job persistence and user management.
 
-This module defines the database schema for storing job records
-and CV composition attempts.
+This module defines the database schema for storing job records,
+CV composition attempts, users, and magic link tokens.
 """
 
 from piccolo.columns import (
     JSON,
+    Boolean,
     Integer,
     Text,
     Timestamptz,
     Varchar,
 )
 from piccolo.table import Table
+
+
+class UserTable(Table, tablename="user"):
+    """Piccolo ORM model for user accounts.
+
+    Stores user profile, master CV, and LinkedIn search preferences.
+    """
+
+    id = Varchar(length=36, primary_key=True)  # UUID
+    email = Varchar(length=255, unique=True, index=True)
+    display_name = Varchar(length=100)
+    master_cv_json = JSON(null=True)
+    search_preferences = JSON(null=True)  # Serialized LinkedInSearchParams
+    created_at = Timestamptz(index=True)
+    updated_at = Timestamptz()
+
+
+class MagicLinkTable(Table, tablename="magic_link"):
+    """Piccolo ORM model for magic link authentication tokens.
+
+    Stores short-lived tokens for passwordless email authentication.
+    """
+
+    token = Varchar(length=64, primary_key=True)
+    email = Varchar(length=255, index=True)
+    expires_at = Timestamptz()
+    used = Boolean(default=False)
 
 
 class Job(Table):
@@ -23,6 +51,9 @@ class Job(Table):
 
     # Primary key
     job_id = Varchar(length=36, primary_key=True)  # UUID
+
+    # Owner
+    user_id = Varchar(length=36, index=True)
 
     # Metadata
     source = Varchar(length=20)  # url, manual, linkedin
@@ -57,6 +88,9 @@ class CVAttemptTable(Table, tablename="cv_attempt"):
     # Composite identity: job_id + attempt_number
     job_id = Varchar(length=36, index=True)
     attempt_number = Integer()
+
+    # Owner
+    user_id = Varchar(length=36, index=True)
 
     # Attempt data
     user_feedback = Text(null=True)
