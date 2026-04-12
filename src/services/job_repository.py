@@ -608,7 +608,7 @@ class SQLiteJobRepository(JobRepository):
         """
         from piccolo.engine.sqlite import SQLiteEngine
 
-        from .tables import CVAttemptTable, Job
+        from .tables import CVAttemptTable, Job, MagicLinkTable, UserTable
 
         # Ensure data directory exists
         db_dir = Path(self.db_path).parent
@@ -620,9 +620,13 @@ class SQLiteJobRepository(JobRepository):
         # Set the engine on tables for this repository instance
         Job._meta._db = self._engine
         CVAttemptTable._meta._db = self._engine
+        UserTable._meta._db = self._engine
+        MagicLinkTable._meta._db = self._engine
 
         # Create tables if they don't exist
         try:
+            await UserTable.create_table(if_not_exists=True).run()
+            await MagicLinkTable.create_table(if_not_exists=True).run()
             await Job.create_table(if_not_exists=True).run()
             await CVAttemptTable.create_table(if_not_exists=True).run()
 

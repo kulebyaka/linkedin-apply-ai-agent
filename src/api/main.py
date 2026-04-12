@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import Cookie, Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -27,6 +27,14 @@ from src.models.unified import (
     JobSubmitRequest,
     JobSubmitResponse,
     PendingApproval,
+)
+from src.models.user import (
+    AuthResponse,
+    LoginRequest,
+    LoginResponse,
+    User,
+    UserSearchPreferences,
+    UserUpdateRequest,
 )
 from src.services.hitl_processor import HITLProcessor
 from src.services.job_orchestrator import JobOrchestrator
@@ -54,6 +62,64 @@ _linkedin_init_lock = asyncio.Lock()
 def _get_ctx(request: Request) -> AppContext:
     """Helper to retrieve AppContext from request."""
     return request.app.state.ctx
+
+
+async def get_current_user(
+    request: Request,
+    auth_token: str | None = Cookie(default=None),
+) -> User:
+    """FastAPI dependency: require authenticated user.
+
+    Reads JWT from the auth_token cookie, decodes it, and looks up
+    the user in the repository. Raises 401 if not authenticated.
+    """
+    if not auth_token:
+        raise HTTPException(401, "Not authenticated")
+
+    ctx = _get_ctx(request)
+    if ctx.auth_service is None:
+        raise HTTPException(500, "Auth service not initialized")
+
+    try:
+        claims = ctx.auth_service.decode_jwt(auth_token)
+    except ValueError:
+        raise HTTPException(401, "Invalid or expired token") from None
+
+    user = await ctx.user_repository.get_by_id(claims["user_id"])
+    if user is None:
+        raise HTTPException(401, "User not found")
+
+    return user
+
+
+async def get_optional_user(
+    request: Request,
+    auth_token: str | None = Cookie(default=None),
+) -> User | None:
+    """FastAPI dependency: optionally authenticated user.
+
+    Returns User if valid auth cookie present, None otherwise.
+    Does not raise 401 — for public endpoints that behave
+    differently when authenticated.
+    """
+    if not auth_token:
+        return None
+
+    ctx = _get_ctx(request)
+    if ctx.auth_service is None:
+        return None
+
+    try:
+        claims = ctx.auth_service.decode_jwt(auth_token)
+    except ValueError:
+        return None
+
+    return await ctx.user_repository.get_by_id(claims["user_id"])
+
+
+# Type aliases for dependency injection (avoids B008 ruff error)
+CurrentUser = Annotated[User, Depends(get_current_user)]
+OptionalUser = Annotated[User | None, Depends(get_optional_user)]
 
 
 @asynccontextmanager
@@ -171,6 +237,115 @@ async def health():
         "message": "LinkedIn Job Application Agent API",
         **_consumer_manager.health_check(),
     }
+
+
+# =============================================================================
+# Authentication Endpoints
+# =============================================================================
+
+
+@app.post("/api/auth/login", response_model=LoginResponse)
+async def auth_login(body: LoginRequest, request: Request) -> LoginResponse:
+    """Request a magic link login email."""
+    ctx = _get_ctx(request)
+    if ctx.auth_service is None:
+        raise HTTPException(500, "Auth service not initialized")
+
+    try:
+        await ctx.auth_service.send_magic_link(body.email)
+    except RuntimeError as e:
+        raise HTTPException(500, str(e)) from None
+
+    return LoginResponse(message="Check your email for a magic link")
+
+
+@app.get("/api/auth/verify", response_model=AuthResponse)
+async def auth_verify(
+    request: Request,
+    response: Response,
+    token: str = Query(...),
+) -> AuthResponse:
+    """Verify a magic link token and set auth cookie."""
+    ctx = _get_ctx(request)
+    if ctx.auth_service is None:
+        raise HTTPException(500, "Auth service not initialized")
+
+    try:
+        user = await ctx.auth_service.verify_token(token)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from None
+
+    jwt_token = ctx.auth_service.create_jwt(user.id, user.email)
+
+    response.set_cookie(
+        key="auth_token",
+        value=jwt_token,
+        httponly=True,
+        max_age=ctx.settings.jwt_expiry_days * 86400,
+        samesite="lax",
+        secure=False,  # Set True in production with HTTPS
+        path="/",
+    )
+
+    return AuthResponse(user=user, message="Logged in successfully")
+
+
+@app.get("/api/auth/me", response_model=User)
+async def auth_me(user: CurrentUser) -> User:
+    """Get the currently authenticated user."""
+    return user
+
+
+@app.post("/api/auth/logout")
+async def auth_logout(response: Response):
+    """Clear auth cookie to log out."""
+    response.delete_cookie(key="auth_token", path="/")
+    return {"message": "Logged out"}
+
+
+# =============================================================================
+# User Settings Endpoints
+# =============================================================================
+
+
+@app.put("/api/users/me", response_model=User)
+async def update_user_profile(
+    body: UserUpdateRequest,
+    request: Request,
+    user: CurrentUser,
+) -> User:
+    """Update current user's profile (display_name, master_cv_json, search_preferences)."""
+    ctx = _get_ctx(request)
+
+    updates = body.model_dump(exclude_none=True)
+    if not updates:
+        return user
+
+    updated = await ctx.user_repository.update(user.id, updates)
+    return updated
+
+
+@app.get("/api/users/me/search-preferences")
+async def get_search_preferences(
+    request: Request,
+    user: CurrentUser,
+):
+    """Get current user's LinkedIn search preferences."""
+    if user.search_preferences is None:
+        return UserSearchPreferences().model_dump()
+    return user.search_preferences.model_dump()
+
+
+@app.put("/api/users/me/search-preferences", response_model=User)
+async def update_search_preferences(
+    prefs: UserSearchPreferences,
+    request: Request,
+    user: CurrentUser,
+) -> User:
+    """Update current user's LinkedIn search preferences."""
+    ctx = _get_ctx(request)
+    updated = await ctx.user_repository.update(user.id, {"search_preferences": prefs})
+    return updated
 
 
 # =============================================================================

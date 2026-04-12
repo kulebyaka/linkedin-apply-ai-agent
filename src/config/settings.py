@@ -104,6 +104,13 @@ class Settings(BaseSettings):
     webhook_url: str | None = None
     notification_email: str | None = None
 
+    # Authentication
+    resend_api_key: str = ""
+    jwt_secret: str = "change-me-in-production"
+    magic_link_ttl_minutes: int = 15
+    jwt_expiry_days: int = 30
+    app_url: str = "http://localhost:5173"  # Base URL for magic link callback
+
     # API Server (for HITL UI)
     api_host: str = "0.0.0.0"
     api_port: int = 8000
