@@ -290,7 +290,7 @@ async def auth_verify(
         httponly=True,
         max_age=ctx.settings.jwt_expiry_days * 86400,
         samesite="lax",
-        secure=False,  # Set True in production with HTTPS
+        secure=not ctx.settings.debug,
         path="/",
     )
 

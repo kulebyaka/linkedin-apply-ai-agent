@@ -199,9 +199,10 @@ class UserRepository:
         Checks that the token exists, hasn't been used, and hasn't expired.
         If valid, marks it as used and returns the email.
 
-        The UPDATE uses WHERE used=False to narrow the race window: SQLite
-        serializes writes, so concurrent requests both see used=False on
-        SELECT, but only the first UPDATE matches the WHERE clause.
+        Uses raw SQL with rowcount check to prevent TOCTOU race: two
+        concurrent requests may both SELECT an unused token, but only one
+        UPDATE will match WHERE used=0. We check cursor.rowcount to ensure
+        only the winning request returns the email.
 
         Args:
             token: The magic link token to verify.
@@ -233,14 +234,21 @@ class UserRepository:
         if expires_at < datetime.now(tz=timezone.utc):
             return None
 
-        # Atomic: only update if still unused (WHERE used=False).
-        # SQLite serializes writes, so only one concurrent request succeeds.
-        await (
-            MagicLinkTable.update({MagicLinkTable.used: True})
-            .where(MagicLinkTable.token == token)
-            .where(MagicLinkTable.used.eq(False))
-            .run()
-        )
+        # Atomic claim: UPDATE only if still unused, check rowcount to
+        # ensure THIS request was the one that consumed the token.
+        engine = MagicLinkTable._meta._db
+        conn = await engine.get_connection()
+        try:
+            cursor = await conn.execute(
+                "UPDATE magic_link SET used = 1 WHERE token = ? AND used = 0",
+                (token,),
+            )
+            if cursor.rowcount == 0:
+                # Another concurrent request already consumed this token
+                return None
+            await conn.commit()
+        finally:
+            await conn.close()
 
         return row["email"]
 

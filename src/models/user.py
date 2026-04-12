@@ -26,7 +26,7 @@ class UserSearchPreferences(BaseModel):
     experience_level: list[str] | None = None  # "entry", "associate", "mid-senior", etc.
     job_type: list[str] | None = None  # "full-time", "part-time", "contract", etc.
     easy_apply_only: bool = False
-    max_jobs: int = 50
+    max_jobs: int = Field(default=50, ge=1, le=500)
 
 
 class User(BaseModel):
