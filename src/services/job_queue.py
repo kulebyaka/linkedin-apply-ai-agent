@@ -199,7 +199,7 @@ async def process_queue(
 
             if on_job_processed is not None:
                 try:
-                    on_job_processed(job.job_id, config["configurable"]["thread_id"])
+                    on_job_processed(job.job_id, config["configurable"]["thread_id"], user_id or "")
                 except Exception:
                     logger.debug("on_job_processed callback failed for %s", job.job_id)
 
@@ -333,9 +333,9 @@ class ConsumerManager:
             else:
                 self.restart_count = 0
 
-        def _register_linkedin_job(job_id: str, thread_id: str) -> None:
+        def _register_linkedin_job(job_id: str, thread_id: str, user_id: str = "") -> None:
             ctx.create_background_task(
-                ctx.register_workflow(job_id, thread_id, "preparation")
+                ctx.register_workflow(job_id, thread_id, "preparation", user_id=user_id)
             )
 
         from ..agents._shared import load_master_cv

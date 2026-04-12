@@ -280,7 +280,7 @@ class JobRepository(ABC):
     # =========================================================================
 
     @abstractmethod
-    async def find_by_application_url(self, url: str) -> JobRecord | None:
+    async def find_by_application_url(self, url: str, user_id: str | None = None) -> JobRecord | None:
         """Find a job by its application URL.
 
         Used for duplicate detection - prevents applying to the same
@@ -288,6 +288,7 @@ class JobRepository(ABC):
 
         Args:
             url: Application URL to search for.
+            user_id: If provided, only match jobs belonging to this user.
 
         Returns:
             JobRecord if found, None otherwise.
@@ -299,6 +300,7 @@ class JobRepository(ABC):
         self,
         older_than_days: int,
         statuses: list[str],
+        user_id: str | None = None,
     ) -> int:
         """Delete old jobs matching criteria.
 
@@ -308,6 +310,7 @@ class JobRepository(ABC):
         Args:
             older_than_days: Delete jobs older than this many days.
             statuses: Only delete jobs with these statuses.
+            user_id: If provided, only delete jobs belonging to this user.
 
         Returns:
             Number of records deleted.
@@ -529,17 +532,18 @@ class InMemoryJobRepository(JobRepository):
     # Specialized Methods
     # =========================================================================
 
-    async def find_by_application_url(self, url: str) -> JobRecord | None:
+    async def find_by_application_url(self, url: str, user_id: str | None = None) -> JobRecord | None:
         """Find a job by its application URL.
 
         Args:
             url: Application URL to search for.
+            user_id: If provided, only match jobs belonging to this user.
 
         Returns:
             JobRecord if found, None otherwise.
         """
         for job in self._jobs.values():
-            if job.application_url == url:
+            if job.application_url == url and (user_id is None or job.user_id == user_id):
                 return job
         return None
 
@@ -547,12 +551,14 @@ class InMemoryJobRepository(JobRepository):
         self,
         older_than_days: int,
         statuses: list[str],
+        user_id: str | None = None,
     ) -> int:
         """Delete old jobs matching criteria.
 
         Args:
             older_than_days: Delete jobs older than this many days.
             statuses: Only delete jobs with these statuses.
+            user_id: If provided, only delete jobs belonging to this user.
 
         Returns:
             Number of records deleted.
@@ -570,7 +576,9 @@ class InMemoryJobRepository(JobRepository):
             to_delete = [
                 job_id
                 for job_id, job in self._jobs.items()
-                if job.status in statuses and job.created_at < cutoff_date
+                if job.status in statuses
+                and job.created_at < cutoff_date
+                and (user_id is None or job.user_id == user_id)
             ]
 
             for job_id in to_delete:
@@ -751,6 +759,7 @@ class SQLiteJobRepository(JobRepository):
         """Convert CVCompositionAttempt to database row dict."""
         return {
             "job_id": attempt.job_id,
+            "user_id": attempt.user_id,
             "attempt_number": attempt.attempt_number,
             "user_feedback": attempt.user_feedback,
             "cv_json": attempt.cv_json,
@@ -762,6 +771,7 @@ class SQLiteJobRepository(JobRepository):
         """Convert database row dict to CVCompositionAttempt."""
         return CVCompositionAttempt(
             job_id=row["job_id"],
+            user_id=row.get("user_id", ""),
             attempt_number=row["attempt_number"],
             user_feedback=row.get("user_feedback"),
             cv_json=self._parse_json_field(row.get("cv_json")) or {},
@@ -1032,11 +1042,12 @@ class SQLiteJobRepository(JobRepository):
     # Specialized Methods
     # =========================================================================
 
-    async def find_by_application_url(self, url: str) -> JobRecord | None:
+    async def find_by_application_url(self, url: str, user_id: str | None = None) -> JobRecord | None:
         """Find a job by its application URL.
 
         Args:
             url: Application URL to search for.
+            user_id: If provided, only match jobs belonging to this user.
 
         Returns:
             JobRecord if found, None otherwise.
@@ -1044,7 +1055,10 @@ class SQLiteJobRepository(JobRepository):
         self._ensure_initialized()
         from .tables import Job
 
-        row = await Job.select().where(Job.application_url == url).first().run()
+        query = Job.select().where(Job.application_url == url)
+        if user_id is not None:
+            query = query.where(Job.user_id == user_id)
+        row = await query.first().run()
         if not row:
             return None
 
@@ -1054,12 +1068,14 @@ class SQLiteJobRepository(JobRepository):
         self,
         older_than_days: int,
         statuses: list[str],
+        user_id: str | None = None,
     ) -> int:
         """Delete old jobs matching criteria.
 
         Args:
             older_than_days: Delete jobs older than this many days.
             statuses: Only delete jobs with these statuses.
+            user_id: If provided, only delete jobs belonging to this user.
 
         Returns:
             Number of records deleted.
@@ -1077,29 +1093,23 @@ class SQLiteJobRepository(JobRepository):
 
         cutoff_date = datetime.now(tz=timezone.utc) - timedelta(days=older_than_days)
 
-        # Count jobs to delete
-        to_delete = (
-            await Job.select(Job.job_id)
-            .where(Job.status.is_in(statuses))
-            .where(Job.created_at < cutoff_date)
-            .run()
-        )
+        # Build query with optional user_id filter
+        query = Job.select(Job.job_id).where(Job.status.is_in(statuses)).where(Job.created_at < cutoff_date)
+        if user_id is not None:
+            query = query.where(Job.user_id == user_id)
+
+        to_delete = await query.run()
         count = len(to_delete)
 
         if count > 0:
-            # Delete associated CV attempts first
             job_ids = [row["job_id"] for row in to_delete]
             await (
                 CVAttemptTable.delete()
                 .where(CVAttemptTable.job_id.is_in(job_ids))
                 .run()
             )
-            await (
-                Job.delete()
-                .where(Job.status.is_in(statuses))
-                .where(Job.created_at < cutoff_date)
-                .run()
-            )
+            delete_query = Job.delete().where(Job.job_id.is_in(job_ids))
+            await delete_query.run()
 
         logger.info(f"Cleanup: deleted {count} jobs older than {older_than_days} days")
         return count

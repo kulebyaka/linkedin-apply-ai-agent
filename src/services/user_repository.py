@@ -17,8 +17,37 @@ class UserRepository:
     """Repository for user accounts and magic link tokens.
 
     Uses the same Piccolo engine as the job repository (set during
-    SQLiteJobRepository.initialize()).
+    SQLiteJobRepository.initialize()). When repo_type=memory, call
+    initialize() to set up the Piccolo engine for user tables.
     """
+
+    async def initialize(self, db_path: str = "./data/jobs.db") -> None:
+        """Ensure Piccolo engine is set on user tables.
+
+        When repo_type=sqlite, SQLiteJobRepository.initialize() already
+        does this. When repo_type=memory, this method must be called
+        separately so that UserRepository can still persist to SQLite.
+        """
+        from pathlib import Path
+
+        from .tables import MagicLinkTable, UserTable
+
+        # Skip if engine already configured (e.g., by SQLiteJobRepository)
+        if UserTable._meta._db is not None:
+            return
+
+        from piccolo.engine.sqlite import SQLiteEngine
+
+        db_dir = Path(db_path).parent
+        db_dir.mkdir(parents=True, exist_ok=True)
+
+        engine = SQLiteEngine(path=db_path)
+        UserTable._meta._db = engine
+        MagicLinkTable._meta._db = engine
+
+        await UserTable.create_table(if_not_exists=True).run()
+        await MagicLinkTable.create_table(if_not_exists=True).run()
+        logger.info("UserRepository initialized with engine at %s", db_path)
 
     async def create_user(self, email: str, display_name: str = "") -> User:
         """Create a new user account.
@@ -87,7 +116,7 @@ class UserRepository:
             return None
         return self._row_to_user(row)
 
-    async def update(self, user_id: str, updates: dict) -> User:
+    async def update(self, user_id: str, updates: dict) -> User | None:
         """Update a user's profile fields.
 
         Args:
@@ -170,6 +199,10 @@ class UserRepository:
         Checks that the token exists, hasn't been used, and hasn't expired.
         If valid, marks it as used and returns the email.
 
+        The UPDATE uses WHERE used=False to narrow the race window: SQLite
+        serializes writes, so concurrent requests both see used=False on
+        SELECT, but only the first UPDATE matches the WHERE clause.
+
         Args:
             token: The magic link token to verify.
 
@@ -200,10 +233,12 @@ class UserRepository:
         if expires_at < datetime.now(tz=timezone.utc):
             return None
 
-        # Mark as used
+        # Atomic: only update if still unused (WHERE used=False).
+        # SQLite serializes writes, so only one concurrent request succeeds.
         await (
             MagicLinkTable.update({MagicLinkTable.used: True})
             .where(MagicLinkTable.token == token)
+            .where(MagicLinkTable.used.eq(False))
             .run()
         )
 

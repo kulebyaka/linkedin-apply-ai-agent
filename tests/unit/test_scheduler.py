@@ -357,6 +357,7 @@ class TestLinkedInSearchAPI:
             import src.api.main as main_module
             from src.config.settings import Settings
             from src.context import AppContext
+            from src.models.user import User
             from src.services.job_queue import JobQueue
 
             # Create test settings that disable fixture replay mode
@@ -375,6 +376,10 @@ class TestLinkedInSearchAPI:
             )
             main_module.app.state.ctx = ctx
 
+            # Override auth dependency to return a test user
+            test_user = User(id="test-user", email="test@example.com", display_name="Test")
+            main_module.app.dependency_overrides[main_module.get_current_user] = lambda: test_user
+
             # Override module-level settings for the trigger_search endpoint check
             original_settings = main_module.settings
             main_module.settings = test_settings
@@ -382,6 +387,7 @@ class TestLinkedInSearchAPI:
             yield TestClient(main_module.app, raise_server_exceptions=False), ctx
 
             main_module.settings = original_settings
+            main_module.app.dependency_overrides.pop(main_module.get_current_user, None)
         except OSError:
             pytest.skip("WeasyPrint system libraries not available")
 

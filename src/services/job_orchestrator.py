@@ -109,7 +109,7 @@ class JobOrchestrator:
         }
 
         # Track thread
-        await self._ctx.register_workflow(job_id, thread_id, "preparation")
+        await self._ctx.register_workflow(job_id, thread_id, "preparation", user_id=user_id)
 
         # Dispatch workflow in background
         self._ctx.create_background_task(

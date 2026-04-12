@@ -31,6 +31,11 @@ class AuthService:
     def __init__(self, settings: Settings, user_repository: UserRepository) -> None:
         self._settings = settings
         self._user_repo = user_repository
+        if settings.jwt_secret == "change-me-in-production":
+            logger.warning(
+                "JWT_SECRET is using the default value. "
+                "Set JWT_SECRET in .env for production use."
+            )
 
     async def send_magic_link(self, email: str) -> None:
         """Generate a magic link token and send it via email.
@@ -54,31 +59,28 @@ class AuthService:
 
         # Send email via Resend
         if not self._settings.resend_api_key:
-            logger.warning(
-                "RESEND_API_KEY not set — magic link not emailed. "
-                "Token for %s: %s",
-                email,
-                token,
-            )
+            logger.warning("RESEND_API_KEY not set — magic link not emailed for %s.", email)
+            logger.debug("Dev-mode magic link token for %s: %s", email, token)
             return
 
         try:
+            import asyncio
+
             import resend
 
             resend.api_key = self._settings.resend_api_key
 
-            resend.Emails.send(
-                {
-                    "from": "LinkedIn Agent <noreply@resend.dev>",
-                    "to": [email],
-                    "subject": "Your magic link login",
-                    "html": (
-                        f"<p>Click the link below to sign in:</p>"
-                        f'<p><a href="{verify_url}">{verify_url}</a></p>'
-                        f"<p>This link expires in {self._settings.magic_link_ttl_minutes} minutes.</p>"
-                    ),
-                }
-            )
+            params = {
+                "from": "LinkedIn Agent <noreply@resend.dev>",
+                "to": [email],
+                "subject": "Your magic link login",
+                "html": (
+                    f"<p>Click the link below to sign in:</p>"
+                    f'<p><a href="{verify_url}">{verify_url}</a></p>'
+                    f"<p>This link expires in {self._settings.magic_link_ttl_minutes} minutes.</p>"
+                ),
+            }
+            await asyncio.to_thread(resend.Emails.send, params)
             logger.info("Magic link email sent to %s", email)
         except Exception as e:
             logger.error("Failed to send magic link email to %s: %s", email, e)

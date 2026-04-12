@@ -54,8 +54,11 @@ class LinkedInSearchScheduler:
         Returns the number of jobs enqueued. Never raises — all exceptions
         are caught and logged so the scheduler keeps running.
 
-        The locked() check and acquire are not separated by an await,
-        so no other coroutine can interleave in the single-threaded event loop.
+        The locked() pre-check is a fast-path optimisation: if a search is
+        already running we skip immediately instead of queuing behind the lock.
+        A narrow race exists where two callers both see locked()==False and
+        then one waits on the lock, but the outcome is correct (second search
+        runs after the first finishes rather than being skipped).
         """
         if self._search_lock.locked():
             logger.warning("Search already in progress, skipping")

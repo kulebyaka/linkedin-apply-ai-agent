@@ -18,6 +18,7 @@ class CVCompositionAttempt(BaseModel):
     """
 
     job_id: str
+    user_id: str = ""
     attempt_number: int = Field(ge=1)
     user_feedback: str | None = None
     cv_json: dict

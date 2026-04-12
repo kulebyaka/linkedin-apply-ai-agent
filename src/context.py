@@ -55,7 +55,8 @@ class AppContext:
     _background_tasks: set[asyncio.Task] = field(default_factory=set)
 
     async def register_workflow(
-        self, job_id: str, thread_id: str, workflow_type: str
+        self, job_id: str, thread_id: str, workflow_type: str,
+        *, user_id: str = "",
     ) -> None:
         """Register an in-progress workflow for status tracking."""
         from datetime import datetime, timezone
@@ -64,8 +65,14 @@ class AppContext:
             self._workflow_threads[job_id] = {
                 "thread_id": thread_id,
                 "workflow_type": workflow_type,
+                "user_id": user_id,
                 "created_at": datetime.now(tz=timezone.utc),
             }
+
+    async def unregister_workflow(self, job_id: str) -> None:
+        """Remove a completed workflow from tracking."""
+        async with self._tracking_lock:
+            self._workflow_threads.pop(job_id, None)
 
     async def get_workflow_thread(self, job_id: str) -> dict | None:
         """Get workflow tracking info for a job_id."""

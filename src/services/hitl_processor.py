@@ -227,7 +227,7 @@ class HITLProcessor:
                 "error_message": None,
             }
 
-            await self._ctx.register_workflow(job_id, retry_thread_id, "retry")
+            await self._ctx.register_workflow(job_id, retry_thread_id, "retry", user_id=user_id)
 
             self._ctx.create_background_task(
                 self._run_retry_workflow(job_id, retry_thread_id, retry_state)

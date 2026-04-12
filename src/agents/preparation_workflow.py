@@ -370,6 +370,7 @@ async def save_to_db_node(state: PreparationWorkflowState, config: RunnableConfi
         if cv_json:
             attempt = CVCompositionAttempt(
                 job_id=job_id,
+                user_id=state.get("user_id", ""),
                 attempt_number=1,
                 user_feedback=state.get("user_feedback"),
                 cv_json=cv_json,

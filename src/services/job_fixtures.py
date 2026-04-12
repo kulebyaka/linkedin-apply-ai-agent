@@ -125,6 +125,7 @@ async def enqueue_from_fixtures(
     queue: JobQueue,
     repository=None,
     limit: int = 0,
+    user_id: str | None = None,
 ) -> dict:
     """Load jobs from fixture file, deduplicate, and enqueue.
 
@@ -138,6 +139,8 @@ async def enqueue_from_fixtures(
         Optional JobRepository for deduplication (skip already-processed jobs).
     limit:
         Max jobs to load from file. 0 means no limit.
+    user_id:
+        Owner user_id to tag enqueued jobs with.
 
     Returns a dict with enqueued/skipped/total_in_file counts.
     """
@@ -162,7 +165,7 @@ async def enqueue_from_fixtures(
                 logger.warning("Dedup check failed for fixture job %s, enqueuing anyway", job.job_id)
         to_enqueue.append(job)
 
-    enqueued = await queue.put_batch(to_enqueue)
+    enqueued = await queue.put_batch(to_enqueue, user_id=user_id)
 
     logger.info(
         "Fixture replay: enqueued=%d, skipped=%d, total_in_file=%d",

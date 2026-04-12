@@ -7,9 +7,10 @@ This module contains models for:
 - User search preferences (mirrors LinkedInSearchParams)
 """
 
+import re
 from datetime import datetime, timezone
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class UserSearchPreferences(BaseModel):
@@ -50,17 +51,19 @@ class LoginRequest(BaseModel):
 
     email: str
 
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        v = v.strip().lower()
+        if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", v):
+            raise ValueError("Invalid email address")
+        return v
+
 
 class LoginResponse(BaseModel):
     """Response after magic link is sent."""
 
     message: str
-
-
-class VerifyRequest(BaseModel):
-    """Request to verify a magic link token."""
-
-    token: str
 
 
 class AuthResponse(BaseModel):

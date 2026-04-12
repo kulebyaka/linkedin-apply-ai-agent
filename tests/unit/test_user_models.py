@@ -9,7 +9,6 @@ from src.models.user import (
     User,
     UserSearchPreferences,
     UserUpdateRequest,
-    VerifyRequest,
 )
 
 
@@ -124,13 +123,23 @@ class TestAuthModels:
         req = LoginRequest(email="user@example.com")
         assert req.email == "user@example.com"
 
+    def test_login_request_normalizes_email(self):
+        req = LoginRequest(email="  User@Example.COM  ")
+        assert req.email == "user@example.com"
+
+    def test_login_request_rejects_invalid_email(self):
+        import pytest
+
+        with pytest.raises(ValueError, match="Invalid email"):
+            LoginRequest(email="not-an-email")
+        with pytest.raises(ValueError, match="Invalid email"):
+            LoginRequest(email="")
+        with pytest.raises(ValueError, match="Invalid email"):
+            LoginRequest(email="@missing-local.com")
+
     def test_login_response(self):
         resp = LoginResponse(message="Check your email for a magic link")
         assert resp.message == "Check your email for a magic link"
-
-    def test_verify_request(self):
-        req = VerifyRequest(token="abc123token")
-        assert req.token == "abc123token"
 
     def test_auth_response(self):
         user = User(id="u1", email="a@b.com", display_name="A")

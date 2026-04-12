@@ -44,13 +44,24 @@ class TestAppContext:
 
     async def test_register_and_get_workflow(self):
         ctx = self._make_ctx()
-        await ctx.register_workflow("job-1", "thread-1", "preparation")
+        await ctx.register_workflow("job-1", "thread-1", "preparation", user_id="u1")
 
         info = await ctx.get_workflow_thread("job-1")
         assert info is not None
         assert info["thread_id"] == "thread-1"
         assert info["workflow_type"] == "preparation"
+        assert info["user_id"] == "u1"
         assert "created_at" in info
+
+    async def test_unregister_workflow(self):
+        ctx = self._make_ctx()
+        await ctx.register_workflow("job-1", "thread-1", "preparation")
+        await ctx.unregister_workflow("job-1")
+        assert await ctx.get_workflow_thread("job-1") is None
+
+    async def test_unregister_nonexistent_is_noop(self):
+        ctx = self._make_ctx()
+        await ctx.unregister_workflow("nonexistent")  # should not raise
 
     async def test_get_nonexistent_workflow_returns_none(self):
         ctx = self._make_ctx()

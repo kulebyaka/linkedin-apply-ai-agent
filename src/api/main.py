@@ -131,6 +131,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     logger.info(f"Starting up with repository type: {settings.repo_type}")
     await ctx.repository.initialize()
+    # Ensure user tables are initialized (SQLiteJobRepository already does this,
+    # but InMemoryJobRepository doesn't set up the Piccolo engine for user tables)
+    if ctx.user_repository:
+        await ctx.user_repository.initialize(db_path=settings.db_path)
     logger.info("Repository initialized successfully")
 
     # Fixture replay mode: seed jobs from file, skip LinkedIn entirely
@@ -320,7 +324,7 @@ async def update_user_profile(
     """Update current user's profile (display_name, master_cv_json, search_preferences)."""
     ctx = _get_ctx(request)
 
-    updates = body.model_dump(exclude_none=True)
+    updates = body.model_dump(exclude_unset=True)
     if not updates:
         return user
 
@@ -406,7 +410,7 @@ async def submit_job(
 
 
 @app.post("/api/jobs/linkedin-search")
-async def trigger_linkedin_search(request: Request):
+async def trigger_linkedin_search(request: Request, user: CurrentUser):
     """Trigger a LinkedIn search manually.
 
     Runs search in background and returns immediately.
@@ -461,7 +465,7 @@ async def trigger_linkedin_search(request: Request):
 
 
 @app.get("/api/jobs/linkedin-search/status")
-async def get_linkedin_search_status(request: Request):
+async def get_linkedin_search_status(request: Request, user: CurrentUser):
     """Return current scheduler state."""
     ctx = _get_ctx(request)
     queue_size = ctx.job_queue.size() if ctx.job_queue else 0
@@ -491,7 +495,7 @@ async def get_linkedin_search_status(request: Request):
 
 
 @app.post("/api/jobs/replay-fixtures")
-async def replay_fixtures(request: Request, limit: Annotated[int, Query(ge=0)] = 0):
+async def replay_fixtures(request: Request, user: CurrentUser, limit: Annotated[int, Query(ge=0)] = 0):
     """Load scraped jobs from fixture file and enqueue for processing.
 
     Useful for HITL testing and demos. Jobs already in the repository are skipped.
@@ -506,6 +510,7 @@ async def replay_fixtures(request: Request, limit: Annotated[int, Query(ge=0)] =
         ctx.job_queue,
         repository=ctx.repository,
         limit=limit,
+        user_id=user.id,
     )
 
     if result["total_in_file"] == 0:
@@ -536,7 +541,7 @@ async def get_job_status(
         if job_record is None:
             # Also check workflow threads for in-progress jobs
             thread_info = await ctx.get_workflow_thread(job_id)
-            if thread_info is None:
+            if thread_info is None or thread_info.get("user_id", "") != user.id:
                 raise KeyError(f"Job {job_id} not found")
 
         orchestrator = _get_orchestrator(request)
@@ -761,7 +766,7 @@ async def cleanup_jobs(
             )
 
         ctx = _get_ctx(request)
-        deleted = await ctx.repository.cleanup(older_than_days, statuses)
+        deleted = await ctx.repository.cleanup(older_than_days, statuses, user_id=user.id)
         return {"deleted": deleted, "message": f"Deleted {deleted} jobs"}
 
     except HTTPException:
