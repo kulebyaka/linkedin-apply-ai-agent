@@ -1,19 +1,19 @@
 """Data models and schemas"""
 
+from .cv import CV, ContactInfo, Education, Experience, Project, Skill
+from .job import JobPosting
 from .state_machine import BusinessState, WorkflowStep
 from .unified import (
-    JobDescriptionInput,
-    JobSubmitRequest,
-    JobSubmitResponse,
+    ApplicationHistoryItem,
     HITLDecision,
     HITLDecisionResponse,
-    PendingApproval,
+    JobDescriptionInput,
     JobRecord,
     JobStatusResponse,
-    ApplicationHistoryItem,
+    JobSubmitRequest,
+    JobSubmitResponse,
+    PendingApproval,
 )
-from .job import JobPosting
-from .cv import CV, ContactInfo, Experience, Education, Skill, Project
 
 __all__ = [
     # State machine

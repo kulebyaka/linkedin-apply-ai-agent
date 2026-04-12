@@ -1,6 +1,6 @@
 """Service for filtering job postings using LLM"""
 
-from typing import Dict
+
 from src.llm.provider import BaseLLMClient
 
 
@@ -37,7 +37,7 @@ class JobFilter:
     def __init__(self, llm_client: BaseLLMClient):
         self.llm = llm_client
 
-    def is_suitable(self, job_posting: Dict, filters: Dict) -> tuple[bool, str]:
+    def is_suitable(self, job_posting: dict, filters: dict) -> tuple[bool, str]:
         """
         Evaluate if a job posting matches the user's criteria
 
@@ -48,7 +48,7 @@ class JobFilter:
         Returns:
             Tuple of (is_suitable: bool, reason: str)
         """
-        prompt = self._build_filter_prompt(job_posting, filters)
+        _prompt = self._build_filter_prompt(job_posting, filters)
 
         # TODO: Implement LLM call with structured output
         # Example implementation:
@@ -70,7 +70,7 @@ class JobFilter:
 
         raise NotImplementedError
 
-    def _build_filter_prompt(self, job_posting: Dict, filters: Dict) -> str:
+    def _build_filter_prompt(self, job_posting: dict, filters: dict) -> str:
         """Build the prompt for LLM job filtering"""
         return f"""
         Evaluate if this job posting matches the following criteria:

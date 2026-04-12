@@ -21,7 +21,6 @@ Environment variables (optional):
 
 import re
 import time
-from urllib.parse import urljoin
 
 import httpx
 import pytest

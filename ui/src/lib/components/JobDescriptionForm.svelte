@@ -14,9 +14,13 @@
 
 	let { onSubmit, isLoading, errorMessage, initialValue = '', initialTemplate = 'compact', initialLLMProvider = 'openai', initialLLMModel = 'gpt-4o-mini' }: Props = $props();
 
+	// svelte-ignore state_referenced_locally -- intentional: local state seeded from prop defaults
 	let jobDescription = $state(initialValue);
+	// svelte-ignore state_referenced_locally
 	let selectedTemplate = $state<TemplateName>(initialTemplate);
+	// svelte-ignore state_referenced_locally
 	let selectedLLMProvider = $state<LLMProvider>(initialLLMProvider);
+	// svelte-ignore state_referenced_locally
 	let selectedLLMModel = $state<LLMModel>(initialLLMModel);
 	let validationError = $state<string | null>(null);
 

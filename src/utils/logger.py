@@ -4,7 +4,6 @@ import logging
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 # Project root directory (where logs/ will be created)
 PROJECT_ROOT = Path(__file__).parent.parent.parent
@@ -17,7 +16,7 @@ _RUN_TIMESTAMP = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 def setup_logger(
     name: str,
     level: str = "INFO",
-    log_file: Optional[str] = None
+    log_file: str | None = None
 ) -> logging.Logger:
     """
     Setup and configure logger

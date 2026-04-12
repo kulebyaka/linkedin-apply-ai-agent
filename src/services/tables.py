@@ -4,14 +4,14 @@ This module defines the database schema for storing job records
 and CV composition attempts.
 """
 
-from piccolo.table import Table
 from piccolo.columns import (
-    Varchar,
     JSON,
     Integer,
-    Timestamptz,
     Text,
+    Timestamptz,
+    Varchar,
 )
+from piccolo.table import Table
 
 
 class Job(Table):

@@ -1,7 +1,7 @@
 """Tests for LinkedInJobScraper with mocked Playwright page elements."""
 
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, PropertyMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 

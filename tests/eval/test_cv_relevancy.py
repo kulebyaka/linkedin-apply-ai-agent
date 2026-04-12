@@ -7,8 +7,8 @@ the job requirements.
 
 import pytest
 from deepeval import assert_test
-from deepeval.test_case import LLMTestCase
 from deepeval.metrics import AnswerRelevancyMetric
+from deepeval.test_case import LLMTestCase
 
 
 @pytest.mark.eval

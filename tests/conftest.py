@@ -1,10 +1,9 @@
 """Shared test fixtures and configuration"""
 
-import pytest
 import json
 from pathlib import Path
-from unittest.mock import Mock
 
+import pytest
 
 # Fixtures directory
 FIXTURES_DIR = Path(__file__).parent / "fixtures"

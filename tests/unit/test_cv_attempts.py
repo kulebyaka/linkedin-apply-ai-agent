@@ -4,9 +4,10 @@ Tests the create_cv_attempt(), get_cv_attempts(), and get_latest_cv_attempt()
 methods on both InMemoryJobRepository and SQLiteJobRepository.
 """
 
+from datetime import datetime, timezone
+
 import pytest
 import pytest_asyncio
-from datetime import datetime, timezone
 
 from src.models.cv_attempt import CVCompositionAttempt
 from src.models.unified import JobRecord

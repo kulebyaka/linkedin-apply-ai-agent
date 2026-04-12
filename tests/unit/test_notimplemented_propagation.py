@@ -13,17 +13,22 @@ sys.modules.setdefault("weasyprint", _wp_mock)
 sys.modules.setdefault("weasyprint.text", MagicMock())
 sys.modules.setdefault("weasyprint.text.fonts", MagicMock())
 
-import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, patch  # noqa: E402
 
-from src.agents.preparation_workflow import extract_job_node, save_to_db_node
-from src.agents.retry_workflow import (
-    load_from_db_node as retry_load_from_db_node,
-    update_db_node as retry_update_db_node,
-)
-from src.agents.application_workflow import (
+import pytest  # noqa: E402
+
+from src.agents.application_workflow import (  # noqa: E402
     load_from_db_node as app_load_from_db_node,
+)
+from src.agents.application_workflow import (  # noqa: E402
     update_db_node as app_update_db_node,
+)
+from src.agents.preparation_workflow import extract_job_node, save_to_db_node  # noqa: E402
+from src.agents.retry_workflow import (  # noqa: E402
+    load_from_db_node as retry_load_from_db_node,
+)
+from src.agents.retry_workflow import (  # noqa: E402
+    update_db_node as retry_update_db_node,
 )
 
 pytestmark = pytest.mark.asyncio

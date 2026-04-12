@@ -148,7 +148,7 @@ The system uses a **two-workflow pipeline** split at the HITL boundary, enabling
 - `src/models/state_machine.py` defines `BusinessState` and `WorkflowStep` enums
 - `BusinessState`: queued → processing → cv_ready/pending_review → approved/declined/retrying → applied/failed
 - `WorkflowStep`: transient step tracking (extracting, composing_cv, generating_pdf, etc.)
-- `ALLOWED_TRANSITIONS` map enforces valid state changes; raises `InvalidStateTransition` on violations
+- `ALLOWED_TRANSITIONS` map enforces valid state changes; raises `InvalidStateTransitionError` on violations
 - Both `InMemoryJobRepository` and `SQLiteJobRepository` validate transitions on `update()`
 
 ### 4. Domain Services (Thin API Handlers)
@@ -246,7 +246,7 @@ See `src/llm/provider.py` module documentation for detailed implementation.
 - `BusinessState` - Job lifecycle states: queued, processing, cv_ready, pending_review, approved, declined, retrying, applying, applied, failed
 - `WorkflowStep` - Transient step tracking: extracting, filtering, composing_cv, generating_pdf, etc.
 - `ALLOWED_TRANSITIONS` - Valid state change map, enforced by repository
-- `InvalidStateTransition` - Raised on illegal transitions
+- `InvalidStateTransitionError` - Raised on illegal transitions
 
 ### CV Attempt History (`src/models/cv_attempt.py`)
 

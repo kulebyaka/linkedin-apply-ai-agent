@@ -1,10 +1,10 @@
 """Schema compliance guardrail for CV validation"""
 
-from typing import Optional
+import json
+
 from deepeval.metrics import BaseMetric
 from deepeval.test_case import LLMTestCase
 from pydantic import ValidationError
-import json
 
 
 class CVSchemaComplianceGuard(BaseMetric):
@@ -23,7 +23,7 @@ class CVSchemaComplianceGuard(BaseMetric):
     def __init__(
         self,
         threshold: float = 1.0,
-        model: Optional[str] = None,
+        model: str | None = None,
         include_reason: bool = True
     ):
         self.threshold = 1.0  # Always strict
@@ -53,7 +53,7 @@ class CVSchemaComplianceGuard(BaseMetric):
                 raise ValueError(f"Unsupported actual_output type: {type(test_case.actual_output)}")
 
             # Validate against Pydantic model
-            validated_cv = CV(**cv_data)
+            CV(**cv_data)
 
             # Success - CV matches schema
             self.score = 1.0
@@ -118,7 +118,7 @@ class CVSectionSchemaGuard(BaseMetric):
         self,
         section_name: str,
         threshold: float = 1.0,
-        model: Optional[str] = None,
+        model: str | None = None,
         include_reason: bool = True
     ):
         self.section_name = section_name
@@ -146,7 +146,7 @@ class CVSectionSchemaGuard(BaseMetric):
 
     def measure(self, test_case: LLMTestCase) -> float:
         """Validate section data against its schema"""
-        from src.models.cv import Experience, Education, Skill, Project, ContactInfo
+        from src.models.cv import ContactInfo, Education, Experience, Project, Skill
 
         model_map = {
             "experiences": Experience,

@@ -1,12 +1,11 @@
 """Tests for LinkedIn search URL builder and filter models."""
 
-import pytest
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import parse_qs, urlparse
 
 from src.services.linkedin_search import (
+    LINKEDIN_JOBS_SEARCH_BASE,
     LinkedInSearchParams,
     LinkedInSearchURLBuilder,
-    LINKEDIN_JOBS_SEARCH_BASE,
 )
 
 

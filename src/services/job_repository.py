@@ -23,10 +23,9 @@ import logging
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional
 
 from ..models.cv_attempt import CVCompositionAttempt
-from ..models.state_machine import BusinessState, InvalidStateTransition, validate_transition
+from ..models.state_machine import BusinessState, validate_transition
 from ..models.unified import JobRecord
 
 logger = logging.getLogger(__name__)
@@ -106,7 +105,7 @@ class JobRepository(ABC):
         pass
 
     @abstractmethod
-    async def get(self, job_id: str) -> Optional[JobRecord]:
+    async def get(self, job_id: str) -> JobRecord | None:
         """Get a job record by ID.
 
         Args:
@@ -202,7 +201,7 @@ class JobRepository(ABC):
     async def get_history(
         self,
         limit: int = 50,
-        statuses: Optional[list[str]] = None,
+        statuses: list[str] | None = None,
     ) -> list[JobRecord]:
         """Get job application history.
 
@@ -245,7 +244,7 @@ class JobRepository(ABC):
         pass
 
     @abstractmethod
-    async def get_latest_cv_attempt(self, job_id: str) -> Optional[CVCompositionAttempt]:
+    async def get_latest_cv_attempt(self, job_id: str) -> CVCompositionAttempt | None:
         """Get the most recent CV composition attempt for a job.
 
         Args:
@@ -261,7 +260,7 @@ class JobRepository(ABC):
     # =========================================================================
 
     @abstractmethod
-    async def find_by_application_url(self, url: str) -> Optional[JobRecord]:
+    async def find_by_application_url(self, url: str) -> JobRecord | None:
         """Find a job by its application URL.
 
         Used for duplicate detection - prevents applying to the same
@@ -302,7 +301,7 @@ class JobRepository(ABC):
 class RepositoryError(Exception):
     """Exception raised for repository operations failures."""
 
-    def __init__(self, message: str, job_id: Optional[str] = None):
+    def __init__(self, message: str, job_id: str | None = None):
         self.message = message
         self.job_id = job_id
         super().__init__(self.message)
@@ -358,7 +357,7 @@ class InMemoryJobRepository(JobRepository):
             self._jobs[job.job_id] = job
             return job.job_id
 
-    async def get(self, job_id: str) -> Optional[JobRecord]:
+    async def get(self, job_id: str) -> JobRecord | None:
         """Get a job record by ID.
 
         Args:
@@ -379,7 +378,7 @@ class InMemoryJobRepository(JobRepository):
         Raises:
             RepositoryError: If job not found.
             ValueError: If updates contain invalid field names.
-            InvalidStateTransition: If status transition is not allowed.
+            InvalidStateTransitionError: If status transition is not allowed.
         """
         async with self._lock:
             if job_id not in self._jobs:
@@ -480,7 +479,7 @@ class InMemoryJobRepository(JobRepository):
     async def get_history(
         self,
         limit: int = 50,
-        statuses: Optional[list[str]] = None,
+        statuses: list[str] | None = None,
     ) -> list[JobRecord]:
         """Get application history.
 
@@ -513,7 +512,7 @@ class InMemoryJobRepository(JobRepository):
         attempts = self._cv_attempts.get(job_id, [])
         return sorted(attempts, key=lambda a: a.attempt_number)
 
-    async def get_latest_cv_attempt(self, job_id: str) -> Optional[CVCompositionAttempt]:
+    async def get_latest_cv_attempt(self, job_id: str) -> CVCompositionAttempt | None:
         """Get the most recent CV attempt for a job."""
         attempts = self._cv_attempts.get(job_id, [])
         if not attempts:
@@ -524,7 +523,7 @@ class InMemoryJobRepository(JobRepository):
     # Specialized Methods
     # =========================================================================
 
-    async def find_by_application_url(self, url: str) -> Optional[JobRecord]:
+    async def find_by_application_url(self, url: str) -> JobRecord | None:
         """Find a job by its application URL.
 
         Args:
@@ -634,7 +633,7 @@ class SQLiteJobRepository(JobRepository):
             self._initialized = True
         except Exception as e:
             logger.error(f"Failed to initialize SQLite repository: {e}")
-            raise RepositoryError(f"Database initialization failed: {e}")
+            raise RepositoryError(f"Database initialization failed: {e}") from e
 
     async def close(self) -> None:
         """Close database connection."""
@@ -789,7 +788,7 @@ class SQLiteJobRepository(JobRepository):
         logger.debug(f"Created job {job.job_id}")
         return job.job_id
 
-    async def get(self, job_id: str) -> Optional[JobRecord]:
+    async def get(self, job_id: str) -> JobRecord | None:
         """Get a job record by ID.
 
         Args:
@@ -817,7 +816,7 @@ class SQLiteJobRepository(JobRepository):
         Raises:
             RepositoryError: If job not found.
             ValueError: If updates contain invalid field names.
-            InvalidStateTransition: If status transition is not allowed.
+            InvalidStateTransitionError: If status transition is not allowed.
         """
         self._ensure_initialized()
         from .tables import Job
@@ -957,7 +956,7 @@ class SQLiteJobRepository(JobRepository):
     async def get_history(
         self,
         limit: int = 50,
-        statuses: Optional[list[str]] = None,
+        statuses: list[str] | None = None,
     ) -> list[JobRecord]:
         """Get application history.
 
@@ -1007,7 +1006,7 @@ class SQLiteJobRepository(JobRepository):
         )
         return [self._row_to_cv_attempt(row) for row in rows]
 
-    async def get_latest_cv_attempt(self, job_id: str) -> Optional[CVCompositionAttempt]:
+    async def get_latest_cv_attempt(self, job_id: str) -> CVCompositionAttempt | None:
         """Get the most recent CV attempt for a job."""
         self._ensure_initialized()
         from .tables import CVAttemptTable
@@ -1027,7 +1026,7 @@ class SQLiteJobRepository(JobRepository):
     # Specialized Methods
     # =========================================================================
 
-    async def find_by_application_url(self, url: str) -> Optional[JobRecord]:
+    async def find_by_application_url(self, url: str) -> JobRecord | None:
         """Find a job by its application URL.
 
         Args:

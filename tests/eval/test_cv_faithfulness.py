@@ -11,8 +11,9 @@ All data must be traceable to the master CV.
 
 import pytest
 from deepeval import assert_test
-from deepeval.test_case import LLMTestCase
 from deepeval.metrics import FaithfulnessMetric
+from deepeval.test_case import LLMTestCase
+
 from tests.eval.metrics.cv_hallucination_guard import CVHallucinationGuard
 from tests.eval.metrics.cv_schema_compliance import CVSchemaComplianceGuard
 

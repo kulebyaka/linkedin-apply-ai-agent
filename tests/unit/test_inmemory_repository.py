@@ -5,7 +5,6 @@ do not cause lost updates or race conditions.
 """
 
 import asyncio
-from datetime import datetime, timezone
 
 import pytest
 

@@ -1,8 +1,6 @@
 """Unit tests for job fixture record & replay service."""
 
-import asyncio
 import json
-from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest

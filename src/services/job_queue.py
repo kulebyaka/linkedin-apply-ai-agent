@@ -162,7 +162,7 @@ async def process_queue(
             }
 
             config = {"configurable": {"thread_id": f"linkedin-{job.job_id}", "repository": job_repository}}
-            result = await workflow.ainvoke(initial_state, config=config)
+            await workflow.ainvoke(initial_state, config=config)
             logger.info("Workflow completed for job %s", job.job_id)
             processed += 1
 

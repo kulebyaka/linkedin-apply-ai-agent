@@ -1,6 +1,5 @@
 """Custom DeepEval metric for CV-specific hallucination detection"""
 
-from typing import Optional, Dict, List
 from deepeval.metrics import BaseMetric
 from deepeval.test_case import LLMTestCase
 
@@ -24,8 +23,8 @@ class CVHallucinationGuard(BaseMetric):
         self,
         threshold: float = 1.0,
         check_type: str = "companies",
-        master_data: Optional[Dict] = None,
-        model: Optional[str] = None,
+        master_data: dict | None = None,
+        model: str | None = None,
         include_reason: bool = True
     ):
         self.threshold = threshold
@@ -122,7 +121,7 @@ class CVHallucinationGuard(BaseMetric):
 
     # Helper methods to extract entities
 
-    def _extract_companies(self, cv: Dict) -> set:
+    def _extract_companies(self, cv: dict) -> set:
         """Extract company names from CV (case-insensitive)"""
         companies = set()
         for exp in cv.get('experiences', []):
@@ -130,7 +129,7 @@ class CVHallucinationGuard(BaseMetric):
                 companies.add(exp['company'].strip().lower())
         return companies
 
-    def _extract_institutions(self, cv: Dict) -> set:
+    def _extract_institutions(self, cv: dict) -> set:
         """Extract education institutions from CV (case-insensitive)"""
         institutions = set()
         for edu in cv.get('education', []):
@@ -138,7 +137,7 @@ class CVHallucinationGuard(BaseMetric):
                 institutions.add(edu['institution'].strip().lower())
         return institutions
 
-    def _extract_skills(self, cv: Dict) -> set:
+    def _extract_skills(self, cv: dict) -> set:
         """Extract skill names from CV (case-insensitive)"""
         skills = set()
 

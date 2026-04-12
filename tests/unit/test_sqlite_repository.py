@@ -4,17 +4,16 @@ Tests all methods of the SQLite-backed job repository implementation.
 Uses temporary database files for isolation.
 """
 
+from datetime import datetime, timedelta
+
 import pytest
 import pytest_asyncio
-from datetime import datetime, timedelta
-from pathlib import Path
 
-from src.services.job_repository import (
-    SQLiteJobRepository,
-    RepositoryError,
-    UPDATABLE_FIELDS,
-)
 from src.models.unified import JobRecord
+from src.services.job_repository import (
+    RepositoryError,
+    SQLiteJobRepository,
+)
 
 
 @pytest_asyncio.fixture
@@ -449,7 +448,7 @@ async def test_data_persists_after_close_and_reopen(tmp_path):
 @pytest.mark.asyncio
 async def test_get_repository_factory_memory():
     """Test get_repository factory returns InMemoryJobRepository."""
-    from src.services.job_repository import get_repository, InMemoryJobRepository
+    from src.services.job_repository import InMemoryJobRepository, get_repository
 
     repo = get_repository(repo_type="memory")
     assert isinstance(repo, InMemoryJobRepository)
@@ -458,7 +457,7 @@ async def test_get_repository_factory_memory():
 @pytest.mark.asyncio
 async def test_get_repository_factory_sqlite(tmp_path):
     """Test get_repository factory returns SQLiteJobRepository."""
-    from src.services.job_repository import get_repository, SQLiteJobRepository
+    from src.services.job_repository import SQLiteJobRepository, get_repository
 
     db_path = tmp_path / "factory_test.db"
     repo = get_repository(repo_type="sqlite", db_path=str(db_path))

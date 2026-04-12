@@ -1,7 +1,7 @@
 """Job posting data models"""
 
 from datetime import datetime
-from typing import Optional
+
 from pydantic import BaseModel
 
 
@@ -19,15 +19,15 @@ class ScrapedJob(BaseModel):
     company: str
     location: str
     url: str
-    posted_date: Optional[datetime] = None
+    posted_date: datetime | None = None
     easy_apply: bool = False
 
     # Detail-level fields (populated by scrape_job_details enrichment)
     description: str = ""
-    requirements: Optional[str] = None
-    salary_range: Optional[str] = None
-    experience_level: Optional[str] = None
-    job_type: Optional[str] = None
+    requirements: str | None = None
+    salary_range: str | None = None
+    experience_level: str | None = None
+    job_type: str | None = None
 
 
 class JobPosting(BaseModel):
@@ -37,11 +37,11 @@ class JobPosting(BaseModel):
     company: str
     location: str
     description: str
-    requirements: Optional[str] = None
-    salary_range: Optional[str] = None
+    requirements: str | None = None
+    salary_range: str | None = None
     is_remote: bool = False
-    experience_level: Optional[str] = None
-    job_type: Optional[str] = None  # full-time, part-time, contract
-    posted_date: Optional[datetime] = None
+    experience_level: str | None = None
+    job_type: str | None = None  # full-time, part-time, contract
+    posted_date: datetime | None = None
     url: str
-    raw_data: Optional[dict] = None
+    raw_data: dict | None = None

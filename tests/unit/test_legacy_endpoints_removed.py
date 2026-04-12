@@ -33,7 +33,7 @@ class TestMvpModuleRemoved:
     def test_mvp_module_not_importable(self):
         try:
             from src.models import mvp  # noqa: F401
-            assert False, "src.models.mvp should not be importable"
+            raise AssertionError("src.models.mvp should not be importable")
         except ImportError:
             pass
 

@@ -1,6 +1,6 @@
 """Tests for job lifecycle state machine.
 
-Tests all valid transitions succeed, invalid transitions raise InvalidStateTransition,
+Tests all valid transitions succeed, invalid transitions raise InvalidStateTransitionError,
 and terminal states have no successors (except failed -> retrying).
 """
 
@@ -9,7 +9,7 @@ import pytest
 from src.models.state_machine import (
     ALLOWED_TRANSITIONS,
     BusinessState,
-    InvalidStateTransition,
+    InvalidStateTransitionError,
     WorkflowStep,
     validate_transition,
 )
@@ -95,7 +95,7 @@ class TestValidTransitions:
 
 
 class TestInvalidTransitions:
-    """Test that invalid transitions raise InvalidStateTransition."""
+    """Test that invalid transitions raise InvalidStateTransitionError."""
 
     @pytest.mark.parametrize(
         "current,target",
@@ -122,13 +122,13 @@ class TestInvalidTransitions:
         ],
     )
     def test_invalid_transition_raises(self, current, target):
-        with pytest.raises(InvalidStateTransition) as exc_info:
+        with pytest.raises(InvalidStateTransitionError) as exc_info:
             validate_transition(current, target)
         assert exc_info.value.current == current
         assert exc_info.value.target == target
 
     def test_error_includes_job_id(self):
-        with pytest.raises(InvalidStateTransition) as exc_info:
+        with pytest.raises(InvalidStateTransitionError) as exc_info:
             validate_transition(
                 BusinessState.DECLINED,
                 BusinessState.APPROVED,
@@ -138,7 +138,7 @@ class TestInvalidTransitions:
         assert exc_info.value.job_id == "test-123"
 
     def test_error_includes_state_names(self):
-        with pytest.raises(InvalidStateTransition) as exc_info:
+        with pytest.raises(InvalidStateTransitionError) as exc_info:
             validate_transition(
                 BusinessState.DECLINED,
                 BusinessState.APPROVED,

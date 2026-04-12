@@ -1,7 +1,7 @@
 """Tests for AppContext DI container."""
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 

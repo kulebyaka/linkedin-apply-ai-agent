@@ -41,7 +41,6 @@ import logging
 import time
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +81,7 @@ class BaseLLMClient(ABC):
     def generate_json(
         self,
         prompt: str,
-        schema: Optional[dict] = None,
+        schema: dict | None = None,
         temperature: float = 0.4,
         max_retries: int = 3,
         **kwargs,
@@ -115,8 +114,8 @@ class OpenAIClient(BaseLLMClient):
             from openai import OpenAI
 
             self.client = OpenAI(api_key=api_key)
-        except ImportError:
-            raise ImportError("OpenAI package not installed. Install with: pip install openai")
+        except ImportError as err:
+            raise ImportError("OpenAI package not installed. Install with: pip install openai") from err
 
     def generate(self, prompt: str, temperature: float = 0.7, **kwargs) -> str:
         """Generate text completion using OpenAI"""
@@ -135,11 +134,11 @@ class OpenAIClient(BaseLLMClient):
     def generate_json(
         self,
         prompt: str,
-        schema: Optional[Dict] = None,
+        schema: dict | None = None,
         temperature: float = 0.4,
         max_retries: int = 3,
         **kwargs,
-    ) -> Dict:
+    ) -> dict:
         """Generate structured JSON output using OpenAI with native JSON Schema support"""
         for attempt in range(max_retries):
             try:
@@ -197,13 +196,13 @@ class OpenAIClient(BaseLLMClient):
             except json.JSONDecodeError as e:
                 logger.warning(f"JSON parsing failed on attempt {attempt + 1}: {e}")
                 if attempt == max_retries - 1:
-                    raise ValueError(f"Failed to generate valid JSON after {max_retries} attempts")
+                    raise ValueError(f"Failed to generate valid JSON after {max_retries} attempts") from e
 
             except Exception as e:
                 logger.error(f"OpenAI JSON generation failed: {e}")
                 raise
 
-    def _make_schema_strict(self, schema: Dict) -> Dict:
+    def _make_schema_strict(self, schema: dict) -> dict:
         """
         Make JSON schema compatible with OpenAI strict mode
         - Wraps top-level arrays in an object (OpenAI requires root to be object)
@@ -265,7 +264,7 @@ class OpenAIClient(BaseLLMClient):
         make_strict_recursive(schema)
         return schema
 
-    def _validate_json_schema(self, data: Dict, schema: Dict):
+    def _validate_json_schema(self, data: dict, schema: dict):
         """Basic JSON schema validation"""
         # This is a simplified validation
         # For production, consider using jsonschema library
@@ -295,8 +294,8 @@ class DeepSeekClient(BaseLLMClient):
 
             # DeepSeek uses OpenAI-compatible API
             self.client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com/v1")
-        except ImportError:
-            raise ImportError("OpenAI package not installed. Install with: pip install openai")
+        except ImportError as err:
+            raise ImportError("OpenAI package not installed. Install with: pip install openai") from err
 
     def generate(self, prompt: str, temperature: float = 0.7, **kwargs) -> str:
         """Generate text completion using DeepSeek"""
@@ -315,11 +314,11 @@ class DeepSeekClient(BaseLLMClient):
     def generate_json(
         self,
         prompt: str,
-        schema: Optional[Dict] = None,
+        schema: dict | None = None,
         temperature: float = 0.4,
         max_retries: int = 3,
         **kwargs,
-    ) -> Dict:
+    ) -> dict:
         """
         Generate structured JSON output using DeepSeek
 
@@ -353,13 +352,13 @@ class DeepSeekClient(BaseLLMClient):
             except json.JSONDecodeError as e:
                 logger.warning(f"JSON parsing failed on attempt {attempt + 1}: {e}")
                 if attempt == max_retries - 1:
-                    raise ValueError(f"Failed to generate valid JSON after {max_retries} attempts")
+                    raise ValueError(f"Failed to generate valid JSON after {max_retries} attempts") from e
 
             except Exception as e:
                 logger.error(f"DeepSeek JSON generation failed: {e}")
                 raise
 
-    def _validate_json_schema(self, data: Dict, schema: Dict):
+    def _validate_json_schema(self, data: dict, schema: dict):
         """Basic JSON schema validation (same as OpenAI implementation)"""
         schema_type = schema.get("type")
 
@@ -387,8 +386,8 @@ class GrokClient(BaseLLMClient):
 
             # Grok uses OpenAI-compatible API
             self.client = OpenAI(api_key=api_key, base_url="https://api.x.ai/v1")
-        except ImportError:
-            raise ImportError("OpenAI package not installed. Install with: pip install openai")
+        except ImportError as err:
+            raise ImportError("OpenAI package not installed. Install with: pip install openai") from err
 
     def generate(self, prompt: str, temperature: float = 0.7, **kwargs) -> str:
         """Generate text completion using Grok"""
@@ -407,11 +406,11 @@ class GrokClient(BaseLLMClient):
     def generate_json(
         self,
         prompt: str,
-        schema: Optional[Dict] = None,
+        schema: dict | None = None,
         temperature: float = 0.4,
         max_retries: int = 3,
         **kwargs,
-    ) -> Dict:
+    ) -> dict:
         """Generate structured JSON output using Grok with native JSON Schema support"""
         for attempt in range(max_retries):
             try:
@@ -468,13 +467,13 @@ class GrokClient(BaseLLMClient):
             except json.JSONDecodeError as e:
                 logger.warning(f"JSON parsing failed on attempt {attempt + 1}: {e}")
                 if attempt == max_retries - 1:
-                    raise ValueError(f"Failed to generate valid JSON after {max_retries} attempts")
+                    raise ValueError(f"Failed to generate valid JSON after {max_retries} attempts") from e
 
             except Exception as e:
                 logger.error(f"Grok JSON generation failed: {e}")
                 raise
 
-    def _make_schema_strict(self, schema: Dict) -> Dict:
+    def _make_schema_strict(self, schema: dict) -> dict:
         """
         Make JSON schema compatible with Grok strict mode (same as OpenAI)
         - Wraps top-level arrays in an object (Grok requires root to be object)
@@ -544,10 +543,10 @@ class AnthropicClient(BaseLLMClient):
             self.client = Anthropic(
                 api_key=api_key, default_headers={"anthropic-beta": "structured-outputs-2025-11-13"}
             )
-        except ImportError:
+        except ImportError as err:
             raise ImportError(
                 "Anthropic package not installed. Install with: pip install anthropic"
-            )
+            ) from err
 
     def generate(self, prompt: str, temperature: float = 0.7, **kwargs) -> str:
         """Generate text completion using Anthropic Claude"""
@@ -568,11 +567,11 @@ class AnthropicClient(BaseLLMClient):
     def generate_json(
         self,
         prompt: str,
-        schema: Optional[Dict] = None,
+        schema: dict | None = None,
         temperature: float = 0.4,
         max_retries: int = 3,
         **kwargs,
-    ) -> Dict:
+    ) -> dict:
         """Generate structured JSON output using Anthropic Claude with native structured outputs"""
         for attempt in range(max_retries):
             try:
@@ -611,7 +610,7 @@ class AnthropicClient(BaseLLMClient):
             except json.JSONDecodeError as e:
                 logger.warning(f"JSON parsing failed on attempt {attempt + 1}: {e}")
                 if attempt == max_retries - 1:
-                    raise ValueError(f"Failed to generate valid JSON after {max_retries} attempts")
+                    raise ValueError(f"Failed to generate valid JSON after {max_retries} attempts") from e
 
             except Exception as e:
                 logger.error(f"Anthropic JSON generation failed: {e}")

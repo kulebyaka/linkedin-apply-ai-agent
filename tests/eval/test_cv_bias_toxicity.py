@@ -9,8 +9,8 @@ CVs should be appropriate for professional contexts and free from:
 
 import pytest
 from deepeval import assert_test
-from deepeval.test_case import LLMTestCase
 from deepeval.metrics import BiasMetric, ToxicityMetric
+from deepeval.test_case import LLMTestCase
 
 
 @pytest.mark.eval

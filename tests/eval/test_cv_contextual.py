@@ -7,8 +7,8 @@ experiences and skills that match the job, not just include everything.
 
 import pytest
 from deepeval import assert_test
-from deepeval.test_case import LLMTestCase
 from deepeval.metrics import ContextualRelevancyMetric
+from deepeval.test_case import LLMTestCase
 
 
 @pytest.mark.eval

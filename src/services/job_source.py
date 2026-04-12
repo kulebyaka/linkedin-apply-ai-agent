@@ -13,8 +13,6 @@ import re
 from abc import ABC, abstractmethod
 from typing import Any
 
-from src.models.job import ScrapedJob
-
 
 class JobSourceAdapter(ABC):
     """Abstract base class for job source adapters.

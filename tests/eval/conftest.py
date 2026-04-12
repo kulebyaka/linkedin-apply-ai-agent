@@ -1,9 +1,10 @@
 """Eval-specific fixtures and configuration"""
 
-import pytest
 import json
 import os
 from pathlib import Path
+
+import pytest
 
 
 # Automatically mark all tests in eval/ directory

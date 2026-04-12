@@ -8,7 +8,6 @@ Provides session-scoped fixtures that auto-start:
 Both servers are started as subprocesses and killed on teardown.
 """
 
-import json
 import os
 import socket
 import subprocess
@@ -96,14 +95,14 @@ def mock_llm_and_api_server():
 
     try:
         wait_for_server(f"{api_url}/api/health", timeout=30)
-    except TimeoutError:
+    except TimeoutError as err:
         proc.kill()
         api_log.flush()
         with open(api_log.name) as f:
             output = f.read()
         raise TimeoutError(
             f"API server failed to start on {api_url}.\nServer output:\n{output}"
-        )
+        ) from err
 
     yield api_url
 
@@ -147,14 +146,14 @@ def ui_dev_server(mock_llm_and_api_server):
 
     try:
         wait_for_server(ui_url, timeout=60)
-    except TimeoutError:
+    except TimeoutError as err:
         proc.kill()
         vite_log.flush()
         with open(vite_log.name) as f:
             output = f.read()
         raise TimeoutError(
             f"Vite dev server failed to start on {ui_url}.\nServer output:\n{output}"
-        )
+        ) from err
 
     yield ui_url
 

@@ -1,8 +1,9 @@
 """Unit tests for PDF Generator service"""
 
-import pytest
 from pathlib import Path
-import json
+
+import pytest
+
 from src.services.pdf_generator import PDFGenerator
 
 

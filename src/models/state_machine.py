@@ -49,7 +49,7 @@ class BusinessState(str, Enum):
     FAILED = "failed"
 
 
-class InvalidStateTransition(Exception):
+class InvalidStateTransitionError(Exception):
     """Raised when an invalid state transition is attempted."""
 
     def __init__(
@@ -124,12 +124,12 @@ def validate_transition(
         True if transition is valid.
 
     Raises:
-        InvalidStateTransition: If the transition is not allowed.
+        InvalidStateTransitionError: If the transition is not allowed.
     """
     if current == target:
         return True
 
     allowed = ALLOWED_TRANSITIONS.get(current, set())
     if target not in allowed:
-        raise InvalidStateTransition(current, target, job_id)
+        raise InvalidStateTransitionError(current, target, job_id)
     return True

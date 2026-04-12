@@ -196,8 +196,8 @@
 			{#if currentState.status === 'idle' || currentState.status === 'failed'}
 				<JobDescriptionForm
 					onSubmit={handleSubmit}
-					isLoading={currentState.status === 'submitting'}
-					errorMessage={currentState.status === 'failed' ? currentState.errorMessage : undefined}
+					isLoading={false}
+					errorMessage={currentState.status === 'failed' ? (currentState.errorMessage ?? undefined) : undefined}
 					initialValue={currentState.jobDescription}
 				/>
 			{/if}

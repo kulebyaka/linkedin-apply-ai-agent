@@ -30,7 +30,6 @@ from ._shared import (
     create_llm_client,
     generate_pdf,
     get_repository_from_config,
-    load_master_cv,
 )
 
 logger = logging.getLogger(__name__)

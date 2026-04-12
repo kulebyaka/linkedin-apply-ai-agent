@@ -12,9 +12,9 @@ Set UI_URL env var to override default: UI_URL=http://localhost:5178 pytest ...
 """
 
 import os
-import pytest
-from playwright.sync_api import sync_playwright, Page, expect
 
+import pytest
+from playwright.sync_api import Page, sync_playwright
 
 # Expected dropdown options
 EXPECTED_PROVIDERS = ["openai", "anthropic"]

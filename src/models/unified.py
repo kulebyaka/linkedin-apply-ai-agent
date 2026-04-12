@@ -8,7 +8,7 @@ This module contains models for:
 """
 
 from datetime import datetime, timezone
-from typing import Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -20,10 +20,10 @@ class JobDescriptionInput(BaseModel):
     title: str = Field(..., description="Job title")
     company: str = Field(..., description="Company name")
     description: str = Field(..., description="Full job description")
-    requirements: Optional[str] = Field(None, description="Job requirements section")
-    template_name: Optional[str] = Field(None, description="CV template: modern, compact, classic, minimal, profile-card")
-    llm_provider: Optional[Literal["openai", "anthropic"]] = Field(None, description="LLM provider: openai, anthropic")
-    llm_model: Optional[str] = Field(None, description="LLM model name (e.g., gpt-4.1-nano, claude-haiku-4.5)")
+    requirements: str | None = Field(None, description="Job requirements section")
+    template_name: str | None = Field(None, description="CV template: modern, compact, classic, minimal, profile-card")
+    llm_provider: Literal["openai", "anthropic"] | None = Field(None, description="LLM provider: openai, anthropic")
+    llm_model: str | None = Field(None, description="LLM model name (e.g., gpt-4.1-nano, claude-haiku-4.5)")
 
 # =============================================================================
 # Job Submission Models

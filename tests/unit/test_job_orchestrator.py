@@ -1,14 +1,11 @@
 """Tests for JobOrchestrator domain service."""
 
-import asyncio
-from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from src.context import AppContext
-from src.models.unified import JobDescriptionInput
-from src.models.unified import JobRecord, JobSubmitRequest
+from src.models.unified import JobDescriptionInput, JobRecord, JobSubmitRequest
 from src.services.job_orchestrator import JobOrchestrator
 
 pytestmark = pytest.mark.asyncio

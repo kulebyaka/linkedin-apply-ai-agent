@@ -230,7 +230,9 @@ class TestProcessQueue:
         stop.set()
 
         wf = self._make_workflow_mock()
-        cv_loader = lambda: {"contact": {"full_name": "Test"}}
+
+        def cv_loader():
+            return {"contact": {"full_name": "Test"}}
 
         count = await process_queue(
             q, workflow=wf, master_cv_loader=cv_loader, job_repository=AsyncMock(get=AsyncMock(return_value=None)), delay_between_jobs=0, stop_event=stop
@@ -263,7 +265,9 @@ class TestProcessQueue:
             return {"step": "done"}
 
         wf.ainvoke = AsyncMock(side_effect=side_effect)
-        cv_loader = lambda: {"contact": {"full_name": "Test"}}
+
+        def cv_loader():
+            return {"contact": {"full_name": "Test"}}
 
         count = await process_queue(
             q, workflow=wf, master_cv_loader=cv_loader, job_repository=AsyncMock(get=AsyncMock(return_value=None)), delay_between_jobs=0, stop_event=stop
@@ -278,7 +282,9 @@ class TestProcessQueue:
 
         wf = MagicMock()
         wf.ainvoke = AsyncMock()
-        cv_loader = lambda: {}
+
+        def cv_loader():
+            return {}
 
         count = await process_queue(
             q, workflow=wf, master_cv_loader=cv_loader, job_repository=AsyncMock(get=AsyncMock(return_value=None)), delay_between_jobs=0, stop_event=stop
@@ -295,7 +301,9 @@ class TestProcessQueue:
 
         wf = self._make_workflow_mock()
         master = {"contact": {"full_name": "Test"}}
-        cv_loader = lambda: master
+
+        def cv_loader():
+            return master
 
         await process_queue(
             q, workflow=wf, master_cv_loader=cv_loader, job_repository=AsyncMock(get=AsyncMock(return_value=None)), delay_between_jobs=0, stop_event=stop
