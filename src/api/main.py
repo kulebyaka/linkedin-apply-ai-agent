@@ -164,7 +164,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             ctx.browser = browser
 
             scraper = LinkedInJobScraper(browser, settings)
-            scheduler = LinkedInSearchScheduler(settings, scraper, ctx.job_queue)
+            scheduler = LinkedInSearchScheduler(
+                settings, scraper, ctx.job_queue,
+                user_repository=ctx.user_repository,
+            )
             scheduler.start()
             ctx.scheduler = scheduler
 
@@ -431,7 +434,10 @@ async def trigger_linkedin_search(request: Request):
                     ctx.browser = browser
 
                 scraper = LinkedInJobScraper(ctx.browser, settings)
-                ctx.scheduler = LinkedInSearchScheduler(settings, scraper, ctx.job_queue)
+                ctx.scheduler = LinkedInSearchScheduler(
+                    settings, scraper, ctx.job_queue,
+                    user_repository=ctx.user_repository,
+                )
             except Exception:
                 logger.exception("Failed to initialize LinkedIn search components")
                 raise HTTPException(500, "Failed to initialize LinkedIn search components") from None

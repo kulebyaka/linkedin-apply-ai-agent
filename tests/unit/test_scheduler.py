@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from src.models.job import ScrapedJob
+from src.models.user import User, UserSearchPreferences
 from src.services.job_queue import JobQueue
 from src.services.scheduler import LinkedInSearchScheduler
 
@@ -14,6 +15,20 @@ pytestmark = pytest.mark.asyncio
 
 def _job(job_id: str) -> ScrapedJob:
     return ScrapedJob(job_id=job_id, title="", company="", location="", url="")
+
+
+def _user(
+    user_id: str,
+    email: str = "test@example.com",
+    prefs: UserSearchPreferences | None = None,
+) -> User:
+    """Create a User with optional search preferences."""
+    return User(
+        id=user_id,
+        email=email,
+        display_name=email.split("@")[0],
+        search_preferences=prefs,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -26,6 +41,7 @@ def _make_scheduler(
     scrape_result: list[ScrapedJob] | None = None,
     scrape_error: Exception | None = None,
     interval_hours: int = 1,
+    user_repository: MagicMock | None = None,
 ) -> tuple[LinkedInSearchScheduler, MagicMock, MagicMock, JobQueue]:
     """Return (scheduler, mock_settings, mock_scraper, queue)."""
     settings = MagicMock()
@@ -49,7 +65,9 @@ def _make_scheduler(
         scraper.scrape_and_enrich = AsyncMock(return_value=scrape_result or [])
 
     queue = JobQueue(max_size=100)
-    scheduler = LinkedInSearchScheduler(settings, scraper, queue)
+    scheduler = LinkedInSearchScheduler(
+        settings, scraper, queue, user_repository=user_repository
+    )
 
     return scheduler, settings, scraper, queue
 
@@ -144,6 +162,178 @@ class TestSchedulerLifecycle:
     async def test_next_run_time_none_when_stopped(self):
         scheduler, _, _, _ = _make_scheduler()
         assert scheduler.next_run_time is None
+
+
+# ---------------------------------------------------------------------------
+# Per-user search
+# ---------------------------------------------------------------------------
+
+
+class TestPerUserSearch:
+    """Test that the scheduler queries users and runs per-user searches."""
+
+    async def test_per_user_search_two_users_different_prefs(self):
+        """Two users with different search prefs produce separate scrape calls,
+        each tagged with the correct user_id."""
+        user_a = _user(
+            "user-a",
+            email="a@test.com",
+            prefs=UserSearchPreferences(keywords="python", location="NYC"),
+        )
+        user_b = _user(
+            "user-b",
+            email="b@test.com",
+            prefs=UserSearchPreferences(
+                keywords="rust", location="Berlin", remote_filter="remote"
+            ),
+        )
+
+        mock_user_repo = MagicMock()
+        mock_user_repo.get_all_with_search_prefs = AsyncMock(
+            return_value=[user_a, user_b]
+        )
+
+        jobs_a = [_job("j1"), _job("j2")]
+        jobs_b = [_job("j3")]
+
+        scraper = MagicMock()
+        scraper.browser = MagicMock()
+        scraper.browser.ensure_authenticated = AsyncMock()
+        scraper.reset_seen = MagicMock()
+        # Return different results for each call
+        scraper.scrape_and_enrich = AsyncMock(side_effect=[jobs_a, jobs_b])
+
+        settings = MagicMock()
+        settings.linkedin_search_interval_hours = 1
+        settings.scraped_jobs_path = None
+
+        queue = JobQueue(max_size=100)
+        scheduler = LinkedInSearchScheduler(
+            settings, scraper, queue, user_repository=mock_user_repo
+        )
+
+        count = await scheduler.run_search()
+
+        # Should have called scrape twice with different params
+        assert scraper.scrape_and_enrich.call_count == 2
+        first_params = scraper.scrape_and_enrich.call_args_list[0][0][0]
+        assert first_params.keywords == "python"
+        assert first_params.location == "NYC"
+        second_params = scraper.scrape_and_enrich.call_args_list[1][0][0]
+        assert second_params.keywords == "rust"
+        assert second_params.location == "Berlin"
+        assert second_params.remote_filter == "remote"
+
+        # Total enqueued: 3 jobs
+        assert count == 3
+        assert queue.size() == 3
+
+        # Verify user_id tags on queue items
+        item1 = await queue.get()
+        assert item1.user_id == "user-a"
+        assert item1.job.job_id == "j1"
+        item2 = await queue.get()
+        assert item2.user_id == "user-a"
+        assert item2.job.job_id == "j2"
+        item3 = await queue.get()
+        assert item3.user_id == "user-b"
+        assert item3.job.job_id == "j3"
+
+    async def test_fallback_to_global_when_no_users_have_prefs(self):
+        """When user_repository returns no users with prefs, falls back to
+        env-var-based global search params."""
+        mock_user_repo = MagicMock()
+        mock_user_repo.get_all_with_search_prefs = AsyncMock(return_value=[])
+
+        scheduler, settings, scraper, queue = _make_scheduler(
+            scrape_result=[_job("g1")],
+            user_repository=mock_user_repo,
+        )
+
+        count = await scheduler.run_search()
+
+        assert count == 1
+        # Used global settings
+        call_args = scraper.scrape_and_enrich.call_args[0][0]
+        assert call_args.keywords == "python"
+        assert call_args.location == "San Francisco"
+
+        # Queue item has user_id=None (global)
+        item = await queue.get()
+        assert item.user_id is None
+
+    async def test_fallback_when_user_repo_is_none(self):
+        """When user_repository is None, uses global settings."""
+        scheduler, _, scraper, queue = _make_scheduler(
+            scrape_result=[_job("g1")],
+            user_repository=None,
+        )
+
+        count = await scheduler.run_search()
+
+        assert count == 1
+        call_args = scraper.scrape_and_enrich.call_args[0][0]
+        assert call_args.keywords == "python"
+
+    async def test_fallback_when_user_repo_raises(self):
+        """When user_repository.get_all_with_search_prefs() raises, falls back
+        to global settings gracefully."""
+        mock_user_repo = MagicMock()
+        mock_user_repo.get_all_with_search_prefs = AsyncMock(
+            side_effect=RuntimeError("DB error")
+        )
+
+        scheduler, _, scraper, queue = _make_scheduler(
+            scrape_result=[_job("g1")],
+            user_repository=mock_user_repo,
+        )
+
+        count = await scheduler.run_search()
+
+        assert count == 1
+        # Fell back to global
+        call_args = scraper.scrape_and_enrich.call_args[0][0]
+        assert call_args.keywords == "python"
+
+    async def test_per_user_search_failure_continues_to_next_user(self):
+        """If scraping fails for one user, the scheduler continues to the next."""
+        user_a = _user(
+            "user-a",
+            prefs=UserSearchPreferences(keywords="fail"),
+        )
+        user_b = _user(
+            "user-b",
+            prefs=UserSearchPreferences(keywords="succeed"),
+        )
+
+        mock_user_repo = MagicMock()
+        mock_user_repo.get_all_with_search_prefs = AsyncMock(
+            return_value=[user_a, user_b]
+        )
+
+        scraper = MagicMock()
+        scraper.browser = MagicMock()
+        scraper.browser.ensure_authenticated = AsyncMock()
+        scraper.reset_seen = MagicMock()
+        scraper.scrape_and_enrich = AsyncMock(
+            side_effect=[RuntimeError("Scrape failed"), [_job("j1")]]
+        )
+
+        settings = MagicMock()
+        settings.linkedin_search_interval_hours = 1
+        settings.scraped_jobs_path = None
+
+        queue = JobQueue(max_size=100)
+        scheduler = LinkedInSearchScheduler(
+            settings, scraper, queue, user_repository=mock_user_repo
+        )
+
+        count = await scheduler.run_search()
+
+        # Only user_b's job was enqueued
+        assert count == 1
+        item = await queue.get()
+        assert item.user_id == "user-b"
 
 
 # ---------------------------------------------------------------------------

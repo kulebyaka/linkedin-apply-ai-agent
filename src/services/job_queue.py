@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from src.models.job import ScrapedJob
@@ -21,26 +22,36 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class QueueItem:
+    """A scraped job with its owning user context."""
+
+    job: ScrapedJob
+    user_id: str | None = None
+
+
 class JobQueue:
     """Async queue for ScrapedJob instances awaiting workflow processing."""
 
     def __init__(self, max_size: int = 100) -> None:
-        self._queue: asyncio.Queue[ScrapedJob] = asyncio.Queue(maxsize=max_size)
+        self._queue: asyncio.Queue[QueueItem] = asyncio.Queue(maxsize=max_size)
 
-    async def put(self, job: ScrapedJob) -> None:
+    async def put(self, job: ScrapedJob, *, user_id: str | None = None) -> None:
         """Enqueue a single scraped job."""
-        await self._queue.put(job)
+        await self._queue.put(QueueItem(job=job, user_id=user_id))
 
-    async def get(self) -> ScrapedJob:
-        """Dequeue next job (blocks until one is available)."""
+    async def get(self) -> QueueItem:
+        """Dequeue next item (blocks until one is available)."""
         return await self._queue.get()
 
-    async def put_batch(self, jobs: list[ScrapedJob]) -> int:
+    async def put_batch(
+        self, jobs: list[ScrapedJob], *, user_id: str | None = None
+    ) -> int:
         """Enqueue multiple jobs. Returns the number actually enqueued."""
         count = 0
         for job in jobs:
             try:
-                self._queue.put_nowait(job)
+                self._queue.put_nowait(QueueItem(job=job, user_id=user_id))
                 count += 1
             except asyncio.QueueFull:
                 dropped = jobs[count:]
@@ -75,6 +86,7 @@ async def process_queue(
     *,
     workflow: Any | None = None,
     master_cv_loader: Any | None = None,
+    user_repository: Any | None = None,
     job_repository: Any,
     delay_between_jobs: float = 2.0,
     stop_event: asyncio.Event | None = None,
@@ -90,7 +102,11 @@ async def process_queue(
         Compiled LangGraph workflow. If *None*, ``create_preparation_workflow()``
         is called (requires WeasyPrint system libs).
     master_cv_loader:
-        Callable returning a master-CV dict. Defaults to ``load_master_cv``.
+        Callable returning a master-CV dict. Used as fallback when no user_id
+        is attached to the queue item.
+    user_repository:
+        UserRepository for loading per-user master CVs. When a queue item
+        has a user_id, the master CV is loaded from the user's DB record.
     job_repository:
         Repository for job persistence and cross-cycle dedup. Required because
         workflow nodes depend on it for state persistence.
@@ -125,13 +141,16 @@ async def process_queue(
             logger.info("Stop event set and queue empty — consumer exiting.")
             break
 
-        # Try to get a job (with timeout so we can re-check stop_event)
+        # Try to get a queue item (with timeout so we can re-check stop_event)
         try:
-            job = await asyncio.wait_for(queue.get(), timeout=1.0)
+            item = await asyncio.wait_for(queue.get(), timeout=1.0)
         except TimeoutError:
             continue
 
-        logger.info("Processing queued job %s", job.job_id)
+        job = item.job
+        user_id = item.user_id
+
+        logger.info("Processing queued job %s (user=%s)", job.job_id, user_id or "global")
 
         # Cross-cycle dedup: skip jobs already in the repository
         if job_repository is not None:
@@ -144,7 +163,18 @@ async def process_queue(
                 logger.warning("Dedup check failed for job %s, proceeding with processing", job.job_id)
 
         try:
-            master_cv = master_cv_loader()
+            # Load master CV: from user's DB record if user_id is present, else fallback
+            master_cv = None
+            if user_id and user_repository:
+                try:
+                    user = await user_repository.get_by_id(user_id)
+                    if user and user.master_cv_json:
+                        master_cv = user.master_cv_json
+                except Exception:
+                    logger.warning("Failed to load master CV for user %s, using fallback", user_id)
+
+            if master_cv is None:
+                master_cv = master_cv_loader()
 
             initial_state = {
                 "job_id": job.job_id,
@@ -159,6 +189,7 @@ async def process_queue(
                 "retry_count": 0,
                 "current_step": BusinessState.QUEUED,
                 "error_message": None,
+                "user_id": user_id or "",
             }
 
             config = {"configurable": {"thread_id": f"linkedin-{job.job_id}", "repository": job_repository}}
@@ -314,6 +345,7 @@ class ConsumerManager:
                 ctx.job_queue,
                 workflow=ctx.prep_workflow,
                 master_cv_loader=load_master_cv,
+                user_repository=ctx.user_repository,
                 job_repository=ctx.repository,
                 delay_between_jobs=2.0,
                 on_job_processed=self._on_job_processed or _register_linkedin_job,

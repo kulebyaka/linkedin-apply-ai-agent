@@ -144,13 +144,13 @@ Update the scheduler to iterate over all users with configured search preference
 - Modify: `src/services/scheduler.py`
 - Modify: `src/services/job_queue.py`
 
-- [ ] Update `LinkedInSearchScheduler.__init__()` to accept `user_repository: UserRepository` instead of using hardcoded settings for search params
-- [ ] Refactor `LinkedInSearchScheduler._do_search()`: call `user_repository.get_all_with_search_prefs()` to get all users with configured search preferences. For each user, build `LinkedInSearchParams` from their `search_preferences` JSON, scrape, and enqueue jobs with that user's `user_id` attached
-- [ ] Update `JobQueue` items to carry `user_id` so that when the consumer processes a queued job, it knows which user owns it. Update the queue item structure (currently just job data) to include user context
-- [ ] Update `AppContext` creation to pass `user_repository` to scheduler
-- [ ] Keep the fallback: if no users have search preferences configured, fall back to env-var-based global search params (for backwards compat during transition)
-- [ ] Write tests for per-user search: mock UserRepository returning 2 users with different search prefs, verify scheduler builds correct params for each and tags jobs with correct user_id
-- [ ] Run project test suite — must pass before task 5
+- [x] Update `LinkedInSearchScheduler.__init__()` to accept `user_repository: UserRepository` instead of using hardcoded settings for search params
+- [x] Refactor `LinkedInSearchScheduler._do_search()`: call `user_repository.get_all_with_search_prefs()` to get all users with configured search preferences. For each user, build `LinkedInSearchParams` from their `search_preferences` JSON, scrape, and enqueue jobs with that user's `user_id` attached
+- [x] Update `JobQueue` items to carry `user_id` so that when the consumer processes a queued job, it knows which user owns it. Update the queue item structure (currently just job data) to include user context
+- [x] Update `AppContext` creation to pass `user_repository` to scheduler
+- [x] Keep the fallback: if no users have search preferences configured, fall back to env-var-based global search params (for backwards compat during transition)
+- [x] Write tests for per-user search: mock UserRepository returning 2 users with different search prefs, verify scheduler builds correct params for each and tags jobs with correct user_id
+- [x] Run project test suite — must pass before task 5
 
 ### Task 5: Frontend auth flow
 
