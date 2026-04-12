@@ -7,9 +7,10 @@ This document provides context for Claude Code (or any AI assistant) to effectiv
 ## Project Overview
 
 **LinkedIn Job Application Agent** is an intelligent automation system that:
-- Fetches job postings from LinkedIn hourly
+- Supports multiple users with magic-link email authentication (via Resend.com)
+- Fetches job postings from LinkedIn hourly (per-user search preferences)
 - Uses LLM to filter jobs and detect hidden disqualifiers
-- Tailors CV for each job using AI
+- Tailors CV for each job using AI (per-user master CV stored in DB)
 - Generates professional PDF resumes
 - Automates LinkedIn job applications via browser automation
 - Implements Human-in-the-Loop (HITL) approval with Tinder-like UI
@@ -20,10 +21,12 @@ This document provides context for Claude Code (or any AI assistant) to effectiv
 ### Core Technology Stack
 - **Workflow Orchestration**: LangGraph (state machine for agent workflow)
 - **Backend Framework**: FastAPI (for HITL UI API)
+- **Authentication**: Magic link via Resend.com + JWT (httpOnly cookie)
 - **Browser Automation**: Playwright
 - **Data Validation**: Pydantic v2
 - **PDF Generation**: WeasyPrint + Jinja2
 - **LLM Integration**: Multi-provider support (OpenAI, Anthropic, DeepSeek, Grok)
+- **Auth Dependencies**: `resend` (email sending), `pyjwt` (JWT tokens)
 
 ### Directory Structure
 
@@ -38,6 +41,8 @@ src/
 ├── llm/                        # LLM provider integrations
 │   └── provider.py             # Abstract base + provider implementations
 ├── services/                   # Business logic services
+│   ├── auth.py                 # AuthService: magic link + JWT authentication
+│   ├── user_repository.py      # UserRepository: user CRUD + search prefs + magic links
 │   ├── job_orchestrator.py     # Domain service: job submission & status queries
 │   ├── hitl_processor.py       # Domain service: HITL decision processing
 │   ├── job_source.py           # Job source adapters (URL, manual, LinkedIn)
@@ -51,14 +56,15 @@ src/
 │   ├── linkedin_scraper.py     # LinkedIn job search results scraper
 │   ├── linkedin_search.py      # LinkedIn search URL builder + filters
 │   ├── job_queue.py            # Async job queue + ConsumerManager for lifecycle
-│   ├── scheduler.py            # APScheduler-based LinkedIn search scheduler
+│   ├── scheduler.py            # APScheduler-based per-user LinkedIn search scheduler
 │   └── notification.py         # Webhook/email notifications (skeleton)
 ├── models/                     # Pydantic data models
 │   ├── job.py                  # Job posting models
 │   ├── cv.py                   # CV data models
 │   ├── cv_attempt.py           # CVCompositionAttempt for retry history tracking
 │   ├── state_machine.py        # BusinessState + WorkflowStep enums, transition validation
-│   └── unified.py              # Unified models for two-workflow architecture
+│   ├── unified.py              # Unified models for two-workflow architecture
+│   └── user.py                 # User, auth, and search preference models
 ├── api/                        # FastAPI endpoints (thin adapters)
 │   └── main.py                 # REST API — delegates to domain services
 ├── config/                     # Configuration
@@ -67,9 +73,9 @@ src/
     └── logger.py               # Logging setup
 
 data/
-├── cv/                         # Master CV in JSON
+├── cv/                         # Legacy master CV location (now stored in User DB record)
 ├── jobs/                       # Fetched job data
-└── generated_cvs/              # Tailored CV PDFs
+└── generated_cvs/              # Tailored CV PDFs (per-user: {user_id}/{job_id}.pdf)
 ```
 
 ## Two-Workflow Pipeline Architecture
@@ -133,6 +139,7 @@ The system uses a **two-workflow pipeline** split at the HITL boundary, enabling
 ### 1. Dependency Injection via AppContext
 - `src/context.py` defines a single `AppContext` dataclass holding all shared dependencies
 - Created once at startup via `create_app_context()` and stored in `app.state.ctx`
+- Includes `user_repository: UserRepository` and `auth_service: AuthService`
 - No module-level globals — all dependencies are explicit and injected
 - Workflow nodes receive `repository` via LangGraph's `config["configurable"]` dict
 - Domain services (`JobOrchestrator`, `HITLProcessor`) receive the full `AppContext`
@@ -178,6 +185,23 @@ The system uses a **two-workflow pipeline** split at the HITL boundary, enabling
 - Adapters for URL extraction, manual input, LinkedIn API
 - Factory pattern: `JobSourceFactory.get_adapter(source)`
 
+### 9. Multi-User Authentication
+- Magic link flow: user enters email → `AuthService` generates token → sends email via Resend.com → user clicks link → JWT cookie set
+- `AuthService` in `src/services/auth.py`: magic link generation/verification, JWT creation/decoding
+- `UserRepository` in `src/services/user_repository.py`: user CRUD, magic link storage, search preferences
+- Open registration: first login auto-creates user account
+- JWT stored in httpOnly cookie (`auth_token`), 30-day expiry
+- FastAPI dependencies: `get_current_user` (401 on missing auth), `get_optional_user` (returns None)
+- All job data is user-scoped: `user_id` FK on `Job` and `CVAttemptTable`
+
+### 10. Per-User Data Ownership
+- `JobRecord` includes `user_id` field — all list queries filter by user
+- Master CV stored as JSON in `UserTable.master_cv_json` (loaded from DB, not filesystem)
+- Search preferences stored as JSON in `UserTable.search_preferences`
+- PDF output stored in per-user directories: `data/generated_cvs/{user_id}/{job_id}.pdf`
+- Scheduler iterates all users with configured search preferences, runs separate LinkedIn searches per user
+- `JobRepository.get_for_user(job_id, user_id)` enforces ownership verification
+
 #### Important Notes about strict schema support
 - **OpenAI**: Requires GPT-4 or newer models for strict schema support
 - **Anthropic**: Requires beta header `anthropic-beta: structured-outputs-2025-11-13` (already configured)
@@ -209,26 +233,64 @@ See `src/llm/provider.py` module documentation for detailed implementation.
 5. **update_db_node**: Records application result
 
 ### Master CV Format
-- Stored as JSON in `data/cv/master_cv.json`
+- Stored as JSON in each user's DB record (`UserTable.master_cv_json`)
+- Uploaded via Settings UI or API (`PUT /api/users/me`)
 - Schema defined in `src/models/cv.py`
 - Contains comprehensive work history, skills, projects
 - LLM recomposes relevant portions for each job
+- Loaded from user record and passed via workflow state (`master_cv` key)
 
 ## API Endpoints
+
+### Authentication (public)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/auth/login` | Request magic link email |
+| GET | `/api/auth/verify?token=...` | Verify magic link, set JWT cookie |
+| GET | `/api/auth/me` | Get current authenticated user |
+| POST | `/api/auth/logout` | Clear auth cookie |
+
+### User Settings (requires auth)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| PUT | `/api/users/me` | Update user profile (display_name, master_cv_json, search_preferences) |
+| GET | `/api/users/me/search-preferences` | Get current search preferences |
+| PUT | `/api/users/me/search-preferences` | Update search preferences |
+
+### Jobs & HITL (requires auth, user-scoped)
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/api/jobs/submit` | Submit job for CV generation (URL or manual input) |
 | GET | `/api/jobs/{job_id}/status` | Get job status and details |
 | GET | `/api/jobs/{job_id}/pdf` | Download generated CV PDF |
+| GET | `/api/jobs/{job_id}/html` | Get generated CV as HTML |
 | GET | `/api/hitl/pending` | Get all jobs pending HITL review |
 | POST | `/api/hitl/{job_id}/decide` | Submit HITL decision (approve/decline/retry) |
 | GET | `/api/hitl/history` | Get application history |
+| DELETE | `/api/jobs/cleanup` | Clean up old job records |
+
+### System (public)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
 | POST | `/api/jobs/linkedin-search` | Trigger LinkedIn job search manually |
 | GET | `/api/jobs/linkedin-search/status` | Get scheduler state and last run info |
 | GET | `/api/health` | Health check (includes queue consumer status) |
 
 ## Data Models
+
+### User & Auth Models (`src/models/user.py`)
+
+- `User` - User entity: id, email, display_name, master_cv_json, search_preferences, timestamps
+- `LoginRequest` - Email input for magic link request
+- `LoginResponse` - Success message after magic link sent
+- `VerifyRequest` - Token for magic link verification
+- `AuthResponse` - User object + message after successful auth
+- `UserUpdateRequest` - Optional fields for profile update (display_name, master_cv_json, search_preferences)
+- `UserSearchPreferences` - Mirrors LinkedInSearchParams: keywords, location, remote_filter, date_posted, experience_level, job_type, easy_apply_only, max_jobs
 
 ### Core Models (`src/models/unified.py`)
 
@@ -238,7 +300,7 @@ See `src/llm/provider.py` module documentation for detailed implementation.
 - `HITLDecisionResponse` - Response after decision processed
 - `PendingApproval` - Job details for HITL review UI
 - `JobStatusResponse` - Full job status with CV and PDF info
-- `JobRecord` - Database record (focused: job metadata + current CV pointer, no CV history)
+- `JobRecord` - Database record (includes `user_id` for ownership)
 - `ApplicationHistoryItem` - History entry for completed jobs
 
 ### State Machine (`src/models/state_machine.py`)
@@ -256,11 +318,17 @@ See `src/llm/provider.py` module documentation for detailed implementation.
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| **AppContext DI** | ✅ Complete | `src/context.py` - replaces all module-level globals |
+| **Multi-User Auth** | ✅ Complete | `src/services/auth.py` - magic link + JWT, `src/services/user_repository.py` - user CRUD |
+| **User Models** | ✅ Complete | `src/models/user.py` - User, auth, search preferences models |
+| **Per-User Data Ownership** | ✅ Complete | user_id FK on all job data, per-user CV storage and search prefs |
+| **Per-User Search Scheduler** | ✅ Complete | `src/services/scheduler.py` - iterates users with search preferences |
+| **Frontend Auth Flow** | ✅ Complete | Login, magic link verify, protected routes, auth state store |
+| **Settings UI** | ✅ Complete | Profile editing, CV upload (JSON), search preferences configuration |
+| **AppContext DI** | ✅ Complete | `src/context.py` - includes UserRepository + AuthService |
 | **Async-Native Workflows** | ✅ Complete | All workflow nodes are `async def`, use `ainvoke()` |
 | **Shared Workflow Utils** | ✅ Complete | `src/agents/_shared.py` - deduplicated across 3 workflows |
 | **Job Lifecycle State Machine** | ✅ Complete | `src/models/state_machine.py` - BusinessState + WorkflowStep + transition validation |
-| **Domain Services** | ✅ Complete | `JobOrchestrator` + `HITLProcessor` - thin API handlers |
+| **Domain Services** | ✅ Complete | `JobOrchestrator` + `HITLProcessor` - thin API handlers, user-scoped |
 | **CV Validator** | ✅ Complete | `src/services/cv_validator.py` - configurable hallucination policy |
 | **CV Attempt History** | ✅ Complete | `src/models/cv_attempt.py` + repository methods |
 | **Consumer Manager** | ✅ Complete | `src/services/job_queue.py` - resilient queue consumer lifecycle |
@@ -271,16 +339,16 @@ See `src/llm/provider.py` module documentation for detailed implementation.
 | **Generate PDF** | ✅ Complete | `src/services/pdf_generator.py` (WeasyPrint + Jinja2) |
 | **HITL API Endpoints** | ✅ Complete | `src/api/main.py` (thin adapters to domain services) |
 | **Unified Data Models** | ✅ Complete | `src/models/unified.py` |
-| **Job Repository (DAL)** | ✅ Complete | `src/services/job_repository.py` (in-memory + SQLite, thread-safe) |
+| **Job Repository (DAL)** | ✅ Complete | `src/services/job_repository.py` (in-memory + SQLite, user-scoped queries) |
 | **Job Source Adapters** | ✅ Complete | `src/services/job_source.py` - LinkedIn adapter with field mapping |
 | **Browser Automation** | ✅ Complete | `src/services/browser_automation.py` - stealth Playwright with cookie auth |
 | **LinkedIn Job Scraper** | ✅ Complete | `src/services/linkedin_scraper.py` - search results parser with dedup |
 | **LinkedIn Search Builder** | ✅ Complete | `src/services/linkedin_search.py` - URL builder with filter models |
-| **Async Job Queue** | ✅ Complete | `src/services/job_queue.py` - queue with ConsumerManager |
-| **LinkedIn Search Scheduler** | ✅ Complete | `src/services/scheduler.py` - APScheduler with API endpoints |
+| **Async Job Queue** | ✅ Complete | `src/services/job_queue.py` - queue with ConsumerManager, user_id tagging |
+| **LinkedIn Search Scheduler** | ✅ Complete | `src/services/scheduler.py` - per-user search with APScheduler |
+| **HITL Frontend UI** | ✅ Complete | Svelte 5 SPA with Tinder-like review interface |
 | **Application Workflow** | 🟡 Stubs | `src/agents/application_workflow.py` - stubs only |
 | **Job Filter (LLM)** | 🔴 Pending | `src/services/job_filter.py` skeleton |
-| **HITL Frontend UI** | 🔴 Pending | Tinder-like React/Vue interface |
 
 ## Development Guidelines
 
@@ -301,11 +369,17 @@ All settings in `.env`:
 - Paths and directories
 - Workflow parameters (fetch interval, concurrency)
 - API server settings
+- **Authentication Configuration:**
+  - `RESEND_API_KEY` - Resend.com API key for sending magic link emails
+  - `JWT_SECRET` - Secret key for JWT token signing
+  - `MAGIC_LINK_TTL_MINUTES=15` - Magic link token validity period
+  - `JWT_EXPIRY_DAYS=30` - JWT session duration
+  - `APP_URL=http://localhost:5173` - Base URL for magic link callback
 - **Repository Configuration:**
   - `REPO_TYPE=memory` (default) or `REPO_TYPE=sqlite` for persistent storage
   - `DB_PATH=./data/jobs.db` (SQLite database path)
 - **LinkedIn Search Configuration:**
-  - `LINKEDIN_SEARCH_KEYWORDS`, `LINKEDIN_SEARCH_LOCATION` - search filters
+  - `LINKEDIN_SEARCH_KEYWORDS`, `LINKEDIN_SEARCH_LOCATION` - fallback search filters (used when no users have configured preferences)
   - `LINKEDIN_SEARCH_REMOTE_FILTER` - "remote", "on-site", "hybrid"
   - `LINKEDIN_SEARCH_SCHEDULE_ENABLED=false` - enable hourly scheduled searches
   - `LINKEDIN_SEARCH_INTERVAL_HOURS=1` - search frequency
@@ -356,10 +430,9 @@ All settings in `.env`:
 
 ## Next Steps
 
-1. **Build HITL Frontend** - Tinder-like React/Vue UI for batch review
-2. **Implement Application Workflow** - Deep agent with Playwright MCP for browser automation
-3. **Add Job Filter Logic** - LLM-based job suitability evaluation
-4. **LinkedIn Easy Apply** - Automated application submission via browser automation
+1. **Implement Application Workflow** - Deep agent with Playwright MCP for browser automation
+2. **Add Job Filter Logic** - LLM-based job suitability evaluation
+3. **LinkedIn Easy Apply** - Automated application submission via browser automation
 
 ## Reference Implementations
 

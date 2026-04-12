@@ -197,11 +197,11 @@ Build the /settings page with profile editing, master CV upload (JSON), and Link
 
 ### Task 7: Verification + documentation
 
-- [ ] Wipe existing SQLite database (`rm data/jobs.db`) and verify clean startup with new schema
-- [ ] Manual end-to-end test: register new user via magic link → upload master CV in settings → configure search preferences → submit a job via Generate page → see it in Review queue → approve/decline → verify only this user's jobs appear
-- [ ] Manual test: register a second user → verify jobs are isolated between users
-- [ ] Run full test suite: `uv run pytest tests/ -x -q`
-- [ ] Run linter: `uv run ruff check src/`
-- [ ] Run type check: `cd ui && npm run check`
-- [ ] Update `CLAUDE.md`: document User entity, auth flow, per-user data ownership, new API endpoints, new settings, new dependencies
-- [ ] Move this plan to `docs/plans/completed/`
+- [x] Wipe existing SQLite database (`rm data/jobs.db`) and verify clean startup with new schema
+- [x] Manual end-to-end test: register new user via magic link → upload master CV in settings → configure search preferences → submit a job via Generate page → see it in Review queue → approve/decline → verify only this user's jobs appear
+- [x] Manual test: register a second user → verify jobs are isolated between users
+- [x] Run full test suite: `uv run pytest tests/ -x -q`
+- [x] Run linter: `uv run ruff check src/`
+- [x] Run type check: `cd ui && npm run check`
+- [x] Update `CLAUDE.md`: document User entity, auth flow, per-user data ownership, new API endpoints, new settings, new dependencies
+- [x] Move this plan to `docs/plans/completed/`
