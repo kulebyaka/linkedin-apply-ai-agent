@@ -16,20 +16,32 @@ Every hour, based on a set of filters (in the future, filters will be built base
 | Component | Status | Notes |
 |-----------|--------|-------|
 | **Two-Workflow Architecture** | ✅ Complete | Preparation + Application workflows with HITL boundary. |
-| **LLM Provider Layer** | ✅ Complete | Implemented in `src/llm/provider.py`. |
-| **MVP Web UI** | ✅ Complete | `ui/` - SvelteKit 5 with Runes, Tailwind CSS v3, TypeScript. Single-page CV generator. |
-| **Job Source Adapters** | 🟡 Interface | `src/services/job_source.py` - interface only, no implementation. |
-| **Data Access Layer (DAL)** | 🟡 Stubs | `src/services/job_repository.py` - stubs only, no persistence. |
+| **AppContext DI** | ✅ Complete | `src/context.py` - replaces all module-level globals. |
+| **Async-Native Workflows** | ✅ Complete | All workflow nodes are `async def`, use `ainvoke()`. |
+| **Shared Workflow Utils** | ✅ Complete | `src/agents/_shared.py` - deduplicated across 3 workflows. |
+| **Job Lifecycle State Machine** | ✅ Complete | `src/models/state_machine.py` - BusinessState + WorkflowStep + transition validation. |
+| **Domain Services** | ✅ Complete | `JobOrchestrator` + `HITLProcessor` - thin API handlers. |
+| **CV Validator** | ✅ Complete | `src/services/cv_validator.py` - configurable hallucination policy. |
+| **CV Attempt History** | ✅ Complete | `src/models/cv_attempt.py` + repository methods. |
+| **Consumer Manager** | ✅ Complete | `src/services/job_queue.py` - resilient queue consumer lifecycle. |
+| **LLM Provider Layer** | ✅ Complete | `src/llm/provider.py`. |
+| **MVP Web UI** | ✅ Complete | `ui/` - SvelteKit 5 with Runes, Tailwind CSS v3, TypeScript. |
+| **Job Source Adapters** | ✅ Complete | `src/services/job_source.py` - LinkedIn adapter with field mapping. |
+| **Data Access Layer (DAL)** | ✅ Complete | `src/services/job_repository.py` - in-memory + SQLite via Piccolo, thread-safe. |
 | **Preparation Workflow** | ✅ Complete | `src/agents/preparation_workflow.py` - extract → filter → compose → PDF → save. |
 | **Retry Workflow** | ✅ Complete | `src/agents/retry_workflow.py` - regenerate CV with user feedback. |
 | **Application Workflow** | 🟡 Stubs | `src/agents/application_workflow.py` - stubs only, deep agent not implemented. |
 | **Compose Tailored CV** | ✅ Complete | `src/services/cv_composer.py` fully implemented. |
 | **Generate PDF** | ✅ Complete | `src/services/pdf_generator.py` fully implemented. Uses WeasyPrint + Jinja2. |
-| **HITL API Endpoints** | ✅ Complete | `src/api/main.py` - batch review, approve/decline/retry endpoints. |
+| **HITL API Endpoints** | ✅ Complete | `src/api/main.py` - thin adapters to domain services. |
 | **Unified Data Models** | ✅ Complete | `src/models/unified.py` - Pydantic models for new architecture. |
 | **HITL Frontend (Full Mode)** | ✅ Complete | Tinder-like batch review UI in `ui/` - neo-brutalist design. |
+| **Browser Automation** | ✅ Complete | `src/services/browser_automation.py` - stealth Playwright with cookie auth. |
+| **LinkedIn Job Scraper** | ✅ Complete | `src/services/linkedin_scraper.py` - search results parser with dedup. |
+| **LinkedIn Search Builder** | ✅ Complete | `src/services/linkedin_search.py` - URL builder with filter models. |
+| **Async Job Queue** | ✅ Complete | `src/services/job_queue.py` - queue with ConsumerManager. |
+| **LinkedIn Search Scheduler** | ✅ Complete | `src/services/scheduler.py` - APScheduler with API endpoints. |
 | **Job Filter (LLM)** | 🔴 Pending | `src/services/job_filter.py` skeleton exists. |
-| **Browser Automation** | 🔴 Pending | `src/services/browser_automation.py` is a skeleton. |
 
 ## Two-Workflow Pipeline Architecture
 
@@ -80,6 +92,7 @@ The system uses a **two-workflow pipeline** split at the HITL boundary, enabling
 | Preparation | `src/agents/preparation_workflow.py` | Main pipeline: job input → CV PDF → DB |
 | Retry | `src/agents/retry_workflow.py` | Re-compose CV with user feedback |
 | Application | `src/agents/application_workflow.py` | Apply to job (stubs only) |
+| Shared | `src/agents/_shared.py` | Common utilities: LLM init, CV compose, PDF gen, master CV loading |
 
 ### Workflow Modes
 
@@ -88,17 +101,15 @@ The system uses a **two-workflow pipeline** split at the HITL boundary, enabling
 
 ### Job Sources
 
-Defined in `src/services/job_source.py` (interface only):
+Defined in `src/services/job_source.py`:
 
 | Source | Description | Status |
 |--------|-------------|--------|
-| `url` | Extract job from external URL (lever.co, greenhouse.io, etc.) | Interface only |
-| `manual` | User provides job description directly | Interface only |
-| `linkedin` | LinkedIn API/scraping (future) | Not implemented |
+| `url` | Extract job from external URL (lever.co, greenhouse.io, etc.) | ✅ Complete |
+| `manual` | User provides job description directly | ✅ Complete |
+| `linkedin` | LinkedIn scraping with field mapping | ✅ Complete |
 
 ## API Endpoints
-
-### Unified Endpoints (New)
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -108,27 +119,33 @@ Defined in `src/services/job_source.py` (interface only):
 | GET | `/api/hitl/pending` | Get all jobs pending HITL review |
 | POST | `/api/hitl/{job_id}/decide` | Submit HITL decision (approve/decline/retry) |
 | GET | `/api/hitl/history` | Get application history |
-
-### Legacy Endpoints (Backward Compatible)
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/cv/generate` | Submit CV generation (uses preparation_workflow with MVP mode) |
-| GET | `/api/cv/status/{job_id}` | Get CV generation status |
-| GET | `/api/cv/download/{job_id}` | Download generated CV PDF |
+| POST | `/api/jobs/linkedin-search` | Trigger LinkedIn job search manually |
+| GET | `/api/jobs/linkedin-search/status` | Get scheduler state and last run info |
+| GET | `/api/health` | Health check (includes queue consumer status) |
 
 ## Data Models
 
-Defined in `src/models/unified.py`:
+### Core Models (`src/models/unified.py`)
 
 - `JobSubmitRequest` - Input for job submission (source, mode, url/job_description)
 - `JobSubmitResponse` - Response with job_id and status
-- `HITLDecision` - User decision (approved/declined/retry + feedback)
+- `HITLDecision` - User decision (approved/declined/retry + feedback + reasoning)
 - `HITLDecisionResponse` - Response after decision processed
 - `PendingApproval` - Job details for HITL review UI
 - `JobStatusResponse` - Full job status with CV and PDF info
-- `JobRecord` - Database record for job persistence
+- `JobRecord` - Focused database record (job metadata + current CV pointer, no CV history)
 - `ApplicationHistoryItem` - History entry for completed jobs
+
+### State Machine (`src/models/state_machine.py`)
+
+- `BusinessState` - Job lifecycle states: queued, processing, cv_ready, pending_review, approved, declined, retrying, applying, applied, failed
+- `WorkflowStep` - Transient step tracking: extracting, filtering, composing_cv, generating_pdf, etc.
+- `ALLOWED_TRANSITIONS` - Valid state change map, enforced by repository
+- `InvalidStateTransition` - Raised on illegal transitions
+
+### CV Attempt History (`src/models/cv_attempt.py`)
+
+- `CVCompositionAttempt` - Tracks each CV composition: attempt_number, user_feedback, cv_json, pdf_path
 
 ## Deleted Files
 
@@ -141,6 +158,7 @@ The following files were removed as part of the two-workflow architecture refact
 | `src/services/cv_generation_service.py` | Functionality moved to workflows |
 | `src/services/job_fetcher.py` | Superseded by `job_source.py` adapters |
 | `src/models/application.py` | Superseded by `unified.py` models (`HITLDecision`, etc.) |
+| `src/models/mvp.py` | Legacy MVP models removed; unified endpoints handle both modes |
 
 ## Architecture: Job Application Automation Agent
 
@@ -152,8 +170,12 @@ Overview: This option keeps a Python-centric solution but introduces a structure
 
 1. **Two-Workflow Split**: Separating at HITL boundary allows batch processing of pending approvals
 2. **Mode Parameter**: Single workflow handles both MVP (immediate) and Full (HITL) modes
-3. **Job Source Adapters**: Abstract interface for URL extraction, manual input, LinkedIn API
-4. **Repository Pattern**: DAL abstraction for future database persistence (currently in-memory stubs)
+3. **Dependency Injection via AppContext**: Single `AppContext` dataclass holds all shared dependencies — no module-level globals
+4. **Async-Native Workflows**: All workflow nodes are `async def`, invoked via `ainvoke()` — no `asyncio.run()` hacks
+5. **Domain Services**: `JobOrchestrator` and `HITLProcessor` encapsulate business logic — API handlers are thin adapters
+6. **Job Lifecycle State Machine**: `BusinessState` + `WorkflowStep` enums with enforced transition validation
+7. **Job Source Adapters**: Abstract interface for URL extraction, manual input, LinkedIn scraping
+8. **Repository Pattern**: DAL with in-memory (dev) and SQLite via Piccolo (production) implementations
 
 ### Node Descriptions
 
@@ -290,9 +312,7 @@ See `ui/README.md` for detailed documentation and `docs/plans/hitl-svelte-conver
 
 ## Next Steps
 
-1. **Implement Job Source Adapters** - URL extraction using HTTP + LLM, manual input processing
-2. **Implement DAL** - SQLite or PostgreSQL persistence for job records
-3. **Connect HITL UI to Real API** - Disable mock mode, implement `/api/jobs/{job_id}/html` endpoint
-4. **Implement Application Workflow** - Deep agent with Playwright MCP for browser automation
-5. **Add Job Filter Logic** - LLM-based job suitability evaluation
-6. **LinkedIn Integration** - Job fetching and Easy Apply automation
+1. **Implement Application Workflow** - Deep agent with Playwright for browser automation (currently stubs)
+2. **Add Job Filter Logic** - LLM-based job suitability evaluation (`src/services/job_filter.py` skeleton exists)
+3. **LinkedIn Easy Apply** - Automated application submission via browser automation
+4. **Build HITL Frontend** - Connect to real API (currently uses mock data)
