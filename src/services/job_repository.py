@@ -150,11 +150,26 @@ class JobRepository(ABC):
     # =========================================================================
 
     @abstractmethod
-    async def get_pending(self) -> list[JobRecord]:
-        """Get all jobs with status='pending' (awaiting HITL review).
+    async def get_for_user(self, job_id: str, user_id: str) -> JobRecord | None:
+        """Get a job record by ID, verifying user ownership.
 
-        Convenience method equivalent to get_by_status("pending").
+        Args:
+            job_id: Unique job identifier.
+            user_id: Owner's user ID.
+
+        Returns:
+            JobRecord if found and owned by user, None otherwise.
+        """
+        pass
+
+    @abstractmethod
+    async def get_pending(self, user_id: str) -> list[JobRecord]:
+        """Get all jobs with status='pending' (awaiting HITL review) for a user.
+
         Returns jobs ordered by created_at descending (newest first).
+
+        Args:
+            user_id: Owner's user ID.
 
         Returns:
             List of JobRecord objects pending approval.
@@ -164,15 +179,17 @@ class JobRepository(ABC):
     @abstractmethod
     async def get_by_status(
         self,
+        user_id: str,
         status: str,
         limit: int = 100,
         offset: int = 0,
         order_by: str = "created_at",
         order_desc: bool = True,
     ) -> list[JobRecord]:
-        """Get jobs with a specific status, with pagination.
+        """Get jobs with a specific status for a user, with pagination.
 
         Args:
+            user_id: Owner's user ID.
             status: Job status to filter by.
             limit: Maximum number of records to return.
             offset: Number of records to skip.
@@ -185,10 +202,11 @@ class JobRepository(ABC):
         pass
 
     @abstractmethod
-    async def get_all(self, limit: int = 100, offset: int = 0) -> list[JobRecord]:
-        """Get all job records with pagination.
+    async def get_all(self, user_id: str, limit: int = 100, offset: int = 0) -> list[JobRecord]:
+        """Get all job records for a user with pagination.
 
         Args:
+            user_id: Owner's user ID.
             limit: Maximum number of records to return.
             offset: Number of records to skip.
 
@@ -200,12 +218,14 @@ class JobRepository(ABC):
     @abstractmethod
     async def get_history(
         self,
+        user_id: str,
         limit: int = 50,
         statuses: list[str] | None = None,
     ) -> list[JobRecord]:
-        """Get job application history.
+        """Get job application history for a user.
 
         Args:
+            user_id: Owner's user ID.
             limit: Maximum number of records to return.
             statuses: Optional list of statuses to filter by.
                       If None, returns all statuses.
@@ -423,74 +443,60 @@ class InMemoryJobRepository(JobRepository):
     # Query Methods
     # =========================================================================
 
-    async def get_pending(self) -> list[JobRecord]:
-        """Get all pending jobs.
+    async def get_for_user(self, job_id: str, user_id: str) -> JobRecord | None:
+        """Get a job record by ID, verifying user ownership."""
+        job = self._jobs.get(job_id)
+        if job and job.user_id == user_id:
+            return job
+        return None
 
-        Returns:
-            List of jobs with status='pending', sorted by created_at desc.
-        """
-        jobs = [j for j in self._jobs.values() if j.status == BusinessState.PENDING_REVIEW]
+    async def get_pending(self, user_id: str) -> list[JobRecord]:
+        """Get all pending jobs for a user."""
+        jobs = [
+            j for j in self._jobs.values()
+            if j.status == BusinessState.PENDING_REVIEW and j.user_id == user_id
+        ]
         jobs.sort(key=lambda j: j.created_at, reverse=True)
         return jobs
 
     async def get_by_status(
         self,
+        user_id: str,
         status: str,
         limit: int = 100,
         offset: int = 0,
         order_by: str = "created_at",
         order_desc: bool = True,
     ) -> list[JobRecord]:
-        """Get jobs by status with pagination.
+        """Get jobs by status for a user with pagination."""
+        jobs = [
+            j for j in self._jobs.values()
+            if j.status == status and j.user_id == user_id
+        ]
 
-        Args:
-            status: Status to filter by.
-            limit: Max records.
-            offset: Records to skip.
-            order_by: Field to sort by.
-            order_desc: Sort descending if True.
-
-        Returns:
-            List of matching jobs.
-        """
-        jobs = [j for j in self._jobs.values() if j.status == status]
-
-        # Sort by specified field
         if order_by == "updated_at":
             jobs.sort(key=lambda j: j.updated_at, reverse=order_desc)
-        else:  # default to created_at
+        else:
             jobs.sort(key=lambda j: j.created_at, reverse=order_desc)
 
         return jobs[offset:offset + limit]
 
-    async def get_all(self, limit: int = 100, offset: int = 0) -> list[JobRecord]:
-        """Get all jobs with pagination.
-
-        Args:
-            limit: Max records.
-            offset: Records to skip.
-
-        Returns:
-            List of jobs sorted by created_at desc.
-        """
-        jobs = sorted(self._jobs.values(), key=lambda j: j.created_at, reverse=True)
+    async def get_all(self, user_id: str, limit: int = 100, offset: int = 0) -> list[JobRecord]:
+        """Get all jobs for a user with pagination."""
+        jobs = sorted(
+            [j for j in self._jobs.values() if j.user_id == user_id],
+            key=lambda j: j.created_at, reverse=True,
+        )
         return jobs[offset:offset + limit]
 
     async def get_history(
         self,
+        user_id: str,
         limit: int = 50,
         statuses: list[str] | None = None,
     ) -> list[JobRecord]:
-        """Get application history.
-
-        Args:
-            limit: Max records.
-            statuses: Optional status filter.
-
-        Returns:
-            List of jobs sorted by updated_at desc.
-        """
-        jobs = list(self._jobs.values())
+        """Get application history for a user."""
+        jobs = [j for j in self._jobs.values() if j.user_id == user_id]
         if statuses:
             jobs = [j for j in jobs if j.status in statuses]
         jobs.sort(key=lambda j: j.updated_at, reverse=True)
@@ -689,6 +695,7 @@ class SQLiteJobRepository(JobRepository):
         """Convert Pydantic JobRecord to database row dict."""
         return {
             "job_id": job.job_id,
+            "user_id": job.user_id,
             "source": job.source,
             "mode": job.mode,
             "status": job.status,
@@ -726,6 +733,7 @@ class SQLiteJobRepository(JobRepository):
         """Convert database row dict to Pydantic JobRecord."""
         return JobRecord(
             job_id=row["job_id"],
+            user_id=row.get("user_id", ""),
             source=row["source"],
             mode=row["mode"],
             status=row["status"],
@@ -879,18 +887,31 @@ class SQLiteJobRepository(JobRepository):
     # Query Methods
     # =========================================================================
 
-    async def get_pending(self) -> list[JobRecord]:
-        """Get all pending jobs.
+    async def get_for_user(self, job_id: str, user_id: str) -> JobRecord | None:
+        """Get a job record by ID, verifying user ownership."""
+        self._ensure_initialized()
+        from .tables import Job
 
-        Returns:
-            List of jobs with status='pending', sorted by created_at desc.
-        """
+        row = (
+            await Job.select()
+            .where(Job.job_id == job_id)
+            .where(Job.user_id == user_id)
+            .first()
+            .run()
+        )
+        if not row:
+            return None
+        return self._row_to_job_record(row)
+
+    async def get_pending(self, user_id: str) -> list[JobRecord]:
+        """Get all pending jobs for a user."""
         self._ensure_initialized()
         from .tables import Job
 
         rows = (
             await Job.select()
             .where(Job.status == BusinessState.PENDING_REVIEW)
+            .where(Job.user_id == user_id)
             .order_by(Job.created_at, ascending=False)
             .run()
         )
@@ -899,33 +920,23 @@ class SQLiteJobRepository(JobRepository):
 
     async def get_by_status(
         self,
+        user_id: str,
         status: str,
         limit: int = 100,
         offset: int = 0,
         order_by: str = "created_at",
         order_desc: bool = True,
     ) -> list[JobRecord]:
-        """Get jobs by status with pagination.
-
-        Args:
-            status: Status to filter by.
-            limit: Max records.
-            offset: Records to skip.
-            order_by: Field to sort by.
-            order_desc: Sort descending if True.
-
-        Returns:
-            List of matching jobs.
-        """
+        """Get jobs by status for a user with pagination."""
         self._ensure_initialized()
         from .tables import Job
 
-        # Determine order column
         order_column = Job.updated_at if order_by == "updated_at" else Job.created_at
 
         rows = (
             await Job.select()
             .where(Job.status == status)
+            .where(Job.user_id == user_id)
             .order_by(order_column, ascending=not order_desc)
             .limit(limit)
             .offset(offset)
@@ -934,21 +945,14 @@ class SQLiteJobRepository(JobRepository):
 
         return [self._row_to_job_record(row) for row in rows]
 
-    async def get_all(self, limit: int = 100, offset: int = 0) -> list[JobRecord]:
-        """Get all jobs with pagination.
-
-        Args:
-            limit: Max records.
-            offset: Records to skip.
-
-        Returns:
-            List of jobs sorted by created_at desc.
-        """
+    async def get_all(self, user_id: str, limit: int = 100, offset: int = 0) -> list[JobRecord]:
+        """Get all jobs for a user with pagination."""
         self._ensure_initialized()
         from .tables import Job
 
         rows = (
             await Job.select()
+            .where(Job.user_id == user_id)
             .order_by(Job.created_at, ascending=False)
             .limit(limit)
             .offset(offset)
@@ -959,22 +963,20 @@ class SQLiteJobRepository(JobRepository):
 
     async def get_history(
         self,
+        user_id: str,
         limit: int = 50,
         statuses: list[str] | None = None,
     ) -> list[JobRecord]:
-        """Get application history.
-
-        Args:
-            limit: Max records.
-            statuses: Optional status filter.
-
-        Returns:
-            List of jobs sorted by updated_at desc.
-        """
+        """Get application history for a user."""
         self._ensure_initialized()
         from .tables import Job
 
-        query = Job.select().order_by(Job.updated_at, ascending=False).limit(limit)
+        query = (
+            Job.select()
+            .where(Job.user_id == user_id)
+            .order_by(Job.updated_at, ascending=False)
+            .limit(limit)
+        )
 
         if statuses:
             query = query.where(Job.status.is_in(statuses))

@@ -123,18 +123,18 @@ Add user_id filtering to all job queries so each user sees only their own jobs. 
 - Modify: `src/models/unified.py`
 - Modify: `src/api/main.py`
 
-- [ ] Add `user_id: str` field to `JobRecord` in `src/models/unified.py`. Update `JobSubmitRequest` or workflow invocation to carry user_id
-- [ ] Update `JobRepository` ABC in `src/services/job_repository.py`: add `user_id: str` parameter to `get_pending(user_id)`, `get_by_status(user_id, status, ...)`, `get_all(user_id, ...)`, `get_history(user_id, ...)`. Keep `get(job_id)` without user_id filter (used internally) but add `get_for_user(job_id, user_id)` that verifies ownership
-- [ ] Update `InMemoryJobRepository` to filter by `user_id` in all list queries. Store user_id on JobRecord during `create()`
-- [ ] Update `SQLiteJobRepository` to add `WHERE user_id = ?` to all list queries. Add user_id to INSERT statements
-- [ ] Update `load_master_cv()` in `src/agents/_shared.py`: change from reading filesystem to accepting `master_cv_json: dict` passed via workflow state (loaded from User table before workflow invocation). Remove the filesystem path dependency
-- [ ] Add `user_id` and `master_cv` to preparation workflow state TypedDict and retry workflow state TypedDict. Ensure these are populated before workflow invocation
-- [ ] Update `JobOrchestrator.submit_job()` in `src/services/job_orchestrator.py` to accept and thread `user_id`. Load master CV from user's DB record. Pass user_id in job record and workflow state
-- [ ] Update `HITLProcessor` in `src/services/hitl_processor.py`: `get_pending(user_id)`, `get_history(user_id, ...)` to filter by user. `process_decision(job_id, decision, user_id)` to verify ownership
-- [ ] Update PDF generation to use per-user directories: `data/generated_cvs/{user_id}/{job_id}.pdf`. Update `pdf_generator.py` if path construction happens there, or update workflow nodes where path is built
-- [ ] Update all API endpoints in `src/api/main.py` that return job data to require auth and pass `user_id` from `get_current_user` dependency to orchestrator/HITL processor. Endpoints: `POST /api/jobs/submit`, `GET /api/jobs/{job_id}/status`, `GET /api/jobs/{job_id}/pdf`, `GET /api/jobs/{job_id}/html`, `GET /api/hitl/pending`, `POST /api/hitl/{job_id}/decide`, `GET /api/hitl/history`, `DELETE /api/jobs/cleanup`
-- [ ] Update tests: `tests/unit/test_job_orchestrator.py`, `tests/unit/test_hitl_processor.py` — add user_id to all test cases. Update any repository mocks to expect user_id parameters
-- [ ] Run project test suite — must pass before task 4
+- [x] Add `user_id: str` field to `JobRecord` in `src/models/unified.py`. Update `JobSubmitRequest` or workflow invocation to carry user_id
+- [x] Update `JobRepository` ABC in `src/services/job_repository.py`: add `user_id: str` parameter to `get_pending(user_id)`, `get_by_status(user_id, status, ...)`, `get_all(user_id, ...)`, `get_history(user_id, ...)`. Keep `get(job_id)` without user_id filter (used internally) but add `get_for_user(job_id, user_id)` that verifies ownership
+- [x] Update `InMemoryJobRepository` to filter by `user_id` in all list queries. Store user_id on JobRecord during `create()`
+- [x] Update `SQLiteJobRepository` to add `WHERE user_id = ?` to all list queries. Add user_id to INSERT statements
+- [x] Update `load_master_cv()` in `src/agents/_shared.py`: change from reading filesystem to accepting `master_cv_json: dict` passed via workflow state (loaded from User table before workflow invocation). Remove the filesystem path dependency
+- [x] Add `user_id` and `master_cv` to preparation workflow state TypedDict and retry workflow state TypedDict. Ensure these are populated before workflow invocation
+- [x] Update `JobOrchestrator.submit_job()` in `src/services/job_orchestrator.py` to accept and thread `user_id`. Load master CV from user's DB record. Pass user_id in job record and workflow state
+- [x] Update `HITLProcessor` in `src/services/hitl_processor.py`: `get_pending(user_id)`, `get_history(user_id, ...)` to filter by user. `process_decision(job_id, decision, user_id)` to verify ownership
+- [x] Update PDF generation to use per-user directories: `data/generated_cvs/{user_id}/{job_id}.pdf`. Update `pdf_generator.py` if path construction happens there, or update workflow nodes where path is built
+- [x] Update all API endpoints in `src/api/main.py` that return job data to require auth and pass `user_id` from `get_current_user` dependency to orchestrator/HITL processor. Endpoints: `POST /api/jobs/submit`, `GET /api/jobs/{job_id}/status`, `GET /api/jobs/{job_id}/pdf`, `GET /api/jobs/{job_id}/html`, `GET /api/hitl/pending`, `POST /api/hitl/{job_id}/decide`, `GET /api/hitl/history`, `DELETE /api/jobs/cleanup`
+- [x] Update tests: `tests/unit/test_job_orchestrator.py`, `tests/unit/test_hitl_processor.py` — add user_id to all test cases. Update any repository mocks to expect user_id parameters
+- [x] Run project test suite — must pass before task 4
 
 ### Task 4: Per-user LinkedIn search scheduler
 

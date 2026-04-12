@@ -21,7 +21,7 @@ from langgraph.graph import END, StateGraph
 from ..config.settings import get_settings
 from ..models.cv_attempt import CVCompositionAttempt
 from ..models.state_machine import BusinessState, WorkflowStep
-from ._shared import compose_cv, generate_pdf, get_repository_from_config, load_master_cv
+from ._shared import compose_cv, generate_pdf, get_repository_from_config
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -32,6 +32,7 @@ class RetryWorkflowState(TypedDict):
 
     # Input
     job_id: str
+    user_id: str
     user_feedback: str
 
     # Loaded from DB
@@ -110,8 +111,7 @@ async def load_from_db_node(state: RetryWorkflowState, config: RunnableConfig | 
         attempts = await repo.get_cv_attempts(job_id)
         state["retry_count"] = len(attempts) + 1
 
-        # Load master CV
-        state["master_cv"] = load_master_cv()
+        # master_cv is passed via state from the caller (loaded from User DB record)
 
         state["current_step"] = WorkflowStep.LOADED
         logger.info(f"Loaded job data for {job_id}, retry #{state['retry_count']}")

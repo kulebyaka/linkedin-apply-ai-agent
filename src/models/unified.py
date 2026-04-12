@@ -122,6 +122,7 @@ class JobRecord(BaseModel):
     quick-access copies of the latest CV attempt data.
     """
     job_id: str
+    user_id: str = ""
     source: Literal["url", "manual", "linkedin"]
     mode: Literal["mvp", "full"]
     status: BusinessState = Field(default=BusinessState.QUEUED)

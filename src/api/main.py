@@ -377,12 +377,18 @@ async def submit_job_options():
 
 @app.post("/api/jobs/submit", response_model=JobSubmitResponse)
 async def submit_job(
-    job_request: JobSubmitRequest, http_request: Request
+    job_request: JobSubmitRequest, http_request: Request, user: CurrentUser
 ) -> JobSubmitResponse:
     """Submit a job for CV generation."""
     try:
+        # Load master CV from user's DB record, fall back to filesystem
+        master_cv = user.master_cv_json
+        if not master_cv:
+            from src.agents._shared import load_master_cv
+            master_cv = load_master_cv()
+
         orchestrator = _get_orchestrator(http_request)
-        return await orchestrator.submit_job(job_request)
+        return await orchestrator.submit_job(job_request, user.id, master_cv)
     except ValueError as e:
         raise HTTPException(400, str(e)) from None
     except Exception as e:
@@ -513,9 +519,20 @@ async def replay_fixtures(request: Request, limit: Annotated[int, Query(ge=0)] =
 
 
 @app.get("/api/jobs/{job_id}/status", response_model=JobStatusResponse)
-async def get_job_status(job_id: str, request: Request) -> JobStatusResponse:
+async def get_job_status(
+    job_id: str, request: Request, user: CurrentUser
+) -> JobStatusResponse:
     """Get status of a submitted job."""
     try:
+        # Verify ownership
+        ctx = _get_ctx(request)
+        job_record = await ctx.repository.get_for_user(job_id, user.id)
+        if job_record is None:
+            # Also check workflow threads for in-progress jobs
+            thread_info = await ctx.get_workflow_thread(job_id)
+            if thread_info is None:
+                raise KeyError(f"Job {job_id} not found")
+
         orchestrator = _get_orchestrator(request)
         return await orchestrator.get_status(job_id)
     except KeyError:
@@ -526,7 +543,7 @@ async def get_job_status(job_id: str, request: Request) -> JobStatusResponse:
 
 
 @app.get("/api/jobs/{job_id}/pdf")
-async def download_job_pdf(job_id: str, request: Request):
+async def download_job_pdf(job_id: str, request: Request, user: CurrentUser):
     """
     Download generated CV PDF for a job.
 
@@ -534,8 +551,8 @@ async def download_job_pdf(job_id: str, request: Request):
     Returns 404 if PDF file missing.
     """
     try:
-        # Get job status
-        status = await get_job_status(job_id, request)
+        # Get job status (pass user for ownership check)
+        status = await get_job_status(job_id, request, user)
 
         # Check if job is ready
         if status.status == BusinessState.FAILED:
@@ -580,7 +597,7 @@ async def download_job_pdf(job_id: str, request: Request):
 
 
 @app.get("/api/jobs/{job_id}/html", response_class=HTMLResponse)
-async def get_job_cv_html(job_id: str, request: Request) -> HTMLResponse:
+async def get_job_cv_html(job_id: str, request: Request, user: CurrentUser) -> HTMLResponse:
     """
     Return rendered HTML CV for a job.
 
@@ -590,8 +607,8 @@ async def get_job_cv_html(job_id: str, request: Request) -> HTMLResponse:
     try:
         ctx = _get_ctx(request)
 
-        # Get job status
-        status = await get_job_status(job_id, request)
+        # Get job status (pass user for ownership check)
+        status = await get_job_status(job_id, request, user)
 
         # Check if job is ready
         if status.status == BusinessState.FAILED:
@@ -648,11 +665,11 @@ async def get_job_cv_html(job_id: str, request: Request) -> HTMLResponse:
 
 
 @app.get("/api/hitl/pending", response_model=list[PendingApproval])
-async def get_hitl_pending(request: Request) -> list[PendingApproval]:
-    """Get all jobs pending HITL review."""
+async def get_hitl_pending(request: Request, user: CurrentUser) -> list[PendingApproval]:
+    """Get all jobs pending HITL review for the authenticated user."""
     try:
         hitl = _get_hitl(request)
-        return await hitl.get_pending()
+        return await hitl.get_pending(user.id)
     except Exception as e:
         logger.error(f"Failed to get pending jobs: {e}", exc_info=True)
         raise HTTPException(500, "Failed to get pending jobs") from None
@@ -660,12 +677,12 @@ async def get_hitl_pending(request: Request) -> list[PendingApproval]:
 
 @app.post("/api/hitl/{job_id}/decide", response_model=HITLDecisionResponse)
 async def submit_hitl_decision(
-    job_id: str, decision: HITLDecision, request: Request
+    job_id: str, decision: HITLDecision, request: Request, user: CurrentUser
 ) -> HITLDecisionResponse:
     """Submit HITL decision for a pending job."""
     try:
         hitl = _get_hitl(request)
-        return await hitl.process_decision(job_id, decision)
+        return await hitl.process_decision(job_id, decision, user.id)
     except ValueError as e:
         raise HTTPException(400, str(e)) from None
     except KeyError:
@@ -679,12 +696,12 @@ async def submit_hitl_decision(
 
 @app.get("/api/hitl/history", response_model=list[ApplicationHistoryItem])
 async def get_application_history(
-    request: Request, limit: int = 50, status: str | None = None
+    request: Request, user: CurrentUser, limit: int = 50, status: str | None = None
 ) -> list[ApplicationHistoryItem]:
-    """Get application history."""
+    """Get application history for the authenticated user."""
     try:
         hitl = _get_hitl(request)
-        return await hitl.get_history(limit=limit, status=status)
+        return await hitl.get_history(user.id, limit=limit, status=status)
     except Exception as e:
         logger.error(f"Failed to get application history: {e}", exc_info=True)
         raise HTTPException(500, "Failed to get history") from None
@@ -699,6 +716,7 @@ async def get_application_history(
 @app.delete("/api/jobs/cleanup")
 async def cleanup_jobs(
     request: Request,
+    user: CurrentUser,
     older_than_days: Annotated[int, Query(ge=1, description="Delete jobs older than this many days")] = 90,
     statuses: Annotated[
         list[str] | None, Query(description="Only delete jobs with these statuses")

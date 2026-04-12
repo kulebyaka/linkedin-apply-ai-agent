@@ -242,10 +242,14 @@ async def generate_pdf(
             c for c in candidate_name if c.isalnum() or c in (" ", "-", "_")
         ).strip()
 
-        # Build filename
+        # Build filename with per-user directory
         suffix = version_suffix or ""
         pdf_filename = f"{safe_name}_{safe_company}_{safe_title}{suffix}.pdf".replace(" ", "_")
-        output_dir = Path(settings.generated_cvs_dir)
+        user_id = state.get("user_id", "")
+        if user_id:
+            output_dir = Path(settings.generated_cvs_dir) / user_id
+        else:
+            output_dir = Path(settings.generated_cvs_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         output_path = output_dir / pdf_filename
 

@@ -1,6 +1,6 @@
 """Tests for JobOrchestrator domain service."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -10,11 +10,15 @@ from src.services.job_orchestrator import JobOrchestrator
 
 pytestmark = pytest.mark.asyncio
 
+TEST_USER_ID = "user-abc-123"
+TEST_MASTER_CV = {"contact": {"full_name": "Test User"}, "skills": ["Python"]}
+
 
 def _make_ctx(**overrides) -> AppContext:
     """Create an AppContext with mock dependencies."""
     repo = AsyncMock()
     repo.get = AsyncMock(return_value=None)
+    repo.get_for_user = AsyncMock(return_value=None)
     ctx = AppContext(
         repository=repo,
         settings=MagicMock(),
@@ -30,8 +34,7 @@ def _make_ctx(**overrides) -> AppContext:
 class TestSubmitJob:
     """Test JobOrchestrator.submit_job()."""
 
-    @patch("src.agents.preparation_workflow.load_master_cv", return_value={"name": "Test"})
-    async def test_submit_manual_job(self, mock_cv):
+    async def test_submit_manual_job(self):
         ctx = _make_ctx()
         orchestrator = JobOrchestrator(ctx)
 
@@ -47,14 +50,13 @@ class TestSubmitJob:
             ),
         )
 
-        response = await orchestrator.submit_job(request)
+        response = await orchestrator.submit_job(request, TEST_USER_ID, TEST_MASTER_CV)
 
         assert response.status == "queued"
         assert response.job_id  # non-empty UUID
         assert "submitted successfully" in response.message
 
-    @patch("src.agents.preparation_workflow.load_master_cv", return_value={"name": "Test"})
-    async def test_submit_url_job(self, mock_cv):
+    async def test_submit_url_job(self):
         ctx = _make_ctx()
         orchestrator = JobOrchestrator(ctx)
 
@@ -64,7 +66,7 @@ class TestSubmitJob:
             url="https://example.com/job/123",
         )
 
-        response = await orchestrator.submit_job(request)
+        response = await orchestrator.submit_job(request, TEST_USER_ID, TEST_MASTER_CV)
 
         assert response.status == "queued"
         assert response.job_id
@@ -76,7 +78,7 @@ class TestSubmitJob:
         request = JobSubmitRequest(source="url", mode="mvp")
 
         with pytest.raises(ValueError, match="URL is required"):
-            await orchestrator.submit_job(request)
+            await orchestrator.submit_job(request, TEST_USER_ID, TEST_MASTER_CV)
 
     async def test_submit_manual_without_description_raises(self):
         ctx = _make_ctx()
@@ -85,10 +87,9 @@ class TestSubmitJob:
         request = JobSubmitRequest(source="manual", mode="mvp")
 
         with pytest.raises(ValueError, match="job_description is required"):
-            await orchestrator.submit_job(request)
+            await orchestrator.submit_job(request, TEST_USER_ID, TEST_MASTER_CV)
 
-    @patch("src.agents.preparation_workflow.load_master_cv", return_value={"name": "Test"})
-    async def test_submit_registers_workflow(self, mock_cv):
+    async def test_submit_registers_workflow(self):
         ctx = _make_ctx()
         orchestrator = JobOrchestrator(ctx)
 
@@ -103,7 +104,7 @@ class TestSubmitJob:
             ),
         )
 
-        response = await orchestrator.submit_job(request)
+        response = await orchestrator.submit_job(request, TEST_USER_ID, TEST_MASTER_CV)
 
         # Verify workflow was registered
         thread_info = await ctx.get_workflow_thread(response.job_id)
@@ -117,6 +118,7 @@ class TestGetStatus:
     async def test_status_from_repository(self):
         job = JobRecord(
             job_id="job-1",
+            user_id=TEST_USER_ID,
             source="manual",
             mode="mvp",
             status="completed",

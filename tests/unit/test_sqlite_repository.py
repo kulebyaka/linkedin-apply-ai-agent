@@ -15,6 +15,8 @@ from src.services.job_repository import (
     SQLiteJobRepository,
 )
 
+TEST_USER_ID = "user-test-123"
+
 
 @pytest_asyncio.fixture
 async def temp_db(tmp_path):
@@ -60,7 +62,7 @@ async def test_operations_fail_without_initialize(tmp_path):
     db_path = tmp_path / "uninit.db"
     repo = SQLiteJobRepository(db_path=str(db_path))
 
-    job = JobRecord(job_id="test-1", source="manual", mode="mvp", status="queued")
+    job = JobRecord(job_id="test-1", user_id=TEST_USER_ID, source="manual", mode="mvp", status="queued")
 
     with pytest.raises(RepositoryError) as exc:
         await repo.create(job)
@@ -75,13 +77,14 @@ async def test_operations_fail_without_initialize(tmp_path):
 @pytest.mark.asyncio
 async def test_create_and_get(temp_db):
     """Test creating and retrieving a job."""
-    job = JobRecord(job_id="test-1", source="manual", mode="mvp", status="queued")
+    job = JobRecord(job_id="test-1", user_id=TEST_USER_ID, source="manual", mode="mvp", status="queued")
     job_id = await temp_db.create(job)
     assert job_id == "test-1"
 
     retrieved = await temp_db.get("test-1")
     assert retrieved is not None
     assert retrieved.job_id == "test-1"
+    assert retrieved.user_id == TEST_USER_ID
     assert retrieved.source == "manual"
     assert retrieved.mode == "mvp"
     assert retrieved.status == "queued"
@@ -92,6 +95,7 @@ async def test_create_with_full_data(temp_db):
     """Test creating a job with all fields populated."""
     job = JobRecord(
         job_id="full-1",
+        user_id=TEST_USER_ID,
         source="url",
         mode="full",
         status="pending",
@@ -115,7 +119,7 @@ async def test_create_with_full_data(temp_db):
 @pytest.mark.asyncio
 async def test_create_duplicate_raises_error(temp_db):
     """Test that creating duplicate job_id raises RepositoryError."""
-    job = JobRecord(job_id="dup-1", source="manual", mode="mvp", status="queued")
+    job = JobRecord(job_id="dup-1", user_id=TEST_USER_ID, source="manual", mode="mvp", status="queued")
     await temp_db.create(job)
 
     with pytest.raises(RepositoryError) as exc:
@@ -133,7 +137,7 @@ async def test_get_nonexistent_returns_none(temp_db):
 @pytest.mark.asyncio
 async def test_update(temp_db):
     """Test updating job fields."""
-    job = JobRecord(job_id="test-2", source="url", mode="full", status="pending")
+    job = JobRecord(job_id="test-2", user_id=TEST_USER_ID, source="url", mode="full", status="pending")
     await temp_db.create(job)
 
     await temp_db.update("test-2", {"status": "approved"})
@@ -146,7 +150,7 @@ async def test_update(temp_db):
 @pytest.mark.asyncio
 async def test_update_multiple_fields(temp_db):
     """Test updating multiple fields at once."""
-    job = JobRecord(job_id="test-3", source="url", mode="full", status="pending")
+    job = JobRecord(job_id="test-3", user_id=TEST_USER_ID, source="url", mode="full", status="pending")
     await temp_db.create(job)
 
     await temp_db.update("test-3", {
@@ -162,7 +166,7 @@ async def test_update_multiple_fields(temp_db):
 @pytest.mark.asyncio
 async def test_update_invalid_field_raises_error(temp_db):
     """Test that updating with invalid field raises ValueError."""
-    job = JobRecord(job_id="test-4", source="url", mode="full", status="pending")
+    job = JobRecord(job_id="test-4", user_id=TEST_USER_ID, source="url", mode="full", status="pending")
     await temp_db.create(job)
 
     with pytest.raises(ValueError) as exc:
@@ -181,7 +185,7 @@ async def test_update_nonexistent_raises_error(temp_db):
 @pytest.mark.asyncio
 async def test_delete(temp_db):
     """Test deleting a job."""
-    job = JobRecord(job_id="del-1", source="url", mode="mvp", status="queued")
+    job = JobRecord(job_id="del-1", user_id=TEST_USER_ID, source="url", mode="mvp", status="queued")
     await temp_db.create(job)
 
     assert await temp_db.delete("del-1") is True
@@ -197,43 +201,71 @@ async def test_delete_nonexistent_returns_false(temp_db):
 
 
 # =============================================================================
+# get_for_user Tests
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_get_for_user_returns_owned_job(temp_db):
+    """Test get_for_user returns job when user matches."""
+    job = JobRecord(job_id="own-1", user_id=TEST_USER_ID, source="manual", mode="mvp", status="queued")
+    await temp_db.create(job)
+
+    result = await temp_db.get_for_user("own-1", TEST_USER_ID)
+    assert result is not None
+    assert result.job_id == "own-1"
+
+
+@pytest.mark.asyncio
+async def test_get_for_user_returns_none_for_other_user(temp_db):
+    """Test get_for_user returns None when user doesn't match."""
+    job = JobRecord(job_id="own-2", user_id=TEST_USER_ID, source="manual", mode="mvp", status="queued")
+    await temp_db.create(job)
+
+    result = await temp_db.get_for_user("own-2", "other-user-id")
+    assert result is None
+
+
+# =============================================================================
 # Query Tests
 # =============================================================================
 
 
 @pytest.mark.asyncio
 async def test_get_pending(temp_db):
-    """Test retrieving pending jobs."""
-    await temp_db.create(JobRecord(job_id="p1", source="url", mode="full", status="pending"))
-    await temp_db.create(JobRecord(job_id="p2", source="url", mode="full", status="pending"))
-    await temp_db.create(JobRecord(job_id="c1", source="url", mode="mvp", status="completed"))
+    """Test retrieving pending jobs for a specific user."""
+    await temp_db.create(JobRecord(job_id="p1", user_id=TEST_USER_ID, source="url", mode="full", status="pending"))
+    await temp_db.create(JobRecord(job_id="p2", user_id=TEST_USER_ID, source="url", mode="full", status="pending"))
+    await temp_db.create(JobRecord(job_id="c1", user_id=TEST_USER_ID, source="url", mode="mvp", status="completed"))
+    await temp_db.create(JobRecord(job_id="p3", user_id="other-user", source="url", mode="full", status="pending"))
 
-    pending = await temp_db.get_pending()
+    pending = await temp_db.get_pending(TEST_USER_ID)
     assert len(pending) == 2
     assert all(j.status == "pending" for j in pending)
+    assert all(j.user_id == TEST_USER_ID for j in pending)
 
 
 @pytest.mark.asyncio
 async def test_get_pending_empty(temp_db):
     """Test get_pending with no pending jobs."""
-    await temp_db.create(JobRecord(job_id="c1", source="url", mode="mvp", status="completed"))
+    await temp_db.create(JobRecord(job_id="c1", user_id=TEST_USER_ID, source="url", mode="mvp", status="completed"))
 
-    pending = await temp_db.get_pending()
+    pending = await temp_db.get_pending(TEST_USER_ID)
     assert len(pending) == 0
 
 
 @pytest.mark.asyncio
 async def test_get_by_status(temp_db):
-    """Test getting jobs by status."""
-    await temp_db.create(JobRecord(job_id="j1", source="url", mode="full", status="pending"))
-    await temp_db.create(JobRecord(job_id="j2", source="url", mode="full", status="pending"))
-    await temp_db.create(JobRecord(job_id="j3", source="url", mode="full", status="approved"))
-    await temp_db.create(JobRecord(job_id="j4", source="url", mode="mvp", status="completed"))
+    """Test getting jobs by status for a user."""
+    await temp_db.create(JobRecord(job_id="j1", user_id=TEST_USER_ID, source="url", mode="full", status="pending"))
+    await temp_db.create(JobRecord(job_id="j2", user_id=TEST_USER_ID, source="url", mode="full", status="pending"))
+    await temp_db.create(JobRecord(job_id="j3", user_id=TEST_USER_ID, source="url", mode="full", status="approved"))
+    await temp_db.create(JobRecord(job_id="j4", user_id="other-user", source="url", mode="full", status="pending"))
 
-    pending = await temp_db.get_by_status("pending")
+    pending = await temp_db.get_by_status(TEST_USER_ID, "pending")
     assert len(pending) == 2
 
-    approved = await temp_db.get_by_status("approved")
+    approved = await temp_db.get_by_status(TEST_USER_ID, "approved")
     assert len(approved) == 1
     assert approved[0].job_id == "j3"
 
@@ -242,10 +274,12 @@ async def test_get_by_status(temp_db):
 async def test_get_by_status_with_pagination(temp_db):
     """Test get_by_status with pagination."""
     for i in range(5):
-        await temp_db.create(JobRecord(job_id=f"job-{i}", source="url", mode="full", status="pending"))
+        await temp_db.create(JobRecord(
+            job_id=f"job-{i}", user_id=TEST_USER_ID, source="url", mode="full", status="pending"
+        ))
 
-    page1 = await temp_db.get_by_status("pending", limit=2, offset=0)
-    page2 = await temp_db.get_by_status("pending", limit=2, offset=2)
+    page1 = await temp_db.get_by_status(TEST_USER_ID, "pending", limit=2, offset=0)
+    page2 = await temp_db.get_by_status(TEST_USER_ID, "pending", limit=2, offset=2)
 
     assert len(page1) == 2
     assert len(page2) == 2
@@ -257,23 +291,26 @@ async def test_get_by_status_with_pagination(temp_db):
 
 @pytest.mark.asyncio
 async def test_get_all(temp_db):
-    """Test getting all jobs."""
-    await temp_db.create(JobRecord(job_id="j1", source="url", mode="full", status="pending"))
-    await temp_db.create(JobRecord(job_id="j2", source="url", mode="mvp", status="completed"))
-    await temp_db.create(JobRecord(job_id="j3", source="manual", mode="full", status="declined"))
+    """Test getting all jobs for a user."""
+    await temp_db.create(JobRecord(job_id="j1", user_id=TEST_USER_ID, source="url", mode="full", status="pending"))
+    await temp_db.create(JobRecord(job_id="j2", user_id=TEST_USER_ID, source="url", mode="mvp", status="completed"))
+    await temp_db.create(JobRecord(job_id="j3", user_id="other-user", source="manual", mode="full", status="declined"))
 
-    all_jobs = await temp_db.get_all()
-    assert len(all_jobs) == 3
+    all_jobs = await temp_db.get_all(TEST_USER_ID)
+    assert len(all_jobs) == 2
+    assert all(j.user_id == TEST_USER_ID for j in all_jobs)
 
 
 @pytest.mark.asyncio
 async def test_get_all_with_pagination(temp_db):
     """Test get_all with pagination."""
     for i in range(10):
-        await temp_db.create(JobRecord(job_id=f"job-{i}", source="url", mode="full", status="pending"))
+        await temp_db.create(JobRecord(
+            job_id=f"job-{i}", user_id=TEST_USER_ID, source="url", mode="full", status="pending"
+        ))
 
-    page1 = await temp_db.get_all(limit=5, offset=0)
-    page2 = await temp_db.get_all(limit=5, offset=5)
+    page1 = await temp_db.get_all(TEST_USER_ID, limit=5, offset=0)
+    page2 = await temp_db.get_all(TEST_USER_ID, limit=5, offset=5)
 
     assert len(page1) == 5
     assert len(page2) == 5
@@ -281,23 +318,24 @@ async def test_get_all_with_pagination(temp_db):
 
 @pytest.mark.asyncio
 async def test_get_history(temp_db):
-    """Test getting job history."""
-    await temp_db.create(JobRecord(job_id="j1", source="url", mode="full", status="applied"))
-    await temp_db.create(JobRecord(job_id="j2", source="url", mode="full", status="declined"))
-    await temp_db.create(JobRecord(job_id="j3", source="url", mode="full", status="pending"))
+    """Test getting job history for a user."""
+    await temp_db.create(JobRecord(job_id="j1", user_id=TEST_USER_ID, source="url", mode="full", status="applied"))
+    await temp_db.create(JobRecord(job_id="j2", user_id=TEST_USER_ID, source="url", mode="full", status="declined"))
+    await temp_db.create(JobRecord(job_id="j3", user_id="other-user", source="url", mode="full", status="pending"))
 
-    history = await temp_db.get_history(limit=10)
-    assert len(history) == 3
+    history = await temp_db.get_history(TEST_USER_ID, limit=10)
+    assert len(history) == 2
+    assert all(j.user_id == TEST_USER_ID for j in history)
 
 
 @pytest.mark.asyncio
 async def test_get_history_with_status_filter(temp_db):
     """Test get_history with status filter."""
-    await temp_db.create(JobRecord(job_id="j1", source="url", mode="full", status="applied"))
-    await temp_db.create(JobRecord(job_id="j2", source="url", mode="full", status="declined"))
-    await temp_db.create(JobRecord(job_id="j3", source="url", mode="full", status="failed"))
+    await temp_db.create(JobRecord(job_id="j1", user_id=TEST_USER_ID, source="url", mode="full", status="applied"))
+    await temp_db.create(JobRecord(job_id="j2", user_id=TEST_USER_ID, source="url", mode="full", status="declined"))
+    await temp_db.create(JobRecord(job_id="j3", user_id=TEST_USER_ID, source="url", mode="full", status="failed"))
 
-    history = await temp_db.get_history(limit=10, statuses=["applied", "declined"])
+    history = await temp_db.get_history(TEST_USER_ID, limit=10, statuses=["applied", "declined"])
     assert len(history) == 2
     assert all(j.status in ["applied", "declined"] for j in history)
 
@@ -312,6 +350,7 @@ async def test_find_by_application_url(temp_db):
     """Test finding job by application URL."""
     job = JobRecord(
         job_id="url-1",
+        user_id=TEST_USER_ID,
         source="url",
         mode="full",
         status="pending",
@@ -337,6 +376,7 @@ async def test_cleanup(temp_db):
     # Create old declined job (manually set old created_at)
     old_job = JobRecord(
         job_id="old-1",
+        user_id=TEST_USER_ID,
         source="url",
         mode="full",
         status="declined",
@@ -347,6 +387,7 @@ async def test_cleanup(temp_db):
     # Create recent declined job (should NOT be deleted)
     recent_job = JobRecord(
         job_id="recent-1",
+        user_id=TEST_USER_ID,
         source="url",
         mode="full",
         status="declined",
@@ -357,6 +398,7 @@ async def test_cleanup(temp_db):
     # Create old pending job (should NOT be deleted - different status)
     old_pending = JobRecord(
         job_id="old-pending",
+        user_id=TEST_USER_ID,
         source="url",
         mode="full",
         status="pending",
@@ -381,6 +423,7 @@ async def test_cleanup_multiple_statuses(temp_db):
     for status in ["declined", "failed", "completed"]:
         await temp_db.create(JobRecord(
             job_id=f"old-{status}",
+            user_id=TEST_USER_ID,
             source="url",
             mode="full",
             status=status,
@@ -424,7 +467,9 @@ async def test_data_persists_after_close_and_reopen(tmp_path):
     # Create and populate first repository instance
     repo1 = SQLiteJobRepository(db_path=str(db_path))
     await repo1.initialize()
-    await repo1.create(JobRecord(job_id="persist-1", source="url", mode="full", status="pending"))
+    await repo1.create(JobRecord(
+        job_id="persist-1", user_id=TEST_USER_ID, source="url", mode="full", status="pending"
+    ))
     await repo1.close()
 
     # Create second repository instance with same database
@@ -435,6 +480,7 @@ async def test_data_persists_after_close_and_reopen(tmp_path):
     job = await repo2.get("persist-1")
     assert job is not None
     assert job.job_id == "persist-1"
+    assert job.user_id == TEST_USER_ID
     assert job.status == "pending"
 
     await repo2.close()
