@@ -33,6 +33,8 @@ As a senior member of the team, you'll mentor junior developers, participate in 
 		created_at: new Date().toISOString(),
 		source: 'linkedin',
 		application_url: 'https://careers.acme.com/apply/senior-fullstack',
+		reject_threshold: 30,
+		warning_threshold: 70,
 	},
 	{
 		job_id: 'job-002',
@@ -62,6 +64,8 @@ You'll have the opportunity to work on challenging problems at scale, publish re
 		created_at: new Date(Date.now() - 86400000).toISOString(),
 		source: 'url',
 		application_url: 'https://datadriven.ai/careers/ml-engineer',
+		reject_threshold: 30,
+		warning_threshold: 70,
 	},
 	{
 		job_id: 'job-003',
@@ -91,6 +95,8 @@ This role offers the opportunity to work with cutting-edge cloud technologies an
 		created_at: new Date(Date.now() - 259200000).toISOString(),
 		source: 'manual',
 		application_url: 'https://cloudscale.io/jobs/devops',
+		reject_threshold: 30,
+		warning_threshold: 70,
 	},
 ];
 

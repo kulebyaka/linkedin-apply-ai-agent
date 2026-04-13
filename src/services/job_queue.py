@@ -11,10 +11,12 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from src.models.job import ScrapedJob
-from src.models.state_machine import BusinessState
+from src.models.state_machine import ALLOWED_TRANSITIONS, BusinessState
+from src.models.unified import JobRecord
 
 if TYPE_CHECKING:
     from src.context import AppContext
@@ -224,6 +226,32 @@ async def process_queue(
 
         except Exception:
             logger.exception("Workflow failed for queued job %s", job.job_id)
+            # Persist a failure record so the failure is traceable
+            try:
+                existing = await job_repository.get(scoped_job_id)
+                if existing is not None:
+                    if BusinessState.FAILED in ALLOWED_TRANSITIONS.get(existing.status, set()):
+                        await job_repository.update(
+                            scoped_job_id,
+                            {"status": BusinessState.FAILED, "error_message": "Workflow failed unexpectedly"},
+                        )
+                else:
+                    now = datetime.now(tz=timezone.utc)
+                    await job_repository.create(
+                        JobRecord(
+                            job_id=scoped_job_id,
+                            user_id=user_id or "",
+                            source="linkedin",
+                            mode="full",
+                            status=BusinessState.FAILED,
+                            raw_input=job.model_dump(),
+                            error_message="Workflow failed unexpectedly",
+                            created_at=now,
+                            updated_at=now,
+                        )
+                    )
+            except Exception:
+                logger.warning("Failed to persist failure record for job %s", scoped_job_id, exc_info=True)
 
         if delay_between_jobs > 0:
             await asyncio.sleep(delay_between_jobs)

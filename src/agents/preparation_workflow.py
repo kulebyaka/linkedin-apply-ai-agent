@@ -357,7 +357,7 @@ async def save_filtered_out_node(
 
     except Exception as e:
         logger.error(f"Failed to save filtered-out job {job_id}: {e}", exc_info=True)
-        state["error_message"] = f"Failed to save filtered-out job: {str(e)}"
+        raise
 
     return state
 

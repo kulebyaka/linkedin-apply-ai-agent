@@ -831,6 +831,7 @@ async def cleanup_jobs(
         BusinessState.DECLINED,
         BusinessState.FAILED,
         BusinessState.CV_READY,
+        BusinessState.FILTERED_OUT,
     }
     try:
         if statuses is None:

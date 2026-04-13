@@ -411,16 +411,13 @@ class TestSaveFilteredOutNode:
         saved_record = repo.create.call_args[0][0]
         assert saved_record.user_id == "user-xyz"
 
-    async def test_handles_save_error_gracefully(self):
+    async def test_raises_on_save_error(self):
         repo = AsyncMock()
         repo.create = AsyncMock(side_effect=RuntimeError("DB write failed"))
 
         state = _make_state(current_step=BusinessState.FILTERED_OUT)
-        result = await save_filtered_out_node(state, _make_config(repo=repo))
-
-        # Should not raise; error captured in state
-        assert result["error_message"] is not None
-        assert "DB write failed" in result["error_message"]
+        with pytest.raises(RuntimeError, match="DB write failed"):
+            await save_filtered_out_node(state, _make_config(repo=repo))
 
     async def test_saves_source_and_mode(self):
         repo = AsyncMock()
