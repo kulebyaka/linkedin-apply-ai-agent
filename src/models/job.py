@@ -30,18 +30,3 @@ class ScrapedJob(BaseModel):
     job_type: str | None = None
 
 
-class JobPosting(BaseModel):
-    """Model for a job posting"""
-    id: str
-    title: str
-    company: str
-    location: str
-    description: str
-    requirements: str | None = None
-    salary_range: str | None = None
-    is_remote: bool = False
-    experience_level: str | None = None
-    job_type: str | None = None  # full-time, part-time, contract
-    posted_date: datetime | None = None
-    url: str
-    raw_data: dict | None = None

@@ -34,7 +34,6 @@ class Settings(BaseSettings):
     # LLM Provider Selection  (env-specific — override in .env)
     # -------------------------------------------------------------------------
     primary_llm_provider: str = "openai"      # openai | deepseek | grok | anthropic
-    fallback_llm_provider: str | None = "deepseek"
 
     # -------------------------------------------------------------------------
     # LLM API Keys  (secrets — set in .env)
@@ -137,12 +136,6 @@ class Settings(BaseSettings):
     cv_max_projects: int = 2
     cv_max_certifications: int = 4
     cv_target_pages: int = 2
-
-    # -------------------------------------------------------------------------
-    # Notifications  (optional — set in .env if used)
-    # -------------------------------------------------------------------------
-    webhook_url: str | None = None
-    notification_email: str | None = None
 
     # -------------------------------------------------------------------------
     # Authentication  (secrets + env-specific — set in .env)
