@@ -1,4 +1,9 @@
-"""Configuration settings"""
+"""Configuration settings.
+
+Rule applied here:
+  • Same for everyone and safe to publish  →  default defined in this file only.
+  • Changes per environment or is a secret →  empty/None default here; set in .env.
+"""
 
 from functools import lru_cache
 
@@ -9,39 +14,51 @@ _JWT_SECRET_MIN_LENGTH = 32
 
 
 class Settings(BaseSettings):
-    """Application settings"""
+    """Application settings."""
 
+    # -------------------------------------------------------------------------
     # Application
+    # -------------------------------------------------------------------------
     app_name: str = "LinkedIn Job Application Agent"
-    debug: bool = False
-    log_level: str = "INFO"
+    debug: bool = False       # env-specific — override in .env
+    log_level: str = "INFO"   # env-specific — override in .env
 
-    # LinkedIn Credentials (optional — only needed for LinkedIn search features)
+    # -------------------------------------------------------------------------
+    # LinkedIn Credentials  (secrets — set in .env)
+    # -------------------------------------------------------------------------
     linkedin_email: str = ""
     linkedin_password: str = ""
     linkedin_api_key: str | None = None
 
-    # LLM Configuration
-    primary_llm_provider: str = "openai"  # openai, deepseek, grok, anthropic
+    # -------------------------------------------------------------------------
+    # LLM Provider Selection  (env-specific — override in .env)
+    # -------------------------------------------------------------------------
+    primary_llm_provider: str = "openai"      # openai | deepseek | grok | anthropic
     fallback_llm_provider: str | None = "deepseek"
 
-    # OpenAI - Use gpt-4o or newer for strict JSON Schema support
+    # -------------------------------------------------------------------------
+    # LLM API Keys  (secrets — set in .env)
+    # -------------------------------------------------------------------------
     openai_api_key: str | None = None
-    openai_model: str = "gpt-4o"  # gpt-4o supports structured outputs with 100% schema adherence
-
-    # DeepSeek - Supports json_object mode only (not strict schemas)
     deepseek_api_key: str | None = None
-    deepseek_model: str = "deepseek-chat"
-
-    # Grok - Use grok-2-1212 or newer for structured output support
     grok_api_key: str | None = None
-    grok_model: str = "grok-2-1212"  # First version with structured outputs
-
-    # Anthropic - Use Claude Sonnet 4.5+ for structured output support
     anthropic_api_key: str | None = None
-    anthropic_model: str = "claude-sonnet-4.5"  # Supports structured outputs (beta)
 
-    # Paths
+    # -------------------------------------------------------------------------
+    # LLM Model Names  (env-specific — defaults safe for most deployments)
+    # -------------------------------------------------------------------------
+    # OpenAI: gpt-4o or newer required for strict JSON Schema support
+    openai_model: str = "gpt-4o"
+    # DeepSeek: json_object mode only (no strict schemas)
+    deepseek_model: str = "deepseek-chat"
+    # Grok: grok-2-1212+ required for structured outputs
+    grok_model: str = "grok-2-1212"
+    # Anthropic: claude-sonnet-4.5+ required for structured outputs (beta)
+    anthropic_model: str = "claude-sonnet-4.5"
+
+    # -------------------------------------------------------------------------
+    # Paths  (same for everyone — defaults defined here, no need to set in .env)
+    # -------------------------------------------------------------------------
     data_dir: str = "./data"
     cv_dir: str = "./data/cv"
     jobs_dir: str = "./data/jobs"
@@ -49,25 +66,29 @@ class Settings(BaseSettings):
     master_cv_path: str = "./data/cv/master_cv.json"
     prompts_dir: str = "./prompts/cv_composer"
 
-    # Repository Configuration
-    repo_type: str = "memory"  # "memory" or "sqlite"
-    db_path: str = "./data/jobs.db"  # SQLite database path
+    # -------------------------------------------------------------------------
+    # Repository  (env-specific — override in .env)
+    # -------------------------------------------------------------------------
+    repo_type: str = "memory"           # "memory" (dev) | "sqlite" (production)
+    db_path: str = "./data/jobs.db"     # SQLite path; same for everyone by default
 
-    # PDF Generation Settings
+    # -------------------------------------------------------------------------
+    # PDF / CV Template  (same for everyone — change via CV_TEMPLATE_NAME in .env)
+    # -------------------------------------------------------------------------
     cv_template_dir: str = "src/templates/cv"
-    cv_template_name: str = "compact"  # Template theme: modern, compact (2-column), classic, minimal, profile-card (LinkedIn-style)
+    cv_template_name: str = "compact"   # modern | compact | classic | minimal | profile-card
 
-    # LinkedIn Search Settings
+    # -------------------------------------------------------------------------
+    # LinkedIn Search — global fallback (env-specific — set in .env)
+    # -------------------------------------------------------------------------
     linkedin_search_keywords: str = ""
     linkedin_search_location: str = ""
-    linkedin_search_remote_filter: str | None = None  # "remote", "on-site", "hybrid"
-    linkedin_search_date_posted: str | None = None  # "24h", "week", "month"
-    linkedin_search_experience_level: list[str] | None = (
-        None  # "entry", "associate", "mid-senior", "director", "executive"
-    )
-    linkedin_search_job_type: list[str] | None = (
-        None  # "full-time", "part-time", "contract", "temporary", "internship"
-    )
+    linkedin_search_remote_filter: str | None = None    # "remote" | "on-site" | "hybrid"
+    linkedin_search_date_posted: str | None = None      # "24h" | "week" | "month"
+    linkedin_search_experience_level: list[str] | None = None
+    linkedin_search_job_type: list[str] | None = None
+
+    # Same for everyone — tune in .env only if you need different pacing
     linkedin_search_easy_apply_only: bool = False
     linkedin_search_max_jobs: int = 50
     linkedin_session_cookie_path: str = "./data/linkedin_cookies.json"
@@ -76,49 +97,62 @@ class Settings(BaseSettings):
     linkedin_page_delay_min: float = 2.0
     linkedin_page_delay_max: float = 5.0
 
-    # LinkedIn Search Scheduler
+    # -------------------------------------------------------------------------
+    # LinkedIn Scheduler  (env-specific — override in .env)
+    # -------------------------------------------------------------------------
     linkedin_search_schedule_enabled: bool = False
-    linkedin_search_interval_hours: int = 1
+    linkedin_search_interval_hours: int = 1     # same for everyone; change via .env if needed
 
-    # Job Fixture Record & Replay
-    seed_jobs_from_file: bool = False  # Bypass LinkedIn scraping, load from fixture file
-    scraped_jobs_path: str = "./data/jobs/scraped_jobs.json"  # Fixture file path
-    seed_jobs_limit: int = 0  # Max jobs to replay from file (0 = no limit)
+    # -------------------------------------------------------------------------
+    # Job Fixture Record & Replay  (env-specific — for dev/demo use)
+    # -------------------------------------------------------------------------
+    seed_jobs_from_file: bool = False
+    scraped_jobs_path: str = "./data/jobs/scraped_jobs.json"
+    seed_jobs_limit: int = 0    # 0 = no limit
 
-    # Workflow
+    # -------------------------------------------------------------------------
+    # Workflow  (same for everyone — defaults defined here)
+    # -------------------------------------------------------------------------
     job_fetch_interval_hours: int = 1
     max_concurrent_applications: int = 3
-    browser_headless: bool = True
+    browser_headless: bool = True   # env-specific: set false in .env for visual debugging
 
-    # CV Composer Settings
-    cv_composer_temperature_summary: float = 0.5  # Creative for professional summary
-    cv_composer_temperature_job_analysis: float = 0.3  # Precise for job analysis
-    cv_composer_temperature_sections: float = 0.4  # Balanced for CV sections
-    cv_composer_max_retries: int = 3  # Max retries for JSON generation
-    cv_composer_enable_hallucination_checks: bool = True  # Validate against master CV
-    cv_composer_hallucination_policy: str = (
-        "strict"  # Fine-grained control: "strict", "warn", "disabled"
-    )
-    cv_composer_model_override: str | None = None  # Override LLM model for CV composition
+    # -------------------------------------------------------------------------
+    # CV Composer  (same for everyone — defaults defined here)
+    # -------------------------------------------------------------------------
+    cv_composer_temperature_summary: float = 0.5        # creative for professional summary
+    cv_composer_temperature_job_analysis: float = 0.3   # precise for job analysis
+    cv_composer_temperature_sections: float = 0.4       # balanced for CV sections
+    cv_composer_max_retries: int = 3
+    cv_composer_enable_hallucination_checks: bool = True
+    cv_composer_hallucination_policy: str = "strict"    # "strict" | "warn" | "disabled"
+    cv_composer_model_override: str | None = None       # env-specific override
 
-    # CV Length Limits (for 2-page target)
-    cv_max_experiences: int = 4  # Maximum work experiences to include
-    cv_max_achievements_per_experience: int = 4  # Maximum bullets per experience
-    cv_max_skills: int = 15  # Maximum skills to include
-    cv_max_projects: int = 2  # Maximum projects to include
-    cv_max_certifications: int = 4  # Maximum certifications to include
-    cv_target_pages: int = 2  # Target page count for generated CV
+    # -------------------------------------------------------------------------
+    # CV Length Limits  (same for everyone — targets a 2-page output)
+    # -------------------------------------------------------------------------
+    cv_max_experiences: int = 4
+    cv_max_achievements_per_experience: int = 4
+    cv_max_skills: int = 15
+    cv_max_projects: int = 2
+    cv_max_certifications: int = 4
+    cv_target_pages: int = 2
 
-    # Notifications
+    # -------------------------------------------------------------------------
+    # Notifications  (optional — set in .env if used)
+    # -------------------------------------------------------------------------
     webhook_url: str | None = None
     notification_email: str | None = None
 
-    # Authentication
+    # -------------------------------------------------------------------------
+    # Authentication  (secrets + env-specific — set in .env)
+    # -------------------------------------------------------------------------
     resend_api_key: str = ""
+    resend_from: str = "LinkedIn Agent <noreply@resend.dev>"
+    app_url: str = "http://localhost:5173"      # base URL for magic link callback
+    magic_link_ttl_minutes: int = 15            # same for everyone
     jwt_secret: str = "change-me-in-production"
-    magic_link_ttl_minutes: int = 15
-    jwt_expiry_days: int = 30
-    app_url: str = "http://localhost:5173"  # Base URL for magic link callback
+    jwt_expiry_days: int = 30                   # same for everyone
 
     @field_validator("jwt_secret")
     @classmethod
@@ -128,18 +162,20 @@ class Settings(BaseSettings):
                 "JWT_SECRET must not be empty. Set a strong unique value in .env."
             )
         if v == "change-me-in-production":
-            # Allow the default at settings-load time so tests that don't need
-            # auth can still import Settings. AuthService performs this check
-            # too and raises at runtime before any tokens are signed.
+            # Allow the placeholder at import time so tests that don't exercise
+            # auth can still import Settings. AuthService re-checks at runtime
+            # before signing any token.
             return v
         if len(v) < _JWT_SECRET_MIN_LENGTH:
             raise ValueError(
-                f"JWT_SECRET must be at least {_JWT_SECRET_MIN_LENGTH} characters long. "
+                f"JWT_SECRET must be at least {_JWT_SECRET_MIN_LENGTH} characters. "
                 "Use a randomly generated value (e.g. `openssl rand -hex 32`)."
             )
         return v
 
-    # API Server (for HITL UI)
+    # -------------------------------------------------------------------------
+    # API Server  (env-specific — override in .env)
+    # -------------------------------------------------------------------------
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     cors_origins: list = [
@@ -157,5 +193,5 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    """Get application settings singleton."""
+    """Return the application settings singleton."""
     return Settings()

@@ -87,7 +87,7 @@ class AuthService:
             resend.api_key = self._settings.resend_api_key
 
             params = {
-                "from": "LinkedIn Agent <noreply@resend.dev>",
+                "from": self._settings.resend_from,
                 "to": [email],
                 "subject": "Your magic link login",
                 "html": (
