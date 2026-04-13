@@ -113,18 +113,18 @@ Implement an LLM-powered job filter that detects hidden disqualifiers (fake remo
 - Create: `prompts/job_filter/default_filter_prompt.txt`
 - Create: `prompts/job_filter/generate_prompt_from_prefs.txt`
 
-- [ ] Create `prompts/job_filter/default_filter_prompt.txt` — the default filter prompt template with placeholders for job title, company, location, description, and user preferences context. Should instruct the LLM to check for: fake remote, hidden hard requirements (clearance, visa, degree, relocation), misleading titles, experience inflation, and score overall suitability 0-100
-- [ ] Create `prompts/job_filter/generate_prompt_from_prefs.txt` — meta-prompt that takes the user's natural language preferences (textarea 1) and generates a structured filter prompt (textarea 2)
-- [ ] Rewrite `src/services/job_filter.py`:
+- [x] Create `prompts/job_filter/default_filter_prompt.txt` — the default filter prompt template with placeholders for job title, company, location, description, and user preferences context. Should instruct the LLM to check for: fake remote, hidden hard requirements (clearance, visa, degree, relocation), misleading titles, experience inflation, and score overall suitability 0-100
+- [x] Create `prompts/job_filter/generate_prompt_from_prefs.txt` — meta-prompt that takes the user's natural language preferences (textarea 1) and generates a structured filter prompt (textarea 2)
+- [x] Rewrite `src/services/job_filter.py`:
   - `JobFilter.__init__(self, llm_client: BaseLLMClient, prompts_dir: str | None = None)` — mirrors `CVComposer` pattern
   - `FILTER_RESULT_SCHEMA` — JSON schema derived from `FilterResult.model_json_schema()`
   - `async def evaluate_job(self, job_posting: dict, user_filter_prefs: UserFilterPreferences | None = None) -> FilterResult` — main entry point. Uses custom prompt from `user_filter_prefs.custom_prompt` if set, otherwise default template. Calls `llm.generate_json()` with `FILTER_RESULT_SCHEMA`. Returns validated `FilterResult`.
   - `async def generate_prompt_from_preferences(self, natural_language_prefs: str) -> str` — calls LLM with meta-prompt to generate a filter prompt from user's natural language input. Returns the generated prompt string.
   - `def should_reject(self, result: FilterResult, reject_threshold: int = 30) -> bool` — returns True if `result.disqualified` or `result.score < reject_threshold`
   - `def should_warn(self, result: FilterResult, warning_threshold: int = 70) -> bool` — returns True if `result.score < warning_threshold` and not rejected
-- [ ] Make `evaluate_job` use `asyncio.to_thread()` for the sync `llm.generate_json()` call (same pattern as `CVComposer`)
-- [ ] Write unit tests for `JobFilter` with mocked LLM client: test evaluate_job, should_reject, should_warn, generate_prompt_from_preferences, custom prompt usage, default prompt fallback
-- [ ] Run project test suite - must pass before task 4
+- [x] Make `evaluate_job` use `asyncio.to_thread()` for the sync `llm.generate_json()` call (same pattern as `CVComposer`)
+- [x] Write unit tests for `JobFilter` with mocked LLM client: test evaluate_job, should_reject, should_warn, generate_prompt_from_preferences, custom prompt usage, default prompt fallback
+- [x] Run project test suite - must pass before task 4
 
 ### Task 4: Wire Filter into Preparation Workflow
 
