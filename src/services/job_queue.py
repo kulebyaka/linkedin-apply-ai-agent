@@ -208,6 +208,7 @@ async def process_queue(
                 "tailored_cv_pdf_path": "",
                 "user_feedback": None,
                 "retry_count": 0,
+                "filter_result": None,
                 "current_step": BusinessState.QUEUED,
                 "error_message": None,
                 "user_id": user_id or "",

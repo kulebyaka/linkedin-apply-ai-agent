@@ -104,6 +104,7 @@ class JobOrchestrator:
             "master_cv": master_cv,
             "current_step": BusinessState.QUEUED,
             "retry_count": 0,
+            "filter_result": None,
             "user_feedback": None,
             "error_message": None,
         }
