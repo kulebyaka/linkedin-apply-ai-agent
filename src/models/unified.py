@@ -108,6 +108,8 @@ class PendingApproval(BaseModel):
     created_at: datetime
     source: Literal["url", "manual", "linkedin"]
     application_url: str | None = None
+    reject_threshold: int = Field(30, description="User's reject threshold for filter score badge")
+    warning_threshold: int = Field(70, description="User's warning threshold for filter score badge")
 
 
 # =============================================================================

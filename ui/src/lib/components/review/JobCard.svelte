@@ -4,10 +4,6 @@
 	import JobDescriptionPanel from './JobDescriptionPanel.svelte';
 	import CVPreviewPanel from './CVPreviewPanel.svelte';
 
-	// Default thresholds matching backend defaults
-	const REJECT_THRESHOLD = 30;
-	const WARNING_THRESHOLD = 70;
-
 	interface Props {
 		job: PendingApproval;
 	}
@@ -21,9 +17,9 @@
 	}
 
 	function getScoreBadgeClass(result: FilterResult): string {
-		if (result.disqualified || result.score < REJECT_THRESHOLD) {
+		if (result.disqualified || result.score < job.reject_threshold) {
 			return 'border-2 border-red-500 bg-red-100 text-red-800';
-		} else if (result.score < WARNING_THRESHOLD) {
+		} else if (result.score < job.warning_threshold) {
 			return 'border-2 border-yellow-500 bg-yellow-100 text-yellow-800';
 		} else {
 			return 'border-2 border-green-500 bg-green-100 text-green-800';
@@ -31,9 +27,9 @@
 	}
 
 	function getScoreLabel(result: FilterResult): string {
-		if (result.disqualified || result.score < REJECT_THRESHOLD) {
+		if (result.disqualified || result.score < job.reject_threshold) {
 			return 'Low Match';
-		} else if (result.score < WARNING_THRESHOLD) {
+		} else if (result.score < job.warning_threshold) {
 			return 'Moderate';
 		} else {
 			return 'Good Match';

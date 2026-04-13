@@ -143,14 +143,14 @@ class JobFilter:
         """
         return result.disqualified or result.score < reject_threshold
 
-    def should_warn(self, result: FilterResult, warning_threshold: int = 70) -> bool:
+    def should_warn(self, result: FilterResult, warning_threshold: int = 70, reject_threshold: int = 30) -> bool:
         """Check if a job should show a warning badge in HITL review.
 
         Returns True if the score is below the warning threshold but
         the job was NOT rejected (i.e., it passes the reject check but
         has concerns).
         """
-        return result.score < warning_threshold
+        return not self.should_reject(result, reject_threshold) and result.score < warning_threshold
 
     def _build_evaluation_prompt(
         self,

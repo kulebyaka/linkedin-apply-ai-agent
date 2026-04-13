@@ -379,15 +379,15 @@ async def update_search_preferences(
     return updated
 
 
-@app.get("/api/users/me/filter-preferences")
+@app.get("/api/users/me/filter-preferences", response_model=UserFilterPreferences)
 async def get_filter_preferences(
     request: Request,
     user: CurrentUser,
 ):
     """Get current user's job filter preferences."""
     if user.filter_preferences is None:
-        return UserFilterPreferences().model_dump()
-    return user.filter_preferences.model_dump()
+        return UserFilterPreferences()
+    return user.filter_preferences
 
 
 @app.put("/api/users/me/filter-preferences", response_model=User)

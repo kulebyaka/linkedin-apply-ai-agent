@@ -192,6 +192,10 @@ class TestUpdateFilterPreferences:
         }
         resp = client.put("/api/users/me/filter-preferences", json=payload)
         assert resp.status_code == 200
+        data = resp.json()
+        # Response is the User model
+        assert "email" in data
+        assert "id" in data
 
     def test_calls_repository_update_with_correct_prefs(self, api_client):
         client, ctx = api_client

@@ -299,7 +299,7 @@ async def filter_job_node(
             )
             state["current_step"] = BusinessState.FILTERED_OUT
         else:
-            if job_filter.should_warn(filter_result, warning_threshold):
+            if job_filter.should_warn(filter_result, warning_threshold, reject_threshold):
                 logger.info(
                     f"Job {job_id} has filter warnings: score={filter_result.score}, "
                     f"red_flags={filter_result.red_flags}"

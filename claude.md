@@ -220,10 +220,11 @@ See `src/llm/provider.py` module documentation for detailed implementation.
 
 ### Preparation Workflow Nodes
 1. **extract_job_node**: Extracts structured job data from source (URL/manual/LinkedIn)
-2. **filter_job_node**: LLM evaluates job suitability (LinkedIn only); scores 0-100, hard rejects saved as `filtered_out`, warnings surfaced in HITL review
-3. **compose_cv_node**: LLM tailors CV to job description
-4. **generate_pdf_node**: Creates PDF from tailored CV JSON
-5. **save_to_db_node**: Persists job record (MVP: completed, Full: pending)
+2. **filter_job_node**: LLM evaluates job suitability (LinkedIn only); scores 0-100, hard rejects go to `save_filtered_out_node`, warnings surfaced in HITL review
+3. **save_filtered_out_node**: Persists a minimal `JobRecord` with status=`filtered_out` for LLM-rejected jobs; terminal — workflow ends here
+4. **compose_cv_node**: LLM tailors CV to job description
+5. **generate_pdf_node**: Creates PDF from tailored CV JSON
+6. **save_to_db_node**: Persists job record (MVP: completed, Full: pending)
 
 ### Retry Workflow Nodes
 1. **load_from_db_node**: Loads job record for retry

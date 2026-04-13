@@ -332,7 +332,13 @@ async def test_sqlite_filter_result_roundtrip_complex(sqlite_repo):
 
 @pytest.mark.asyncio
 async def test_sqlite_migration_adds_filter_result_column(tmp_path):
-    """Migrating an existing DB without filter_result column should add it."""
+    """Migrating an existing DB without filter_result column should add it.
+
+    Simulates an old database that predates the filter_result column by
+    creating the tables then dropping the column with raw SQL. The
+    SQLiteJobRepository.initialize() migration (ALTER TABLE ADD COLUMN)
+    must add it back so the repo can store and retrieve filter results.
+    """
     from piccolo.engine.sqlite import SQLiteEngine
 
     from src.services.tables import CVAttemptTable, Job, MagicLinkTable, UserTable
@@ -345,30 +351,42 @@ async def test_sqlite_migration_adds_filter_result_column(tmp_path):
     UserTable._meta._db = engine
     MagicLinkTable._meta._db = engine
 
-    # Create tables WITHOUT filter_result column (simulate old schema)
+    # Create tables using current Piccolo schema (includes filter_result)
     await UserTable.create_table(if_not_exists=True).run()
     await MagicLinkTable.create_table(if_not_exists=True).run()
     await Job.create_table(if_not_exists=True).run()
     await CVAttemptTable.create_table(if_not_exists=True).run()
 
-    # Drop the filter_result column to simulate old schema
+    # Drop filter_result to simulate an old database schema
     conn = await engine.get_connection()
     try:
-        # Check that filter_result exists (since table def includes it now)
+        await conn.execute("ALTER TABLE job DROP COLUMN filter_result")
         cursor = await conn.execute("PRAGMA table_info(job)")
         rows = await cursor.fetchall()
         col_names = {row["name"] for row in rows}
-        assert "filter_result" in col_names  # Piccolo creates it from current schema
+        assert "filter_result" not in col_names, "Column should be absent before migration"
     finally:
         await conn.close()
 
     await engine.close_connection_pool()
 
-    # Now test that SQLiteJobRepository initialization handles it fine
+    # Now run initialize() — migration should add filter_result back
     repo = SQLiteJobRepository(db_path=str(db_path))
     await repo.initialize()
 
-    # Should be able to create a job with filter_result
+    # Verify the column was re-added by the migration
+    engine2 = SQLiteEngine(path=str(db_path))
+    conn2 = await engine2.get_connection()
+    try:
+        cursor = await conn2.execute("PRAGMA table_info(job)")
+        rows = await cursor.fetchall()
+        col_names = {row["name"] for row in rows}
+        assert "filter_result" in col_names, "Migration should have added filter_result column"
+    finally:
+        await conn2.close()
+    await engine2.close_connection_pool()
+
+    # Should be able to create and retrieve a job with filter_result
     job = _make_job(job_id="post-migrate", filter_result=SAMPLE_FILTER_RESULT)
     await repo.create(job)
 

@@ -106,6 +106,8 @@ export interface PendingApproval {
 	source: 'url' | 'manual' | 'linkedin';
 	application_url: string;
 	filter_result?: FilterResult;
+	reject_threshold: number;
+	warning_threshold: number;
 }
 
 export type Decision = 'approved' | 'declined' | 'retry';

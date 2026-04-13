@@ -32,6 +32,7 @@ import pytest  # noqa: E402
 
 from src.agents.preparation_workflow import (  # noqa: E402
     filter_job_node,
+    route_after_extract,
     route_after_filter,
     save_filtered_out_node,
 )
@@ -177,8 +178,8 @@ class TestFilterJobNodePassThrough:
         assert result["current_step"] == WorkflowStep.JOB_FILTERED
         assert result["filter_result"] is None
 
-    async def test_passes_through_when_user_repo_unavailable(self):
-        """When user_repository is not in config, filtering still runs with defaults."""
+    async def test_runs_with_global_defaults_when_user_repo_unavailable(self):
+        """When user_repository is not in config, filtering still runs with global defaults."""
         state = _make_state()
         config = {"configurable": {"thread_id": "t1", "repository": AsyncMock()}}
 
@@ -199,7 +200,10 @@ class TestFilterJobNodePassThrough:
 
             result = await filter_job_node(state, config)
 
+        # Filtering should have run (not skipped) and populated filter_result
+        mock_filter_instance.evaluate_job.assert_called_once()
         assert result["current_step"] == WorkflowStep.JOB_FILTERED
+        assert result["filter_result"] is not None
 
     async def test_passes_through_on_llm_error(self):
         """Filter errors must not block the pipeline."""
@@ -234,24 +238,6 @@ class TestFilterJobNodePassThrough:
 
 
 class TestFilterJobNodeOutcomes:
-    def _make_filter_node_patches(self, filter_result: FilterResult, mock_settings):
-        """Return a JobFilter mock wired to the given result."""
-        mock_settings.job_filter_enabled = True
-        mock_settings.job_filter_reject_threshold = 30
-        mock_settings.job_filter_warning_threshold = 70
-
-        from src.services.job_filter import JobFilter
-
-        mock_filter_instance = MagicMock(spec=JobFilter)
-        mock_filter_instance.evaluate_job = MagicMock(return_value=filter_result)
-        mock_filter_instance.should_reject = JobFilter.should_reject.__get__(
-            mock_filter_instance, JobFilter
-        )
-        mock_filter_instance.should_warn = JobFilter.should_warn.__get__(
-            mock_filter_instance, JobFilter
-        )
-        return mock_filter_instance
-
     async def test_clean_pass(self):
         state = _make_state()
         user_repo = AsyncMock()
@@ -526,3 +512,33 @@ class TestHITLProcessorFilterResult:
 
         assert len(pending) == 1
         assert pending[0].filter_result is None
+
+
+# ---------------------------------------------------------------------------
+# route_after_extract
+# ---------------------------------------------------------------------------
+
+
+class TestRouteAfterExtract:
+    def test_linkedin_source_routes_to_filter(self):
+        state = _make_state(source="linkedin")
+        assert route_after_extract(state) == "filter"
+
+    def test_url_source_routes_to_compose(self):
+        state = _make_state(source="url")
+        assert route_after_extract(state) == "compose"
+
+    def test_manual_source_routes_to_compose(self):
+        state = _make_state(source="manual")
+        assert route_after_extract(state) == "compose"
+
+    def test_error_message_routes_to_error(self):
+        state = _make_state(source="linkedin")
+        state["error_message"] = "extraction failed"
+        assert route_after_extract(state) == "error"
+
+    def test_error_takes_priority_over_linkedin_source(self):
+        """An error in state should bypass the filter even for LinkedIn jobs."""
+        state = _make_state(source="linkedin")
+        state["error_message"] = "something broke"
+        assert route_after_extract(state) == "error"
