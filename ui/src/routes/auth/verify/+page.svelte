@@ -21,8 +21,9 @@
 			const result = await verifyToken(token);
 			auth.setUser(result.user);
 			status = 'success';
-			// Redirect to home after brief success display
-			setTimeout(() => goto('/'), 1500);
+			// New users (no CV uploaded yet) go to the welcome/guide page
+			const destination = result.user.master_cv_json == null ? '/welcome' : '/';
+			setTimeout(() => goto(destination), 1500);
 		} catch (err) {
 			status = 'error';
 			error = err instanceof Error ? err.message : 'Verification failed';
