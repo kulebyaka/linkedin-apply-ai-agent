@@ -119,6 +119,14 @@ class PDFGenerator:
 
             document.write_pdf(str(output_path))
 
+            if not output_path.exists():
+                raise OSError(
+                    f"WeasyPrint write_pdf completed without error but the "
+                    f"file was not created at {output_path}. This usually "
+                    f"means system libraries (Pango/GLib) are not accessible — "
+                    f"set DYLD_LIBRARY_PATH=/opt/homebrew/lib on macOS."
+                )
+
             logger.info(f"PDF generated successfully: {output_path}")
             return str(output_path.absolute())
 

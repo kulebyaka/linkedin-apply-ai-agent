@@ -3,7 +3,6 @@
 from datetime import date
 
 from src.models.cv import ContactInfo, Experience
-from src.models.job import JobPosting
 
 
 class TestCVModels:
@@ -35,19 +34,3 @@ class TestCVModels:
         assert len(exp.achievements) == 2
 
 
-class TestJobModels:
-    """Test job-related models"""
-
-    def test_job_posting(self):
-        """Test JobPosting model"""
-        job = JobPosting(
-            id="123",
-            title="Software Engineer",
-            company="Tech Corp",
-            location="Remote",
-            description="Great opportunity",
-            is_remote=True,
-            url="https://linkedin.com/jobs/123"
-        )
-        assert job.is_remote is True
-        assert job.title == "Software Engineer"

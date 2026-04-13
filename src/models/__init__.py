@@ -1,7 +1,6 @@
 """Data models and schemas"""
 
 from .cv import CV, ContactInfo, Education, Experience, Project, Skill
-from .job import JobPosting
 from .state_machine import BusinessState, WorkflowStep
 from .unified import (
     ApplicationHistoryItem,
@@ -29,8 +28,6 @@ __all__ = [
     "JobRecord",
     "JobStatusResponse",
     "ApplicationHistoryItem",
-    # Job models
-    "JobPosting",
     # CV models
     "CV",
     "ContactInfo",

@@ -150,11 +150,26 @@ class JobRepository(ABC):
     # =========================================================================
 
     @abstractmethod
-    async def get_pending(self) -> list[JobRecord]:
-        """Get all jobs with status='pending' (awaiting HITL review).
+    async def get_for_user(self, job_id: str, user_id: str) -> JobRecord | None:
+        """Get a job record by ID, verifying user ownership.
 
-        Convenience method equivalent to get_by_status("pending").
+        Args:
+            job_id: Unique job identifier.
+            user_id: Owner's user ID.
+
+        Returns:
+            JobRecord if found and owned by user, None otherwise.
+        """
+        pass
+
+    @abstractmethod
+    async def get_pending(self, user_id: str) -> list[JobRecord]:
+        """Get all jobs with status='pending' (awaiting HITL review) for a user.
+
         Returns jobs ordered by created_at descending (newest first).
+
+        Args:
+            user_id: Owner's user ID.
 
         Returns:
             List of JobRecord objects pending approval.
@@ -164,15 +179,17 @@ class JobRepository(ABC):
     @abstractmethod
     async def get_by_status(
         self,
+        user_id: str,
         status: str,
         limit: int = 100,
         offset: int = 0,
         order_by: str = "created_at",
         order_desc: bool = True,
     ) -> list[JobRecord]:
-        """Get jobs with a specific status, with pagination.
+        """Get jobs with a specific status for a user, with pagination.
 
         Args:
+            user_id: Owner's user ID.
             status: Job status to filter by.
             limit: Maximum number of records to return.
             offset: Number of records to skip.
@@ -185,10 +202,11 @@ class JobRepository(ABC):
         pass
 
     @abstractmethod
-    async def get_all(self, limit: int = 100, offset: int = 0) -> list[JobRecord]:
-        """Get all job records with pagination.
+    async def get_all(self, user_id: str, limit: int = 100, offset: int = 0) -> list[JobRecord]:
+        """Get all job records for a user with pagination.
 
         Args:
+            user_id: Owner's user ID.
             limit: Maximum number of records to return.
             offset: Number of records to skip.
 
@@ -200,12 +218,14 @@ class JobRepository(ABC):
     @abstractmethod
     async def get_history(
         self,
+        user_id: str,
         limit: int = 50,
         statuses: list[str] | None = None,
     ) -> list[JobRecord]:
-        """Get job application history.
+        """Get job application history for a user.
 
         Args:
+            user_id: Owner's user ID.
             limit: Maximum number of records to return.
             statuses: Optional list of statuses to filter by.
                       If None, returns all statuses.
@@ -260,7 +280,7 @@ class JobRepository(ABC):
     # =========================================================================
 
     @abstractmethod
-    async def find_by_application_url(self, url: str) -> JobRecord | None:
+    async def find_by_application_url(self, url: str, user_id: str | None = None) -> JobRecord | None:
         """Find a job by its application URL.
 
         Used for duplicate detection - prevents applying to the same
@@ -268,6 +288,7 @@ class JobRepository(ABC):
 
         Args:
             url: Application URL to search for.
+            user_id: If provided, only match jobs belonging to this user.
 
         Returns:
             JobRecord if found, None otherwise.
@@ -279,6 +300,7 @@ class JobRepository(ABC):
         self,
         older_than_days: int,
         statuses: list[str],
+        user_id: str | None = None,
     ) -> int:
         """Delete old jobs matching criteria.
 
@@ -288,6 +310,7 @@ class JobRepository(ABC):
         Args:
             older_than_days: Delete jobs older than this many days.
             statuses: Only delete jobs with these statuses.
+            user_id: If provided, only delete jobs belonging to this user.
 
         Returns:
             Number of records deleted.
@@ -423,74 +446,60 @@ class InMemoryJobRepository(JobRepository):
     # Query Methods
     # =========================================================================
 
-    async def get_pending(self) -> list[JobRecord]:
-        """Get all pending jobs.
+    async def get_for_user(self, job_id: str, user_id: str) -> JobRecord | None:
+        """Get a job record by ID, verifying user ownership."""
+        job = self._jobs.get(job_id)
+        if job and job.user_id == user_id:
+            return job
+        return None
 
-        Returns:
-            List of jobs with status='pending', sorted by created_at desc.
-        """
-        jobs = [j for j in self._jobs.values() if j.status == BusinessState.PENDING_REVIEW]
+    async def get_pending(self, user_id: str) -> list[JobRecord]:
+        """Get all pending jobs for a user."""
+        jobs = [
+            j for j in self._jobs.values()
+            if j.status == BusinessState.PENDING_REVIEW and j.user_id == user_id
+        ]
         jobs.sort(key=lambda j: j.created_at, reverse=True)
         return jobs
 
     async def get_by_status(
         self,
+        user_id: str,
         status: str,
         limit: int = 100,
         offset: int = 0,
         order_by: str = "created_at",
         order_desc: bool = True,
     ) -> list[JobRecord]:
-        """Get jobs by status with pagination.
+        """Get jobs by status for a user with pagination."""
+        jobs = [
+            j for j in self._jobs.values()
+            if j.status == status and j.user_id == user_id
+        ]
 
-        Args:
-            status: Status to filter by.
-            limit: Max records.
-            offset: Records to skip.
-            order_by: Field to sort by.
-            order_desc: Sort descending if True.
-
-        Returns:
-            List of matching jobs.
-        """
-        jobs = [j for j in self._jobs.values() if j.status == status]
-
-        # Sort by specified field
         if order_by == "updated_at":
             jobs.sort(key=lambda j: j.updated_at, reverse=order_desc)
-        else:  # default to created_at
+        else:
             jobs.sort(key=lambda j: j.created_at, reverse=order_desc)
 
         return jobs[offset:offset + limit]
 
-    async def get_all(self, limit: int = 100, offset: int = 0) -> list[JobRecord]:
-        """Get all jobs with pagination.
-
-        Args:
-            limit: Max records.
-            offset: Records to skip.
-
-        Returns:
-            List of jobs sorted by created_at desc.
-        """
-        jobs = sorted(self._jobs.values(), key=lambda j: j.created_at, reverse=True)
+    async def get_all(self, user_id: str, limit: int = 100, offset: int = 0) -> list[JobRecord]:
+        """Get all jobs for a user with pagination."""
+        jobs = sorted(
+            [j for j in self._jobs.values() if j.user_id == user_id],
+            key=lambda j: j.created_at, reverse=True,
+        )
         return jobs[offset:offset + limit]
 
     async def get_history(
         self,
+        user_id: str,
         limit: int = 50,
         statuses: list[str] | None = None,
     ) -> list[JobRecord]:
-        """Get application history.
-
-        Args:
-            limit: Max records.
-            statuses: Optional status filter.
-
-        Returns:
-            List of jobs sorted by updated_at desc.
-        """
-        jobs = list(self._jobs.values())
+        """Get application history for a user."""
+        jobs = [j for j in self._jobs.values() if j.user_id == user_id]
         if statuses:
             jobs = [j for j in jobs if j.status in statuses]
         jobs.sort(key=lambda j: j.updated_at, reverse=True)
@@ -523,17 +532,18 @@ class InMemoryJobRepository(JobRepository):
     # Specialized Methods
     # =========================================================================
 
-    async def find_by_application_url(self, url: str) -> JobRecord | None:
+    async def find_by_application_url(self, url: str, user_id: str | None = None) -> JobRecord | None:
         """Find a job by its application URL.
 
         Args:
             url: Application URL to search for.
+            user_id: If provided, only match jobs belonging to this user.
 
         Returns:
             JobRecord if found, None otherwise.
         """
         for job in self._jobs.values():
-            if job.application_url == url:
+            if job.application_url == url and (user_id is None or job.user_id == user_id):
                 return job
         return None
 
@@ -541,12 +551,14 @@ class InMemoryJobRepository(JobRepository):
         self,
         older_than_days: int,
         statuses: list[str],
+        user_id: str | None = None,
     ) -> int:
         """Delete old jobs matching criteria.
 
         Args:
             older_than_days: Delete jobs older than this many days.
             statuses: Only delete jobs with these statuses.
+            user_id: If provided, only delete jobs belonging to this user.
 
         Returns:
             Number of records deleted.
@@ -564,7 +576,9 @@ class InMemoryJobRepository(JobRepository):
             to_delete = [
                 job_id
                 for job_id, job in self._jobs.items()
-                if job.status in statuses and job.created_at < cutoff_date
+                if job.status in statuses
+                and job.created_at < cutoff_date
+                and (user_id is None or job.user_id == user_id)
             ]
 
             for job_id in to_delete:
@@ -608,7 +622,7 @@ class SQLiteJobRepository(JobRepository):
         """
         from piccolo.engine.sqlite import SQLiteEngine
 
-        from .tables import CVAttemptTable, Job
+        from .tables import CVAttemptTable, Job, MagicLinkTable, UserTable
 
         # Ensure data directory exists
         db_dir = Path(self.db_path).parent
@@ -620,9 +634,13 @@ class SQLiteJobRepository(JobRepository):
         # Set the engine on tables for this repository instance
         Job._meta._db = self._engine
         CVAttemptTable._meta._db = self._engine
+        UserTable._meta._db = self._engine
+        MagicLinkTable._meta._db = self._engine
 
         # Create tables if they don't exist
         try:
+            await UserTable.create_table(if_not_exists=True).run()
+            await MagicLinkTable.create_table(if_not_exists=True).run()
             await Job.create_table(if_not_exists=True).run()
             await CVAttemptTable.create_table(if_not_exists=True).run()
 
@@ -651,29 +669,50 @@ class SQLiteJobRepository(JobRepository):
     async def _migrate_legacy_columns(self) -> None:
         """Migrate legacy schema columns if upgrading from an older database.
 
-        Renames cv_json -> current_cv_json and pdf_path -> current_pdf_path
-        in the job table if the old columns exist.
+        Handles two migration paths:
+        1. Renames cv_json -> current_cv_json and pdf_path -> current_pdf_path
+        2. Adds user_id column to job and cv_attempt tables (multi-user support)
 
         Raises:
             RepositoryError: If migration detection or execution fails.
         """
         conn = await self._engine.get_connection()
         try:
+            # --- Job table migrations ---
             cursor = await conn.execute("PRAGMA table_info(job)")
             rows = await cursor.fetchall()
-            column_names = {row["name"] for row in rows}
+            job_columns = {row["name"] for row in rows}
 
-            if "cv_json" in column_names and "current_cv_json" not in column_names:
+            if "cv_json" in job_columns and "current_cv_json" not in job_columns:
                 logger.info("Migrating legacy column: cv_json -> current_cv_json")
                 await conn.execute(
                     "ALTER TABLE job RENAME COLUMN cv_json TO current_cv_json"
                 )
 
-            if "pdf_path" in column_names and "current_pdf_path" not in column_names:
+            if "pdf_path" in job_columns and "current_pdf_path" not in job_columns:
                 logger.info("Migrating legacy column: pdf_path -> current_pdf_path")
                 await conn.execute(
                     "ALTER TABLE job RENAME COLUMN pdf_path TO current_pdf_path"
                 )
+
+            if "user_id" not in job_columns:
+                logger.info("Migrating: adding user_id column to job table")
+                await conn.execute(
+                    "ALTER TABLE job ADD COLUMN user_id VARCHAR(36) NOT NULL DEFAULT ''"
+                )
+
+            # --- CV attempt table migrations ---
+            cursor = await conn.execute("PRAGMA table_info(cv_attempt)")
+            rows = await cursor.fetchall()
+            cv_columns = {row["name"] for row in rows}
+
+            if "user_id" not in cv_columns:
+                logger.info("Migrating: adding user_id column to cv_attempt table")
+                await conn.execute(
+                    "ALTER TABLE cv_attempt ADD COLUMN user_id VARCHAR(36) NOT NULL DEFAULT ''"
+                )
+
+            await conn.commit()
         finally:
             await conn.close()
 
@@ -685,6 +724,7 @@ class SQLiteJobRepository(JobRepository):
         """Convert Pydantic JobRecord to database row dict."""
         return {
             "job_id": job.job_id,
+            "user_id": job.user_id,
             "source": job.source,
             "mode": job.mode,
             "status": job.status,
@@ -722,6 +762,7 @@ class SQLiteJobRepository(JobRepository):
         """Convert database row dict to Pydantic JobRecord."""
         return JobRecord(
             job_id=row["job_id"],
+            user_id=row.get("user_id", ""),
             source=row["source"],
             mode=row["mode"],
             status=row["status"],
@@ -739,6 +780,7 @@ class SQLiteJobRepository(JobRepository):
         """Convert CVCompositionAttempt to database row dict."""
         return {
             "job_id": attempt.job_id,
+            "user_id": attempt.user_id,
             "attempt_number": attempt.attempt_number,
             "user_feedback": attempt.user_feedback,
             "cv_json": attempt.cv_json,
@@ -750,6 +792,7 @@ class SQLiteJobRepository(JobRepository):
         """Convert database row dict to CVCompositionAttempt."""
         return CVCompositionAttempt(
             job_id=row["job_id"],
+            user_id=row.get("user_id", ""),
             attempt_number=row["attempt_number"],
             user_feedback=row.get("user_feedback"),
             cv_json=self._parse_json_field(row.get("cv_json")) or {},
@@ -875,18 +918,31 @@ class SQLiteJobRepository(JobRepository):
     # Query Methods
     # =========================================================================
 
-    async def get_pending(self) -> list[JobRecord]:
-        """Get all pending jobs.
+    async def get_for_user(self, job_id: str, user_id: str) -> JobRecord | None:
+        """Get a job record by ID, verifying user ownership."""
+        self._ensure_initialized()
+        from .tables import Job
 
-        Returns:
-            List of jobs with status='pending', sorted by created_at desc.
-        """
+        row = (
+            await Job.select()
+            .where(Job.job_id == job_id)
+            .where(Job.user_id == user_id)
+            .first()
+            .run()
+        )
+        if not row:
+            return None
+        return self._row_to_job_record(row)
+
+    async def get_pending(self, user_id: str) -> list[JobRecord]:
+        """Get all pending jobs for a user."""
         self._ensure_initialized()
         from .tables import Job
 
         rows = (
             await Job.select()
             .where(Job.status == BusinessState.PENDING_REVIEW)
+            .where(Job.user_id == user_id)
             .order_by(Job.created_at, ascending=False)
             .run()
         )
@@ -895,33 +951,23 @@ class SQLiteJobRepository(JobRepository):
 
     async def get_by_status(
         self,
+        user_id: str,
         status: str,
         limit: int = 100,
         offset: int = 0,
         order_by: str = "created_at",
         order_desc: bool = True,
     ) -> list[JobRecord]:
-        """Get jobs by status with pagination.
-
-        Args:
-            status: Status to filter by.
-            limit: Max records.
-            offset: Records to skip.
-            order_by: Field to sort by.
-            order_desc: Sort descending if True.
-
-        Returns:
-            List of matching jobs.
-        """
+        """Get jobs by status for a user with pagination."""
         self._ensure_initialized()
         from .tables import Job
 
-        # Determine order column
         order_column = Job.updated_at if order_by == "updated_at" else Job.created_at
 
         rows = (
             await Job.select()
             .where(Job.status == status)
+            .where(Job.user_id == user_id)
             .order_by(order_column, ascending=not order_desc)
             .limit(limit)
             .offset(offset)
@@ -930,21 +976,14 @@ class SQLiteJobRepository(JobRepository):
 
         return [self._row_to_job_record(row) for row in rows]
 
-    async def get_all(self, limit: int = 100, offset: int = 0) -> list[JobRecord]:
-        """Get all jobs with pagination.
-
-        Args:
-            limit: Max records.
-            offset: Records to skip.
-
-        Returns:
-            List of jobs sorted by created_at desc.
-        """
+    async def get_all(self, user_id: str, limit: int = 100, offset: int = 0) -> list[JobRecord]:
+        """Get all jobs for a user with pagination."""
         self._ensure_initialized()
         from .tables import Job
 
         rows = (
             await Job.select()
+            .where(Job.user_id == user_id)
             .order_by(Job.created_at, ascending=False)
             .limit(limit)
             .offset(offset)
@@ -955,22 +994,20 @@ class SQLiteJobRepository(JobRepository):
 
     async def get_history(
         self,
+        user_id: str,
         limit: int = 50,
         statuses: list[str] | None = None,
     ) -> list[JobRecord]:
-        """Get application history.
-
-        Args:
-            limit: Max records.
-            statuses: Optional status filter.
-
-        Returns:
-            List of jobs sorted by updated_at desc.
-        """
+        """Get application history for a user."""
         self._ensure_initialized()
         from .tables import Job
 
-        query = Job.select().order_by(Job.updated_at, ascending=False).limit(limit)
+        query = (
+            Job.select()
+            .where(Job.user_id == user_id)
+            .order_by(Job.updated_at, ascending=False)
+            .limit(limit)
+        )
 
         if statuses:
             query = query.where(Job.status.is_in(statuses))
@@ -1026,11 +1063,12 @@ class SQLiteJobRepository(JobRepository):
     # Specialized Methods
     # =========================================================================
 
-    async def find_by_application_url(self, url: str) -> JobRecord | None:
+    async def find_by_application_url(self, url: str, user_id: str | None = None) -> JobRecord | None:
         """Find a job by its application URL.
 
         Args:
             url: Application URL to search for.
+            user_id: If provided, only match jobs belonging to this user.
 
         Returns:
             JobRecord if found, None otherwise.
@@ -1038,7 +1076,10 @@ class SQLiteJobRepository(JobRepository):
         self._ensure_initialized()
         from .tables import Job
 
-        row = await Job.select().where(Job.application_url == url).first().run()
+        query = Job.select().where(Job.application_url == url)
+        if user_id is not None:
+            query = query.where(Job.user_id == user_id)
+        row = await query.first().run()
         if not row:
             return None
 
@@ -1048,12 +1089,14 @@ class SQLiteJobRepository(JobRepository):
         self,
         older_than_days: int,
         statuses: list[str],
+        user_id: str | None = None,
     ) -> int:
         """Delete old jobs matching criteria.
 
         Args:
             older_than_days: Delete jobs older than this many days.
             statuses: Only delete jobs with these statuses.
+            user_id: If provided, only delete jobs belonging to this user.
 
         Returns:
             Number of records deleted.
@@ -1071,29 +1114,23 @@ class SQLiteJobRepository(JobRepository):
 
         cutoff_date = datetime.now(tz=timezone.utc) - timedelta(days=older_than_days)
 
-        # Count jobs to delete
-        to_delete = (
-            await Job.select(Job.job_id)
-            .where(Job.status.is_in(statuses))
-            .where(Job.created_at < cutoff_date)
-            .run()
-        )
+        # Build query with optional user_id filter
+        query = Job.select(Job.job_id).where(Job.status.is_in(statuses)).where(Job.created_at < cutoff_date)
+        if user_id is not None:
+            query = query.where(Job.user_id == user_id)
+
+        to_delete = await query.run()
         count = len(to_delete)
 
         if count > 0:
-            # Delete associated CV attempts first
             job_ids = [row["job_id"] for row in to_delete]
             await (
                 CVAttemptTable.delete()
                 .where(CVAttemptTable.job_id.is_in(job_ids))
                 .run()
             )
-            await (
-                Job.delete()
-                .where(Job.status.is_in(statuses))
-                .where(Job.created_at < cutoff_date)
-                .run()
-            )
+            delete_query = Job.delete().where(Job.job_id.is_in(job_ids))
+            await delete_query.run()
 
         logger.info(f"Cleanup: deleted {count} jobs older than {older_than_days} days")
         return count

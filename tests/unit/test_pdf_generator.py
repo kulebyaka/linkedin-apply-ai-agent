@@ -7,6 +7,23 @@ import pytest
 from src.services.pdf_generator import PDFGenerator
 
 
+# WeasyPrint requires system libraries (Pango, GLib).  On macOS they are found
+# via DYLD_LIBRARY_PATH; on Linux they are typically on the default linker path.
+# We probe by attempting the actual Pango import that WeasyPrint uses internally.
+def _weasyprint_available() -> bool:
+    try:
+        from weasyprint.text.ffi import ffi, pango  # noqa: F401
+        return True
+    except (ImportError, OSError):
+        return False
+
+_can_render_pdf = _weasyprint_available()
+requires_weasyprint_libs = pytest.mark.skipif(
+    not _can_render_pdf,
+    reason="WeasyPrint system libraries not available",
+)
+
+
 class TestPDFGenerator:
     """Test cases for PDFGenerator class"""
 
@@ -63,6 +80,7 @@ class TestPDFGenerator:
         assert "+1-234-567-8900" in html
         assert "Experienced software engineer" in html
 
+    @requires_weasyprint_libs
     def test_generate_pdf_creates_file(self, tmp_path, sample_cv_json):
         """Test PDF file is created at specified path"""
         generator = PDFGenerator()
@@ -74,6 +92,7 @@ class TestPDFGenerator:
         assert Path(result_path).stat().st_size > 0
         assert Path(result_path).suffix == ".pdf"
 
+    @requires_weasyprint_libs
     def test_generate_pdf_with_metadata(self, tmp_path, sample_cv_json):
         """Test PDF is generated with custom metadata"""
         generator = PDFGenerator()
@@ -122,6 +141,7 @@ class TestPDFGenerator:
         assert metadata["title"] == "Custom Title"
         assert metadata["author"] == "Jane Smith"
 
+    @requires_weasyprint_libs
     def test_generate_pdf_creates_output_directory(self, tmp_path, sample_cv_json):
         """Test PDF generation creates output directory if it doesn't exist"""
         generator = PDFGenerator()

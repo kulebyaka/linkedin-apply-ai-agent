@@ -1,6 +1,6 @@
 """Tests for HITLProcessor domain service."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -9,6 +9,8 @@ from src.models.unified import HITLDecision, JobRecord
 from src.services.hitl_processor import HITLProcessor
 
 pytestmark = pytest.mark.asyncio
+
+TEST_USER_ID = "user-abc-123"
 
 
 def _make_ctx(**overrides) -> AppContext:
@@ -29,6 +31,7 @@ def _make_ctx(**overrides) -> AppContext:
 def _make_pending_job(job_id: str = "job-1") -> JobRecord:
     return JobRecord(
         job_id=job_id,
+        user_id=TEST_USER_ID,
         source="manual",
         mode="full",
         status="pending",
@@ -44,12 +47,12 @@ class TestProcessDecision:
     async def test_approve(self):
         job = _make_pending_job()
         repo = AsyncMock()
-        repo.get = AsyncMock(return_value=job)
+        repo.get_for_user = AsyncMock(return_value=job)
         ctx = _make_ctx(repository=repo)
         processor = HITLProcessor(ctx)
 
         result = await processor.process_decision(
-            "job-1", HITLDecision(decision="approved")
+            "job-1", HITLDecision(decision="approved"), TEST_USER_ID
         )
 
         assert result.status == "approved"
@@ -59,28 +62,33 @@ class TestProcessDecision:
     async def test_decline(self):
         job = _make_pending_job()
         repo = AsyncMock()
-        repo.get = AsyncMock(return_value=job)
+        repo.get_for_user = AsyncMock(return_value=job)
         ctx = _make_ctx(repository=repo)
         processor = HITLProcessor(ctx)
 
         result = await processor.process_decision(
-            "job-1", HITLDecision(decision="declined")
+            "job-1", HITLDecision(decision="declined"), TEST_USER_ID
         )
 
         assert result.status == "declined"
         repo.update.assert_awaited_once_with("job-1", {"status": "declined"})
 
-    @patch("src.agents.preparation_workflow.load_master_cv", return_value={"name": "Test"})
-    async def test_retry_with_feedback(self, mock_cv):
+    async def test_retry_with_feedback(self):
         job = _make_pending_job()
         repo = AsyncMock()
-        repo.get = AsyncMock(return_value=job)
+        repo.get_for_user = AsyncMock(return_value=job)
         repo.get_cv_attempts = AsyncMock(return_value=[])
-        ctx = _make_ctx(repository=repo)
+        user_repo = AsyncMock()
+        user_repo.get_by_id = AsyncMock(return_value=MagicMock(
+            master_cv_json={"contact": {"full_name": "Test"}}
+        ))
+        ctx = _make_ctx(repository=repo, user_repository=user_repo)
         processor = HITLProcessor(ctx)
 
         result = await processor.process_decision(
-            "job-1", HITLDecision(decision="retry", feedback="Add more Python experience")
+            "job-1",
+            HITLDecision(decision="retry", feedback="Add more Python experience"),
+            TEST_USER_ID,
         )
 
         assert result.status == "retrying"
@@ -89,41 +97,42 @@ class TestProcessDecision:
     async def test_retry_without_feedback_raises(self):
         job = _make_pending_job()
         repo = AsyncMock()
-        repo.get = AsyncMock(return_value=job)
+        repo.get_for_user = AsyncMock(return_value=job)
         ctx = _make_ctx(repository=repo)
         processor = HITLProcessor(ctx)
 
         with pytest.raises(ValueError, match="Feedback is required"):
             await processor.process_decision(
-                "job-1", HITLDecision(decision="retry")
+                "job-1", HITLDecision(decision="retry"), TEST_USER_ID
             )
 
     async def test_job_not_found_raises(self):
         repo = AsyncMock()
-        repo.get = AsyncMock(return_value=None)
+        repo.get_for_user = AsyncMock(return_value=None)
         ctx = _make_ctx(repository=repo)
         processor = HITLProcessor(ctx)
 
         with pytest.raises(KeyError, match="not found"):
             await processor.process_decision(
-                "nonexistent", HITLDecision(decision="approved")
+                "nonexistent", HITLDecision(decision="approved"), TEST_USER_ID
             )
 
     async def test_non_pending_job_raises(self):
         job = JobRecord(
             job_id="job-1",
+            user_id=TEST_USER_ID,
             source="manual",
             mode="full",
             status="declined",
         )
         repo = AsyncMock()
-        repo.get = AsyncMock(return_value=job)
+        repo.get_for_user = AsyncMock(return_value=job)
         ctx = _make_ctx(repository=repo)
         processor = HITLProcessor(ctx)
 
         with pytest.raises(RuntimeError, match="not pending"):
             await processor.process_decision(
-                "job-1", HITLDecision(decision="approved")
+                "job-1", HITLDecision(decision="approved"), TEST_USER_ID
             )
 
 
@@ -138,13 +147,14 @@ class TestGetPending:
         ctx = _make_ctx(repository=repo)
         processor = HITLProcessor(ctx)
 
-        result = await processor.get_pending()
+        result = await processor.get_pending(TEST_USER_ID)
 
         assert len(result) == 2
         assert result[0].job_id == "job-1"
         assert result[1].job_id == "job-2"
         assert result[0].job_posting == {"title": "Engineer", "company": "Acme"}
         assert result[0].attempt_count == 0
+        repo.get_pending.assert_awaited_once_with(TEST_USER_ID)
 
     async def test_returns_empty_list(self):
         repo = AsyncMock()
@@ -152,7 +162,7 @@ class TestGetPending:
         ctx = _make_ctx(repository=repo)
         processor = HITLProcessor(ctx)
 
-        result = await processor.get_pending()
+        result = await processor.get_pending(TEST_USER_ID)
         assert result == []
 
     async def test_propagates_repository_error(self):
@@ -162,7 +172,7 @@ class TestGetPending:
         processor = HITLProcessor(ctx)
 
         with pytest.raises(NotImplementedError):
-            await processor.get_pending()
+            await processor.get_pending(TEST_USER_ID)
 
 
 class TestGetHistory:
@@ -172,6 +182,7 @@ class TestGetHistory:
         jobs = [
             JobRecord(
                 job_id="job-1",
+                user_id=TEST_USER_ID,
                 source="manual",
                 mode="full",
                 status="approved",
@@ -183,7 +194,7 @@ class TestGetHistory:
         ctx = _make_ctx(repository=repo)
         processor = HITLProcessor(ctx)
 
-        result = await processor.get_history(limit=10)
+        result = await processor.get_history(TEST_USER_ID, limit=10)
 
         assert len(result) == 1
         assert result[0].job_id == "job-1"
@@ -196,9 +207,11 @@ class TestGetHistory:
         ctx = _make_ctx(repository=repo)
         processor = HITLProcessor(ctx)
 
-        await processor.get_history(limit=50, status="declined")
+        await processor.get_history(TEST_USER_ID, limit=50, status="declined")
 
-        repo.get_history.assert_awaited_once_with(limit=50, statuses=["declined"])
+        repo.get_history.assert_awaited_once_with(
+            user_id=TEST_USER_ID, limit=50, statuses=["declined"]
+        )
 
     async def test_propagates_repository_error(self):
         repo = AsyncMock()
@@ -207,4 +220,4 @@ class TestGetHistory:
         processor = HITLProcessor(ctx)
 
         with pytest.raises(NotImplementedError):
-            await processor.get_history()
+            await processor.get_history(TEST_USER_ID)

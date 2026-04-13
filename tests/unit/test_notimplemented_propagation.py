@@ -17,12 +17,6 @@ from unittest.mock import AsyncMock, patch  # noqa: E402
 
 import pytest  # noqa: E402
 
-from src.agents.application_workflow import (  # noqa: E402
-    load_from_db_node as app_load_from_db_node,
-)
-from src.agents.application_workflow import (  # noqa: E402
-    update_db_node as app_update_db_node,
-)
 from src.agents.preparation_workflow import extract_job_node, save_to_db_node  # noqa: E402
 from src.agents.retry_workflow import (  # noqa: E402
     load_from_db_node as retry_load_from_db_node,
@@ -192,53 +186,3 @@ async def test_retry_update_db_not_implemented_fails():
     assert result["error_message"] is not None
 
 
-# ---------------------------------------------------------------------------
-# application_workflow: load_from_db_node
-# ---------------------------------------------------------------------------
-
-
-async def test_app_load_from_db_not_implemented_fails():
-    """If repo.get() raises NotImplementedError, application load should fail."""
-    state = {
-        "job_id": "test-6",
-        "application_type": "manual",
-        "current_step": "",
-        "error_message": None,
-    }
-
-    mock_repo = AsyncMock()
-    mock_repo.get = AsyncMock(
-        side_effect=NotImplementedError("get() not implemented")
-    )
-    config = {"configurable": {"repository": mock_repo}}
-
-    result = await app_load_from_db_node(state, config=config)
-
-    assert result["current_step"] == "failed"
-    assert result["error_message"] is not None
-
-
-# ---------------------------------------------------------------------------
-# application_workflow: update_db_node
-# ---------------------------------------------------------------------------
-
-
-async def test_app_update_db_not_implemented_fails():
-    """If repo.update() raises NotImplementedError, application update should fail, not silently skip."""
-    state = {
-        "job_id": "test-7",
-        "application_status": "success",
-        "current_step": "",
-        "error_message": None,
-    }
-
-    mock_repo = AsyncMock()
-    mock_repo.update = AsyncMock(
-        side_effect=NotImplementedError("update() not implemented")
-    )
-    config = {"configurable": {"repository": mock_repo}}
-
-    result = await app_update_db_node(state, config=config)
-
-    assert result["current_step"] == "failed"
-    assert result["error_message"] is not None

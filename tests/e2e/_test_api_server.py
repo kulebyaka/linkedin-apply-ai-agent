@@ -117,7 +117,12 @@ def main():
 
     import src.config.settings as _settings_mod
 
-    _test_settings = Settings(_env_file=None, cors_origins=["*"])
+    _test_settings = Settings(
+        _env_file=None,
+        cors_origins=[],  # Empty — we'll override CORS with regex below
+        cv_composer_hallucination_policy="disabled",
+        jwt_secret="test-secret-for-e2e-tests-extended",
+    )
     _settings_mod.get_settings = lambda: _test_settings
 
     # Apply patches BEFORE importing the app (which triggers module-level init)
@@ -128,9 +133,38 @@ def main():
     )
     p1.start()
 
+    # Override auth dependency to return a test user for e2e tests
+    from src.api.main import app, get_current_user
+    from src.models.user import User
+
+    _test_user = User(id="e2e-test-user", email="e2e@test.com", display_name="E2E Test")
+    app.dependency_overrides[get_current_user] = lambda: _test_user
+
+    # Replace the CORS middleware to allow any localhost/127.0.0.1 origin.
+    # The default cors_origins setting uses specific ports, but e2e tests use
+    # random ports. Using allow_origin_regex with allow_credentials=True
+    # makes the browser accept cross-origin responses with credentials.
+    from starlette.middleware.cors import CORSMiddleware
+
+    # Remove existing CORS middleware and re-add with regex
+    app.user_middleware = [
+        m for m in app.user_middleware
+        if m.cls is not CORSMiddleware
+    ]
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    # Force middleware stack rebuild
+    app.middleware_stack = None
+    app.build_middleware_stack()
+
     import uvicorn
 
-    uvicorn.run("src.api.main:app", host="127.0.0.1", port=port, log_level="warning")
+    uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
 
 
 if __name__ == "__main__":

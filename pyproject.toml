@@ -28,6 +28,8 @@ dependencies = [
     "apscheduler>=3.10.4",
     "piccolo[sqlite]>=1.21.0",
     "aiosqlite>=0.20.0",
+    "resend>=2.0.0",
+    "pyjwt>=2.8.0",
 ]
 
 [project.optional-dependencies]

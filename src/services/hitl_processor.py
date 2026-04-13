@@ -64,7 +64,7 @@ class HITLProcessor:
             return self._job_locks[job_id]
 
     async def process_decision(
-        self, job_id: str, decision: HITLDecision
+        self, job_id: str, decision: HITLDecision, user_id: str
     ) -> HITLDecisionResponse:
         """Process a HITL decision for a pending job.
 
@@ -73,22 +73,22 @@ class HITLProcessor:
         Args:
             job_id: The job to decide on.
             decision: The user's decision (approve/decline/retry).
+            user_id: Authenticated user's ID (for ownership verification).
 
         Returns:
             HITLDecisionResponse with the new status.
 
         Raises:
             ValueError: If validation fails (e.g., retry without feedback).
-            KeyError: If job not found.
+            KeyError: If job not found or not owned by user.
             RuntimeError: If job is not in pending status.
         """
         # Validate retry has feedback (before acquiring lock)
         if decision.decision == "retry" and not decision.feedback:
             raise ValueError("Feedback is required for retry decision")
 
-        # Check job exists before creating a per-job lock to prevent
-        # unbounded lock growth from requests with nonexistent job IDs.
-        job_record = await self._ctx.repository.get(job_id)
+        # Check job exists and belongs to user before creating a per-job lock
+        job_record = await self._ctx.repository.get_for_user(job_id, user_id)
         if job_record is None:
             raise KeyError(f"Job {job_id} not found")
 
@@ -96,7 +96,7 @@ class HITLProcessor:
         lock = await self._get_job_lock(job_id)
         async with lock:
             # Re-read under lock to ensure consistent state
-            job_record = await self._ctx.repository.get(job_id)
+            job_record = await self._ctx.repository.get_for_user(job_id, user_id)
             if job_record is None:
                 raise KeyError(f"Job {job_id} not found")
 
@@ -110,17 +110,16 @@ class HITLProcessor:
             elif decision.decision == "declined":
                 return await self._handle_decline(job_id)
             elif decision.decision == "retry":
-                return await self._handle_retry(job_id, job_record, decision.feedback)
+                return await self._handle_retry(
+                    job_id, job_record, decision.feedback, user_id
+                )
             else:
                 raise ValueError(f"Invalid decision: {decision.decision}")
 
-    async def get_pending(self) -> list[PendingApproval]:
-        """Get all jobs pending HITL review.
-
-        Falls back to scanning workflow threads if repository raises NotImplementedError.
-        """
+    async def get_pending(self, user_id: str) -> list[PendingApproval]:
+        """Get all jobs pending HITL review for a user."""
         try:
-            pending_jobs = await self._ctx.repository.get_pending()
+            pending_jobs = await self._ctx.repository.get_pending(user_id)
             result = []
             for job in pending_jobs:
                 attempts = await self._ctx.repository.get_cv_attempts(job.job_id)
@@ -143,13 +142,13 @@ class HITLProcessor:
             raise
 
     async def get_history(
-        self, limit: int = 50, status: str | None = None
+        self, user_id: str, limit: int = 50, status: str | None = None
     ) -> list[ApplicationHistoryItem]:
-        """Get application history with optional status filter."""
+        """Get application history for a user with optional status filter."""
         try:
             statuses = [status] if status else None
             jobs = await self._ctx.repository.get_history(
-                limit=limit, statuses=statuses
+                user_id=user_id, limit=limit, statuses=statuses
             )
             return [
                 ApplicationHistoryItem(
@@ -194,7 +193,7 @@ class HITLProcessor:
         )
 
     async def _handle_retry(
-        self, job_id: str, job_record, feedback: str
+        self, job_id: str, job_record, feedback: str, user_id: str
     ) -> HITLDecisionResponse:
         logger.info("Job %s queued for retry with user feedback", job_id)
 
@@ -203,7 +202,15 @@ class HITLProcessor:
         try:
             retry_thread_id = str(uuid.uuid4())
 
-            from src.agents._shared import load_master_cv
+            # Load master CV from user's DB record
+            master_cv = None
+            if self._ctx.user_repository:
+                user = await self._ctx.user_repository.get_by_id(user_id)
+                if user and user.master_cv_json:
+                    master_cv = user.master_cv_json
+            if not master_cv:
+                from src.agents._shared import load_master_cv
+                master_cv = load_master_cv()
 
             # Derive retry count from CV attempts
             attempts = await self._ctx.repository.get_cv_attempts(job_id)
@@ -211,15 +218,16 @@ class HITLProcessor:
 
             retry_state = {
                 "job_id": job_id,
+                "user_id": user_id,
                 "user_feedback": feedback,
                 "job_posting": job_record.job_posting,
-                "master_cv": load_master_cv(),
+                "master_cv": master_cv,
                 "retry_count": retry_count,
                 "current_step": BusinessState.QUEUED,
                 "error_message": None,
             }
 
-            await self._ctx.register_workflow(job_id, retry_thread_id, "retry")
+            await self._ctx.register_workflow(job_id, retry_thread_id, "retry", user_id=user_id)
 
             self._ctx.create_background_task(
                 self._run_retry_workflow(job_id, retry_thread_id, retry_state)
@@ -285,4 +293,6 @@ class HITLProcessor:
                 )
             except Exception:
                 logger.warning("Failed to mark job %s as FAILED in repository", job_id)
+        finally:
+            await self._ctx.unregister_workflow(job_id)
 

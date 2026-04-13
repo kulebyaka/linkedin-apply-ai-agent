@@ -104,7 +104,9 @@ export async function fetchPendingApprovals(): Promise<PendingApproval[]> {
 		return [...mockPendingJobs];
 	}
 
-	const response = await fetch(`${API_BASE}/api/hitl/pending`);
+	const response = await fetch(`${API_BASE}/api/hitl/pending`, {
+		credentials: 'include',
+	});
 	if (!response.ok) {
 		const errorText = await response.text();
 		throw new Error(`Failed to fetch pending approvals: ${response.statusText} - ${errorText}`);
@@ -135,6 +137,7 @@ export async function submitDecision(
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ decision, feedback }),
+		credentials: 'include',
 	});
 	if (!response.ok) {
 		const errorText = await response.text();
@@ -173,7 +176,9 @@ export async function fetchCVHtml(jobId: string): Promise<string> {
 		`;
 	}
 
-	const response = await fetch(`${API_BASE}/api/jobs/${jobId}/html`);
+	const response = await fetch(`${API_BASE}/api/jobs/${jobId}/html`, {
+		credentials: 'include',
+	});
 	if (!response.ok) {
 		const errorText = await response.text();
 		throw new Error(`Failed to fetch CV HTML: ${response.statusText} - ${errorText}`);

@@ -41,6 +41,7 @@ class PreparationWorkflowState(TypedDict):
 
     # Input
     job_id: str
+    user_id: str
     source: Literal["url", "manual", "linkedin"]
     mode: Literal["mvp", "full"]
     raw_input: dict  # URL, manual text, or LinkedIn job data
@@ -346,6 +347,7 @@ async def save_to_db_node(state: PreparationWorkflowState, config: RunnableConfi
         # Build job record
         job_record = JobRecord(
             job_id=job_id,
+            user_id=state.get("user_id", ""),
             source=state.get("source", "manual"),
             mode=mode,
             status=final_status,
@@ -368,6 +370,7 @@ async def save_to_db_node(state: PreparationWorkflowState, config: RunnableConfi
         if cv_json:
             attempt = CVCompositionAttempt(
                 job_id=job_id,
+                user_id=state.get("user_id", ""),
                 attempt_number=1,
                 user_feedback=state.get("user_feedback"),
                 cv_json=cv_json,

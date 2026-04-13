@@ -13,10 +13,13 @@ from src.services.job_repository import InMemoryJobRepository, RepositoryError
 
 pytestmark = pytest.mark.asyncio
 
+TEST_USER_ID = "user-test-123"
+
 
 def _make_job(job_id: str = "test-1", status: str = "queued") -> JobRecord:
     return JobRecord(
         job_id=job_id,
+        user_id=TEST_USER_ID,
         source="manual",
         mode="full",
         status=status,
@@ -32,10 +35,6 @@ class TestInMemoryLockProtection:
         await repo.initialize()
         await repo.create(_make_job("job-1", status="queued"))
 
-        # Each coroutine updates retry_count to a unique value.
-        # We just need to verify all updates succeed without error
-        # and the final state reflects one of them (last writer wins,
-        # but none should be lost/corrupt).
         results = []
 
         async def update_status(i: int):
@@ -47,7 +46,6 @@ class TestInMemoryLockProtection:
         assert len(results) == 50
         job = await repo.get("job-1")
         assert job is not None
-        # error_message should be one of the values we set
         assert job.error_message.startswith("attempt-")
 
     async def test_concurrent_create_duplicate_rejected(self):
@@ -87,14 +85,11 @@ class TestInMemoryLockProtection:
         """Create then many concurrent updates should all succeed (using valid transitions)."""
         repo = InMemoryJobRepository()
         await repo.initialize()
-        # Start from "pending" which allows approved/declined/retrying transitions
         await repo.create(_make_job("cu-1", status="pending"))
 
-        # All transitions from "pending" that are valid
         valid_targets = ["approved", "declined", "retrying"]
 
         async def update_to(s: str):
-            # Reset to pending first (via error_message update), then transition
             await repo.update("cu-1", {"error_message": f"test-{s}"})
 
         await asyncio.gather(*[update_to(s) for s in valid_targets])
@@ -107,3 +102,66 @@ class TestInMemoryLockProtection:
         """Verify the repository has an asyncio.Lock."""
         repo = InMemoryJobRepository()
         assert isinstance(repo._lock, asyncio.Lock)
+
+
+class TestInMemoryUserFiltering:
+    """Test that user_id filtering works correctly."""
+
+    async def test_get_for_user_returns_owned_job(self):
+        repo = InMemoryJobRepository()
+        await repo.initialize()
+        await repo.create(_make_job("job-1"))
+
+        result = await repo.get_for_user("job-1", TEST_USER_ID)
+        assert result is not None
+        assert result.job_id == "job-1"
+
+    async def test_get_for_user_returns_none_for_other_user(self):
+        repo = InMemoryJobRepository()
+        await repo.initialize()
+        await repo.create(_make_job("job-1"))
+
+        result = await repo.get_for_user("job-1", "other-user")
+        assert result is None
+
+    async def test_get_pending_filters_by_user(self):
+        repo = InMemoryJobRepository()
+        await repo.initialize()
+        await repo.create(JobRecord(
+            job_id="p1", user_id=TEST_USER_ID, source="url", mode="full", status="pending"
+        ))
+        await repo.create(JobRecord(
+            job_id="p2", user_id="other-user", source="url", mode="full", status="pending"
+        ))
+
+        pending = await repo.get_pending(TEST_USER_ID)
+        assert len(pending) == 1
+        assert pending[0].job_id == "p1"
+
+    async def test_get_all_filters_by_user(self):
+        repo = InMemoryJobRepository()
+        await repo.initialize()
+        await repo.create(JobRecord(
+            job_id="j1", user_id=TEST_USER_ID, source="url", mode="full", status="queued"
+        ))
+        await repo.create(JobRecord(
+            job_id="j2", user_id="other-user", source="url", mode="full", status="queued"
+        ))
+
+        all_jobs = await repo.get_all(TEST_USER_ID)
+        assert len(all_jobs) == 1
+        assert all_jobs[0].user_id == TEST_USER_ID
+
+    async def test_get_history_filters_by_user(self):
+        repo = InMemoryJobRepository()
+        await repo.initialize()
+        await repo.create(JobRecord(
+            job_id="j1", user_id=TEST_USER_ID, source="url", mode="full", status="applied"
+        ))
+        await repo.create(JobRecord(
+            job_id="j2", user_id="other-user", source="url", mode="full", status="applied"
+        ))
+
+        history = await repo.get_history(TEST_USER_ID)
+        assert len(history) == 1
+        assert history[0].user_id == TEST_USER_ID

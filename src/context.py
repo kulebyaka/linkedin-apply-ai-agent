@@ -14,12 +14,14 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
 
+    from src.services.auth import AuthService
     from src.services.browser_automation import LinkedInAutomation
     from src.services.hitl_processor import HITLProcessor
     from src.services.job_orchestrator import JobOrchestrator
     from src.services.job_queue import JobQueue
     from src.services.job_repository import JobRepository
     from src.services.scheduler import LinkedInSearchScheduler
+    from src.services.user_repository import UserRepository
 
 from src.config.settings import Settings, get_settings
 
@@ -38,6 +40,8 @@ class AppContext:
     settings: Settings
     prep_workflow: CompiledStateGraph
     retry_workflow: CompiledStateGraph
+    user_repository: UserRepository | None = None
+    auth_service: AuthService | None = None
     job_queue: JobQueue | None = None
     scheduler: LinkedInSearchScheduler | None = None
     browser: LinkedInAutomation | None = None
@@ -51,7 +55,8 @@ class AppContext:
     _background_tasks: set[asyncio.Task] = field(default_factory=set)
 
     async def register_workflow(
-        self, job_id: str, thread_id: str, workflow_type: str
+        self, job_id: str, thread_id: str, workflow_type: str,
+        *, user_id: str = "",
     ) -> None:
         """Register an in-progress workflow for status tracking."""
         from datetime import datetime, timezone
@@ -60,8 +65,14 @@ class AppContext:
             self._workflow_threads[job_id] = {
                 "thread_id": thread_id,
                 "workflow_type": workflow_type,
+                "user_id": user_id,
                 "created_at": datetime.now(tz=timezone.utc),
             }
+
+    async def unregister_workflow(self, job_id: str) -> None:
+        """Remove a completed workflow from tracking."""
+        async with self._tracking_lock:
+            self._workflow_threads.pop(job_id, None)
 
     async def get_workflow_thread(self, job_id: str) -> dict | None:
         """Get workflow tracking info for a job_id."""
@@ -94,10 +105,12 @@ def create_app_context(
     """
     from src.agents.preparation_workflow import create_preparation_workflow
     from src.agents.retry_workflow import create_retry_workflow
+    from src.services.auth import AuthService
     from src.services.hitl_processor import HITLProcessor
     from src.services.job_orchestrator import JobOrchestrator
     from src.services.job_queue import JobQueue
     from src.services.job_repository import get_repository
+    from src.services.user_repository import UserRepository
 
     if settings is None:
         settings = get_settings()
@@ -111,11 +124,16 @@ def create_app_context(
     retry_workflow = create_retry_workflow()  # type: ignore[arg-type]
     job_queue = JobQueue()
 
+    user_repository = UserRepository()
+    auth_service = AuthService(settings, user_repository)
+
     ctx = AppContext(
         repository=repository,
         settings=settings,
         prep_workflow=prep_workflow,
         retry_workflow=retry_workflow,
+        user_repository=user_repository,
+        auth_service=auth_service,
         job_queue=job_queue,
     )
 

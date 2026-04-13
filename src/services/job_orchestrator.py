@@ -39,8 +39,15 @@ class JobOrchestrator:
     def __init__(self, ctx: AppContext) -> None:
         self._ctx = ctx
 
-    async def submit_job(self, request: JobSubmitRequest) -> JobSubmitResponse:
+    async def submit_job(
+        self, request: JobSubmitRequest, user_id: str, master_cv: dict
+    ) -> JobSubmitResponse:
         """Validate request, build workflow state, and dispatch preparation workflow.
+
+        Args:
+            request: Job submission request.
+            user_id: Authenticated user's ID.
+            master_cv: Master CV JSON from user's DB record.
 
         Returns:
             JobSubmitResponse with the new job_id.
@@ -87,14 +94,10 @@ class JobOrchestrator:
                 request.job_description.llm_model,
             )
 
-        # Load master CV
-        from src.agents._shared import load_master_cv
-
-        master_cv = load_master_cv()
-
         # Build initial state
         initial_state = {
             "job_id": job_id,
+            "user_id": user_id,
             "source": request.source,
             "mode": request.mode,
             "raw_input": raw_input,
@@ -106,7 +109,7 @@ class JobOrchestrator:
         }
 
         # Track thread
-        await self._ctx.register_workflow(job_id, thread_id, "preparation")
+        await self._ctx.register_workflow(job_id, thread_id, "preparation", user_id=user_id)
 
         # Dispatch workflow in background
         self._ctx.create_background_task(
@@ -205,8 +208,10 @@ class JobOrchestrator:
                     # Job failed before save_to_db_node created the record
                     source = initial_state.get("source", "url")
                     mode = initial_state.get("mode", "mvp")
+                    user_id = initial_state.get("user_id", "")
                     await self._ctx.repository.create(JobRecord(
                         job_id=job_id,
+                        user_id=user_id,
                         source=source,
                         mode=mode,
                         status=BusinessState.FAILED,
@@ -214,3 +219,5 @@ class JobOrchestrator:
                     ))
             except Exception:
                 logger.warning("Failed to mark job %s as FAILED in repository", job_id)
+        finally:
+            await self._ctx.unregister_workflow(job_id)

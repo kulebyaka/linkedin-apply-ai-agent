@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.models.job import ScrapedJob
-from src.services.job_queue import ConsumerManager, JobQueue, process_queue
+from src.services.job_queue import ConsumerManager, JobQueue, QueueItem, process_queue
 from src.services.job_source import LinkedInJobAdapter
 
 pytestmark = pytest.mark.asyncio
@@ -34,8 +34,18 @@ class TestJobQueuePutGet:
         await q.put(job)
         assert q.size() == 1
         item = await q.get()
-        assert item.job_id == "1"
+        assert isinstance(item, QueueItem)
+        assert item.job.job_id == "1"
+        assert item.user_id is None
         assert q.is_empty()
+
+    async def test_single_put_get_with_user_id(self):
+        q = JobQueue()
+        job = _job("1")
+        await q.put(job, user_id="user-abc")
+        item = await q.get()
+        assert item.job.job_id == "1"
+        assert item.user_id == "user-abc"
 
     async def test_fifo_ordering(self):
         q = JobQueue()
@@ -44,7 +54,7 @@ class TestJobQueuePutGet:
         assert q.size() == 5
         for i in range(5):
             item = await q.get()
-            assert item.job_id == str(i)
+            assert item.job.job_id == str(i)
 
     async def test_is_empty_initially(self):
         q = JobQueue()
@@ -71,7 +81,16 @@ class TestJobQueueBatch:
         # First 3 should be in queue
         for i in range(3):
             item = await q.get()
-            assert item.job_id == str(i)
+            assert item.job.job_id == str(i)
+
+    async def test_put_batch_carries_user_id(self):
+        q = JobQueue(max_size=10)
+        jobs = [_job("a"), _job("b")]
+        count = await q.put_batch(jobs, user_id="user-xyz")
+        assert count == 2
+        item = await q.get()
+        assert item.user_id == "user-xyz"
+        assert item.job.job_id == "a"
 
     async def test_put_batch_empty_list(self):
         q = JobQueue()
@@ -314,9 +333,91 @@ class TestProcessQueue:
         assert state["mode"] == "full"
         assert state["master_cv"] == master
         assert state["current_step"] == "queued"
+        assert state["user_id"] == ""  # no user_id on queue item
         # raw_input should be a dict (model_dump output)
         assert isinstance(state["raw_input"], dict)
         assert state["raw_input"]["job_id"] == "x"
+
+    async def test_user_id_flows_to_workflow_state(self):
+        """When a queue item has user_id, it appears in workflow state."""
+        q = JobQueue()
+        await q.put(_job("u1"), user_id="user-abc")
+
+        stop = asyncio.Event()
+        stop.set()
+
+        wf = self._make_workflow_mock()
+
+        def cv_loader():
+            return {"contact": {"full_name": "Test"}}
+
+        await process_queue(
+            q, workflow=wf, master_cv_loader=cv_loader,
+            job_repository=AsyncMock(get=AsyncMock(return_value=None)),
+            delay_between_jobs=0, stop_event=stop,
+        )
+
+        state = wf.ainvoke.call_args[0][0]
+        assert state["user_id"] == "user-abc"
+
+    async def test_user_cv_loaded_from_user_repository(self):
+        """When user_id is set and user_repository has a master CV, use it."""
+        q = JobQueue()
+        await q.put(_job("cv1"), user_id="user-xyz")
+
+        stop = asyncio.Event()
+        stop.set()
+
+        wf = self._make_workflow_mock()
+        user_cv = {"contact": {"full_name": "From DB"}}
+        mock_user = MagicMock()
+        mock_user.master_cv_json = user_cv
+
+        mock_user_repo = AsyncMock()
+        mock_user_repo.get_by_id = AsyncMock(return_value=mock_user)
+
+        def cv_loader():
+            return {"contact": {"full_name": "Fallback"}}
+
+        await process_queue(
+            q, workflow=wf, master_cv_loader=cv_loader,
+            user_repository=mock_user_repo,
+            job_repository=AsyncMock(get=AsyncMock(return_value=None)),
+            delay_between_jobs=0, stop_event=stop,
+        )
+
+        state = wf.ainvoke.call_args[0][0]
+        assert state["master_cv"] == user_cv
+
+    async def test_fallback_cv_when_user_has_no_cv(self):
+        """When user exists but has no master_cv_json, fall back to loader."""
+        q = JobQueue()
+        await q.put(_job("cv2"), user_id="user-no-cv")
+
+        stop = asyncio.Event()
+        stop.set()
+
+        wf = self._make_workflow_mock()
+        mock_user = MagicMock()
+        mock_user.master_cv_json = None
+
+        mock_user_repo = AsyncMock()
+        mock_user_repo.get_by_id = AsyncMock(return_value=mock_user)
+
+        fallback_cv = {"contact": {"full_name": "Fallback"}}
+
+        def cv_loader():
+            return fallback_cv
+
+        await process_queue(
+            q, workflow=wf, master_cv_loader=cv_loader,
+            user_repository=mock_user_repo,
+            job_repository=AsyncMock(get=AsyncMock(return_value=None)),
+            delay_between_jobs=0, stop_event=stop,
+        )
+
+        state = wf.ainvoke.call_args[0][0]
+        assert state["master_cv"] == fallback_cv
 
 
 # ---------------------------------------------------------------------------

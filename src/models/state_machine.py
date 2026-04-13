@@ -4,10 +4,10 @@ Defines the business states and workflow steps for job processing,
 along with transition validation to prevent illegal state changes.
 """
 
-from enum import Enum
+from enum import StrEnum
 
 
-class WorkflowStep(str, Enum):
+class WorkflowStep(StrEnum):
     """Tracks which workflow step is currently executing.
 
     These are transient values used in workflow state (current_step field),
@@ -30,7 +30,7 @@ class WorkflowStep(str, Enum):
     MANUAL_REQUIRED = "manual_required"
 
 
-class BusinessState(str, Enum):
+class BusinessState(StrEnum):
     """Job lifecycle business states.
 
     These are the canonical states stored in the database status field.

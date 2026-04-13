@@ -7,7 +7,7 @@ Supports configurable enforcement policies: STRICT, WARN, DISABLED.
 from __future__ import annotations
 
 import logging
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from src.models.cv import (
@@ -21,7 +21,7 @@ from src.services.cv_composer import CVCompositionError
 logger = logging.getLogger(__name__)
 
 
-class HallucinationPolicy(str, Enum):
+class HallucinationPolicy(StrEnum):
     """Policy for handling detected hallucinations in tailored CVs."""
 
     STRICT = "strict"  # Raise CVHallucinationError on fabricated entities
