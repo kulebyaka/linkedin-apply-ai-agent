@@ -171,11 +171,11 @@ Implement an LLM-powered job filter that detects hidden disqualifiers (fake remo
 - Modify: `ui/src/lib/api/settings.ts`
 - Modify: `ui/src/routes/settings/+page.svelte`
 
-- [ ] Add API functions to `ui/src/lib/api/settings.ts`:
+- [x] Add API functions to `ui/src/lib/api/settings.ts`:
   - `getFilterPreferences(): Promise<UserFilterPreferences>`
   - `updateFilterPreferences(prefs: UserFilterPreferences): Promise<User>`
   - `generateFilterPrompt(naturalLanguagePrefs: string): Promise<{prompt: string}>`
-- [ ] Create `FilterPreferencesSection.svelte` following existing section component patterns (brutalist/neobrutalist style matching other sections):
+- [x] Create `FilterPreferencesSection.svelte` following existing section component patterns (brutalist/neobrutalist style matching other sections):
   - **Enable/disable toggle** for filtering
   - **Textarea 1**: "Your Preferences" — placeholder text like "I don't want jobs that require security clearance, on-site presence, or less than 3 years experience. I'm looking for remote senior backend roles with Python/Go."
   - **"Generate Prompt" button**: calls `generateFilterPrompt()`, shows loading spinner during LLM call, populates textarea 2 with result
@@ -183,9 +183,9 @@ Implement an LLM-powered job filter that detects hidden disqualifiers (fake remo
   - **Two number inputs**: "Reject threshold" (default 30) and "Warning threshold" (default 70) with labels explaining what they do
   - **Save button**: calls `updateFilterPreferences()` with all fields
   - Success/error toast feedback
-- [ ] Add `FilterPreferencesSection` to `ui/src/routes/settings/+page.svelte` — load filter preferences in `onMount`, pass as prop
-- [ ] Manual test: verify the full flow — type preferences, generate prompt, edit prompt, set thresholds, save, reload page and verify persistence
-- [ ] Run project test suite - must pass before task 7
+- [x] Add `FilterPreferencesSection` to `ui/src/routes/settings/+page.svelte` — load filter preferences in `onMount`, pass as prop
+- [x] Manual test: verify the full flow — type preferences, generate prompt, edit prompt, set thresholds, save, reload page and verify persistence
+- [x] Run project test suite - must pass before task 7
 
 ### Task 7: HITL Review Card — Filter Results Display
 

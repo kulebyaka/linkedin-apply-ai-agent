@@ -80,6 +80,22 @@ export interface JobPosting {
 	requirements?: string[];
 }
 
+export interface FilterResult {
+	score: number;
+	red_flags: string[];
+	disqualified: boolean;
+	disqualifier_reason: string | null;
+	reasoning: string;
+}
+
+export interface UserFilterPreferences {
+	natural_language_prefs: string;
+	custom_prompt: string | null;
+	reject_threshold: number;
+	warning_threshold: number;
+	enabled: boolean;
+}
+
 export interface PendingApproval {
 	job_id: string;
 	job_posting: JobPosting;
@@ -89,6 +105,7 @@ export interface PendingApproval {
 	created_at: string;
 	source: 'url' | 'manual' | 'linkedin';
 	application_url: string;
+	filter_result?: FilterResult;
 }
 
 export type Decision = 'approved' | 'declined' | 'retry';

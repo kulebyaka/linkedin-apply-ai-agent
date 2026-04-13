@@ -1,4 +1,5 @@
 import type { User, UserSearchPreferences } from '$lib/api/auth';
+import type { UserFilterPreferences } from '$lib/types/index';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
@@ -53,6 +54,53 @@ export async function updateSearchPreferences(
 		throw new Error(
 			`Failed to update search preferences: ${response.statusText} - ${errorText}`,
 		);
+	}
+
+	return response.json();
+}
+
+export async function getFilterPreferences(): Promise<UserFilterPreferences> {
+	const response = await fetch(`${API_BASE}/api/users/me/filter-preferences`, {
+		credentials: 'include',
+	});
+
+	if (!response.ok) {
+		const errorText = await response.text();
+		throw new Error(`Failed to get filter preferences: ${response.statusText} - ${errorText}`);
+	}
+
+	return response.json();
+}
+
+export async function updateFilterPreferences(prefs: UserFilterPreferences): Promise<User> {
+	const response = await fetch(`${API_BASE}/api/users/me/filter-preferences`, {
+		method: 'PUT',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(prefs),
+		credentials: 'include',
+	});
+
+	if (!response.ok) {
+		const errorText = await response.text();
+		throw new Error(
+			`Failed to update filter preferences: ${response.statusText} - ${errorText}`,
+		);
+	}
+
+	return response.json();
+}
+
+export async function generateFilterPrompt(naturalLanguagePrefs: string): Promise<{ prompt: string }> {
+	const response = await fetch(`${API_BASE}/api/users/me/filter-preferences/generate-prompt`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ natural_language_prefs: naturalLanguagePrefs }),
+		credentials: 'include',
+	});
+
+	if (!response.ok) {
+		const errorText = await response.text();
+		throw new Error(`Failed to generate filter prompt: ${response.statusText} - ${errorText}`);
 	}
 
 	return response.json();
