@@ -213,12 +213,12 @@ Implement an LLM-powered job filter that detects hidden disqualifiers (fake remo
 
 ### Task 9: Update documentation
 
-- [ ] Update `CLAUDE.md`:
+- [x] Update `CLAUDE.md`:
   - Add `JobFilter` to Implementation Status table (mark as Complete)
   - Add filter-related settings to Configuration section
   - Add filter endpoints to API Endpoints table
   - Add `FilterResult` and `UserFilterPreferences` to Data Models section
   - Add `FILTERED_OUT` state to State Machine section
   - Update directory structure if new files added
-- [ ] Update `README.md` if user-facing changes
-- [ ] Move this plan to `docs/plans/completed/`
+- [x] Update `README.md` if user-facing changes
+- [x] Move this plan to `docs/plans/completed/`

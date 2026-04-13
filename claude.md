@@ -46,7 +46,7 @@ src/
 │   ├── job_orchestrator.py     # Domain service: job submission & status queries
 │   ├── hitl_processor.py       # Domain service: HITL decision processing
 │   ├── job_source.py           # Job source adapters (URL, manual, LinkedIn)
-│   ├── job_filter.py           # LLM-based job filtering (skeleton)
+│   ├── job_filter.py           # LLM-based job filtering with two-threshold routing
 │   ├── job_repository.py       # Data access layer (in-memory + SQLite via Piccolo)
 │   ├── cv_composer.py          # LLM-powered CV tailoring
 │   ├── cv_validator.py         # CV validation with configurable hallucination policy
@@ -62,6 +62,7 @@ src/
 │   ├── job.py                  # Job posting models
 │   ├── cv.py                   # CV data models
 │   ├── cv_attempt.py           # CVCompositionAttempt for retry history tracking
+│   ├── job_filter.py           # FilterResult + UserFilterPreferences models
 │   ├── state_machine.py        # BusinessState + WorkflowStep enums, transition validation
 │   ├── unified.py              # Unified models for two-workflow architecture
 │   └── user.py                 # User, auth, and search preference models
@@ -76,6 +77,11 @@ data/
 ├── cv/                         # Legacy master CV location (now stored in User DB record)
 ├── jobs/                       # Fetched job data
 └── generated_cvs/              # Tailored CV PDFs (per-user: {user_id}/{job_id}.pdf)
+
+prompts/
+└── job_filter/
+    ├── default_filter_prompt.txt       # Default LLM filter prompt template
+    └── generate_prompt_from_prefs.txt  # Meta-prompt: natural language → filter prompt
 ```
 
 ## Two-Workflow Pipeline Architecture
@@ -153,7 +159,7 @@ The system uses a **two-workflow pipeline** split at the HITL boundary, enabling
 
 ### 3. Job Lifecycle State Machine
 - `src/models/state_machine.py` defines `BusinessState` and `WorkflowStep` enums
-- `BusinessState`: queued → processing → cv_ready/pending_review → approved/declined/retrying → applied/failed
+- `BusinessState`: queued → processing → cv_ready/pending_review → approved/declined/retrying → applied/failed; also `filtered_out` (terminal, reachable from queued/processing)
 - `WorkflowStep`: transient step tracking (extracting, composing_cv, generating_pdf, etc.)
 - `ALLOWED_TRANSITIONS` map enforces valid state changes; raises `InvalidStateTransitionError` on violations
 - Both `InMemoryJobRepository` and `SQLiteJobRepository` validate transitions on `update()`
@@ -214,7 +220,7 @@ See `src/llm/provider.py` module documentation for detailed implementation.
 
 ### Preparation Workflow Nodes
 1. **extract_job_node**: Extracts structured job data from source (URL/manual/LinkedIn)
-2. **filter_job_node**: LLM evaluates job suitability (LinkedIn only, currently passthrough)
+2. **filter_job_node**: LLM evaluates job suitability (LinkedIn only); scores 0-100, hard rejects saved as `filtered_out`, warnings surfaced in HITL review
 3. **compose_cv_node**: LLM tailors CV to job description
 4. **generate_pdf_node**: Creates PDF from tailored CV JSON
 5. **save_to_db_node**: Persists job record (MVP: completed, Full: pending)
@@ -258,6 +264,9 @@ See `src/llm/provider.py` module documentation for detailed implementation.
 | PUT | `/api/users/me` | Update user profile (display_name, master_cv_json, search_preferences) |
 | GET | `/api/users/me/search-preferences` | Get current search preferences |
 | PUT | `/api/users/me/search-preferences` | Update search preferences |
+| GET | `/api/users/me/filter-preferences` | Get current filter preferences |
+| PUT | `/api/users/me/filter-preferences` | Update filter preferences |
+| POST | `/api/users/me/filter-preferences/generate-prompt` | Generate filter prompt from natural language description |
 
 ### Jobs & HITL (requires auth, user-scoped)
 
@@ -284,12 +293,12 @@ See `src/llm/provider.py` module documentation for detailed implementation.
 
 ### User & Auth Models (`src/models/user.py`)
 
-- `User` - User entity: id, email, display_name, master_cv_json, search_preferences, timestamps
+- `User` - User entity: id, email, display_name, master_cv_json, search_preferences, filter_preferences, timestamps
 - `LoginRequest` - Email input for magic link request
 - `LoginResponse` - Success message after magic link sent
 - `VerifyRequest` - Token for magic link verification
 - `AuthResponse` - User object + message after successful auth
-- `UserUpdateRequest` - Optional fields for profile update (display_name, master_cv_json, search_preferences)
+- `UserUpdateRequest` - Optional fields for profile update (display_name, master_cv_json, search_preferences, filter_preferences)
 - `UserSearchPreferences` - Mirrors LinkedInSearchParams: keywords, location, remote_filter, date_posted, experience_level, job_type, easy_apply_only, max_jobs
 
 ### Core Models (`src/models/unified.py`)
@@ -298,14 +307,15 @@ See `src/llm/provider.py` module documentation for detailed implementation.
 - `JobSubmitResponse` - Response with job_id and status
 - `HITLDecision` - User decision (approved/declined/retry + feedback + reasoning)
 - `HITLDecisionResponse` - Response after decision processed
-- `PendingApproval` - Job details for HITL review UI
+- `PendingApproval` - Job details for HITL review UI (includes `filter_result` for score badge display)
 - `JobStatusResponse` - Full job status with CV and PDF info
-- `JobRecord` - Database record (includes `user_id` for ownership)
+- `JobRecord` - Database record (includes `user_id` for ownership, `filter_result` for LLM filter output)
 - `ApplicationHistoryItem` - History entry for completed jobs
 
 ### State Machine (`src/models/state_machine.py`)
 
-- `BusinessState` - Job lifecycle states: queued, processing, cv_ready, pending_review, approved, declined, retrying, applying, applied, failed
+- `BusinessState` - Job lifecycle states: queued, processing, cv_ready, pending_review, approved, declined, retrying, applying, applied, failed, filtered_out
+  - `filtered_out`: terminal state for LLM-rejected jobs (score below reject threshold or hard disqualifier); reachable from `queued` and `processing`
 - `WorkflowStep` - Transient step tracking: extracting, filtering, composing_cv, generating_pdf, etc.
 - `ALLOWED_TRANSITIONS` - Valid state change map, enforced by repository
 - `InvalidStateTransitionError` - Raised on illegal transitions
@@ -313,6 +323,11 @@ See `src/llm/provider.py` module documentation for detailed implementation.
 ### CV Attempt History (`src/models/cv_attempt.py`)
 
 - `CVCompositionAttempt` - Tracks each CV composition: attempt_number, user_feedback, cv_json, pdf_path
+
+### Job Filter Models (`src/models/job_filter.py`)
+
+- `FilterResult` - LLM filter output: score (0-100), red_flags (list), disqualified (bool), disqualifier_reason (str|None), reasoning (str)
+- `UserFilterPreferences` - Per-user filter config: natural_language_prefs, custom_prompt, reject_threshold (default 30), warning_threshold (default 70), enabled (bool)
 
 ## Implementation Status
 
@@ -348,7 +363,7 @@ See `src/llm/provider.py` module documentation for detailed implementation.
 | **LinkedIn Search Scheduler** | ✅ Complete | `src/services/scheduler.py` - per-user search with APScheduler |
 | **HITL Frontend UI** | ✅ Complete | Svelte 5 SPA with Tinder-like review interface |
 | **Application Workflow** | 🟡 Stubs | `src/agents/application_workflow.py` - stubs only |
-| **Job Filter (LLM)** | 🔴 Pending | `src/services/job_filter.py` skeleton |
+| **Job Filter (LLM)** | ✅ Complete | `src/services/job_filter.py` — two-threshold routing, hidden disqualifier detection, per-user prompt, HITL badge |
 
 ## Development Guidelines
 
@@ -384,6 +399,10 @@ All settings in `.env`:
   - `LINKEDIN_SEARCH_SCHEDULE_ENABLED=false` - enable hourly scheduled searches
   - `LINKEDIN_SEARCH_INTERVAL_HOURS=1` - search frequency
   - `LINKEDIN_SESSION_COOKIE_PATH=./data/linkedin_cookies.json` - cookie persistence
+- **Job Filter Configuration:**
+  - `JOB_FILTER_ENABLED=true` - enable LLM-based job filtering globally
+  - `JOB_FILTER_REJECT_THRESHOLD=30` - jobs scoring below this are saved as `filtered_out` (skips CV generation)
+  - `JOB_FILTER_WARNING_THRESHOLD=70` - jobs scoring below this show warning badge + red flags in HITL review
 
 **Never commit `.env` or real CV data to git!**
 
@@ -431,8 +450,7 @@ All settings in `.env`:
 ## Next Steps
 
 1. **Implement Application Workflow** - Deep agent with Playwright MCP for browser automation
-2. **Add Job Filter Logic** - LLM-based job suitability evaluation
-3. **LinkedIn Easy Apply** - Automated application submission via browser automation
+2. **LinkedIn Easy Apply** - Automated application submission via browser automation
 
 ## Reference Implementations
 

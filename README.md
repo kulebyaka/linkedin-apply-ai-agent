@@ -26,7 +26,7 @@ The goal is a fully automated job application pipeline:
 | MVP Web UI | **Complete** | Single-page CV generator |
 | HITL Review UI | **Complete** | Tinder-like batch review interface |
 | Job Source Adapters | *Interface only* | URL extraction, manual input |
-| Job Filter (LLM) | *Not implemented* | Skeleton exists |
+| Job Filter (LLM) | **Complete** | Two-threshold routing, hidden disqualifier detection, per-user prompt, HITL badge |
 | Application Workflow | *Stubs only* | Browser automation pending |
 | LinkedIn Integration | *Not implemented* | Job fetching & Easy Apply |
 
@@ -88,7 +88,7 @@ This covers the core value proposition: AI-powered CV tailoring with professiona
 ## Roadmap
 
 - [ ] Job source adapters (URL extraction, LinkedIn API)
-- [ ] LLM-based job filtering for hidden disqualifiers
+- [x] LLM-based job filtering for hidden disqualifiers
 - [x] Tinder-like HITL UI for batch review
 - [ ] Browser automation for LinkedIn Easy Apply
 
