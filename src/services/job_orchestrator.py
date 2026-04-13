@@ -188,6 +188,7 @@ class JobOrchestrator:
                 "configurable": {
                     "thread_id": thread_id,
                     "repository": self._ctx.repository,
+                    "user_repository": self._ctx.user_repository,
                 }
             }
             result = await self._ctx.prep_workflow.ainvoke(initial_state, config)

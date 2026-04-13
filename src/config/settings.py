@@ -117,6 +117,13 @@ class Settings(BaseSettings):
     browser_headless: bool = True   # env-specific: set false in .env for visual debugging
 
     # -------------------------------------------------------------------------
+    # Job Filter  (same for everyone — defaults defined here)
+    # -------------------------------------------------------------------------
+    job_filter_enabled: bool = True        # global on/off switch
+    job_filter_reject_threshold: int = 30  # score below this → FILTERED_OUT
+    job_filter_warning_threshold: int = 70 # score below this → warning badge in HITL
+
+    # -------------------------------------------------------------------------
     # CV Composer  (same for everyone — defaults defined here)
     # -------------------------------------------------------------------------
     cv_composer_temperature_summary: float = 0.5        # creative for professional summary

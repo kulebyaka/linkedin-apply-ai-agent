@@ -129,6 +129,7 @@ class HITLProcessor:
                         job_posting=job.job_posting or {},
                         cv_json=job.current_cv_json or {},
                         pdf_path=job.current_pdf_path,
+                        filter_result=job.filter_result,
                         attempt_count=len(attempts),
                         created_at=job.created_at,
                         source=job.source,

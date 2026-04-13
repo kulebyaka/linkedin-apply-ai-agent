@@ -133,9 +133,9 @@ Implement an LLM-powered job filter that detects hidden disqualifiers (fake remo
 - Modify: `src/agents/_shared.py`
 - Modify: `src/config/settings.py`
 
-- [ ] Add default filter threshold settings to `src/config/settings.py`: `job_filter_reject_threshold: int = 30`, `job_filter_warning_threshold: int = 70`, `job_filter_enabled: bool = True`
-- [ ] Add `filter_result: dict | None` field to `PreparationWorkflowState` TypedDict
-- [ ] Implement `filter_job_node` in `preparation_workflow.py`:
+- [x] Add default filter threshold settings to `src/config/settings.py`: `job_filter_reject_threshold: int = 30`, `job_filter_warning_threshold: int = 70`, `job_filter_enabled: bool = True`
+- [x] Add `filter_result: dict | None` field to `PreparationWorkflowState` TypedDict
+- [x] Implement `filter_job_node` in `preparation_workflow.py`:
   - Load user's filter preferences from repository (need user_id from state/config)
   - If filtering disabled (globally or per-user `enabled=False`), pass through
   - Create `JobFilter` instance using `create_llm_client()` from `_shared.py`
@@ -144,13 +144,13 @@ Implement an LLM-powered job filter that detects hidden disqualifiers (fake remo
   - If `should_reject()`: set `state["current_step"] = BusinessState.FILTERED_OUT`, save to DB with filter reason, route to END
   - If `should_warn()`: continue pipeline (filter_result will be saved with job record later)
   - Otherwise: clean pass, continue pipeline
-- [ ] Update `route_after_extract` to support a new routing option: after `filter_job`, check if filtered out → route to `save_filtered_out` or END
-- [ ] Add conditional routing after `filter_job`: if `filter_result` indicates rejection → route to a `save_filtered_out_node` → END; otherwise → `compose_cv`
-- [ ] Implement `save_filtered_out_node`: creates a minimal `JobRecord` with `status=FILTERED_OUT`, `filter_result`, `job_posting`, no CV data. Saves to repository.
-- [ ] Update `save_to_db_node` to include `filter_result` from state in the `JobRecord`
-- [ ] Update `PendingApproval` construction in `HITLProcessor` (or wherever pending approvals are built) to include `filter_result` from `JobRecord`
-- [ ] Write unit tests: test filter_job_node with mocked LLM returning reject/warn/pass results, test routing logic, test save_filtered_out_node
-- [ ] Run project test suite - must pass before task 5
+- [x] Update `route_after_extract` to support a new routing option: after `filter_job`, check if filtered out → route to `save_filtered_out` or END
+- [x] Add conditional routing after `filter_job`: if `filter_result` indicates rejection → route to a `save_filtered_out_node` → END; otherwise → `compose_cv`
+- [x] Implement `save_filtered_out_node`: creates a minimal `JobRecord` with `status=FILTERED_OUT`, `filter_result`, `job_posting`, no CV data. Saves to repository.
+- [x] Update `save_to_db_node` to include `filter_result` from state in the `JobRecord`
+- [x] Update `PendingApproval` construction in `HITLProcessor` (or wherever pending approvals are built) to include `filter_result` from `JobRecord`
+- [x] Write unit tests: test filter_job_node with mocked LLM returning reject/warn/pass results, test routing logic, test save_filtered_out_node
+- [x] Run project test suite - must pass before task 5
 
 ### Task 5: API Endpoints for Filter Preferences
 

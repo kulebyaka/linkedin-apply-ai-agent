@@ -48,6 +48,22 @@ def get_repository_from_config(config: dict) -> JobRepository:
     return repo
 
 
+def get_user_repository_from_config(config: dict):
+    """Extract user repository from LangGraph config['configurable'].
+
+    Returns None (without raising) if the user repository is not present —
+    callers that need it should handle None gracefully.
+
+    Args:
+        config: LangGraph RunnableConfig dict.
+
+    Returns:
+        UserRepository instance, or None if not configured.
+    """
+    configurable = config.get("configurable", {})
+    return configurable.get("user_repository")
+
+
 def create_llm_client(llm_provider: str | None = None, llm_model: str | None = None):
     """Initialize LLM client based on settings or override parameters.
 

@@ -10,6 +10,7 @@ This workflow handles the first half of the two-workflow pipeline:
 The workflow ends at the HITL boundary. Application is handled by a separate workflow.
 """
 
+import asyncio
 import logging
 import time
 from datetime import datetime, timezone
@@ -23,6 +24,7 @@ from ..config.settings import get_settings
 from ..models.cv_attempt import CVCompositionAttempt
 from ..models.state_machine import BusinessState, WorkflowStep
 from ..models.unified import JobRecord
+from ..services.job_filter import JobFilter
 from ..services.job_fixtures import get_cached_llm_response, save_llm_response
 from ..services.job_source import JobExtractionError, JobSourceFactory
 from ._shared import (
@@ -30,6 +32,7 @@ from ._shared import (
     create_llm_client,
     generate_pdf,
     get_repository_from_config,
+    get_user_repository_from_config,
 )
 
 logger = logging.getLogger(__name__)
@@ -56,6 +59,9 @@ class PreparationWorkflowState(TypedDict):
     user_feedback: str | None
     retry_count: int
 
+    # Filter result (from LLM job evaluation)
+    filter_result: dict | None
+
     # Status
     current_step: str
     error_message: str | None
@@ -77,6 +83,7 @@ def create_preparation_workflow() -> StateGraph:
     # Add nodes
     workflow.add_node("extract_job", extract_job_node)
     workflow.add_node("filter_job", filter_job_node)
+    workflow.add_node("save_filtered_out", save_filtered_out_node)
     workflow.add_node("compose_cv", compose_cv_node)
     workflow.add_node("generate_pdf", generate_pdf_node)
     workflow.add_node("save_to_db", save_to_db_node)
@@ -91,7 +98,14 @@ def create_preparation_workflow() -> StateGraph:
         {"filter": "filter_job", "compose": "compose_cv", "error": END},
     )
 
-    workflow.add_edge("filter_job", "compose_cv")
+    # Conditional routing after filtering: rejected → save_filtered_out; else → compose_cv
+    workflow.add_conditional_edges(
+        "filter_job",
+        route_after_filter,
+        {"filtered_out": "save_filtered_out", "compose": "compose_cv"},
+    )
+
+    workflow.add_edge("save_filtered_out", END)
     workflow.add_edge("compose_cv", "generate_pdf")
     workflow.add_edge("generate_pdf", "save_to_db")
     workflow.add_edge("save_to_db", END)
@@ -112,6 +126,17 @@ def route_after_extract(state: PreparationWorkflowState) -> str:
         return "error"
     if state.get("source") == "linkedin":
         return "filter"
+    return "compose"
+
+
+def route_after_filter(state: PreparationWorkflowState) -> str:
+    """Route after LLM job filtering.
+
+    - If the job was filtered out, go to save_filtered_out
+    - Otherwise, continue to compose_cv
+    """
+    if state.get("current_step") == BusinessState.FILTERED_OUT:
+        return "filtered_out"
     return "compose"
 
 
@@ -193,26 +218,146 @@ async def extract_job_node(state: PreparationWorkflowState) -> PreparationWorkfl
     return state
 
 
-async def filter_job_node(state: PreparationWorkflowState) -> PreparationWorkflowState:
+async def filter_job_node(
+    state: PreparationWorkflowState, config: RunnableConfig | None = None
+) -> PreparationWorkflowState:
     """Filter job using LLM (LinkedIn source only).
 
-    This node evaluates if a job is suitable based on user preferences.
-    Currently a stub - will be implemented for LinkedIn integration.
+    Evaluates job suitability using per-user filter preferences.
+    Sets state["current_step"] = FILTERED_OUT if the job is rejected;
+    otherwise continues with JOB_FILTERED. Filter errors are non-fatal:
+    the node passes through to avoid blocking the pipeline.
 
     Args:
         state: Current workflow state.
+        config: LangGraph RunnableConfig (contains repository and user_repository).
 
     Returns:
-        Updated state (potentially with is_suitable flag in future).
+        Updated state with filter_result and routing step.
     """
     job_id = state.get("job_id", "unknown")
     logger.info(f"Filtering job {job_id} (LinkedIn source)")
     state["current_step"] = WorkflowStep.FILTERING
 
-    # TODO: Implement LLM-based job filtering for LinkedIn jobs
-    # For now, just pass through (all jobs are considered suitable)
-    logger.warning(f"Job filtering not implemented, passing through for {job_id}")
-    state["current_step"] = WorkflowStep.JOB_FILTERED
+    # Global kill switch
+    if not settings.job_filter_enabled:
+        logger.info(f"Job filtering disabled globally, passing through for {job_id}")
+        state["current_step"] = WorkflowStep.JOB_FILTERED
+        return state
+
+    # Load per-user filter preferences
+    user_filter_prefs = None
+    user_id = state.get("user_id", "")
+    if user_id:
+        user_repo = get_user_repository_from_config(config or {})
+        if user_repo is not None:
+            try:
+                user = await user_repo.get_by_id(user_id)
+                if user:
+                    user_filter_prefs = user.filter_preferences
+            except Exception as e:
+                logger.warning(f"Could not load filter preferences for user {user_id}: {e}")
+
+    # Per-user kill switch
+    if user_filter_prefs is not None and not user_filter_prefs.enabled:
+        logger.info(f"Job filtering disabled by user {user_id}, passing through for {job_id}")
+        state["current_step"] = WorkflowStep.JOB_FILTERED
+        return state
+
+    # Resolve thresholds (prefer user config, fall back to global defaults)
+    reject_threshold = (
+        user_filter_prefs.reject_threshold
+        if user_filter_prefs is not None
+        else settings.job_filter_reject_threshold
+    )
+    warning_threshold = (
+        user_filter_prefs.warning_threshold
+        if user_filter_prefs is not None
+        else settings.job_filter_warning_threshold
+    )
+
+    try:
+        llm_client = create_llm_client()
+        job_filter = JobFilter(llm_client=llm_client)
+
+        job_posting = state.get("job_posting") or {}
+
+        # evaluate_job is synchronous — offload to thread
+        filter_result = await asyncio.to_thread(
+            job_filter.evaluate_job,
+            job_posting,
+            user_filter_prefs,
+        )
+
+        state["filter_result"] = filter_result.model_dump()
+
+        if job_filter.should_reject(filter_result, reject_threshold):
+            logger.info(
+                f"Job {job_id} filtered out: score={filter_result.score}, "
+                f"disqualified={filter_result.disqualified}, "
+                f"reason={filter_result.disqualifier_reason}"
+            )
+            state["current_step"] = BusinessState.FILTERED_OUT
+        else:
+            if job_filter.should_warn(filter_result, warning_threshold):
+                logger.info(
+                    f"Job {job_id} has filter warnings: score={filter_result.score}, "
+                    f"red_flags={filter_result.red_flags}"
+                )
+            else:
+                logger.info(f"Job {job_id} passed filter cleanly: score={filter_result.score}")
+            state["current_step"] = WorkflowStep.JOB_FILTERED
+
+    except Exception as e:
+        # Non-fatal: log and pass through so the pipeline is not blocked
+        logger.warning(
+            f"Job filter evaluation failed for {job_id}, passing through: {e}",
+            exc_info=True,
+        )
+        state["current_step"] = WorkflowStep.JOB_FILTERED
+
+    return state
+
+
+async def save_filtered_out_node(
+    state: PreparationWorkflowState, config: RunnableConfig | None = None
+) -> PreparationWorkflowState:
+    """Save a filtered-out job record to the repository.
+
+    Creates a minimal JobRecord with status=FILTERED_OUT and the filter
+    evaluation result. No CV data is attached since CV generation was skipped.
+
+    Args:
+        state: Current workflow state (must contain filter_result).
+        config: LangGraph RunnableConfig (contains repository).
+
+    Returns:
+        Updated state with final status set.
+    """
+    job_id = state.get("job_id", "unknown")
+    logger.info(f"Saving filtered-out job {job_id} to repository")
+
+    try:
+        job_record = JobRecord(
+            job_id=job_id,
+            user_id=state.get("user_id", ""),
+            source=state.get("source", "linkedin"),
+            mode=state.get("mode", "full"),
+            status=BusinessState.FILTERED_OUT,
+            job_posting=state.get("job_posting"),
+            raw_input=state.get("raw_input"),
+            filter_result=state.get("filter_result"),
+            created_at=datetime.now(tz=timezone.utc),
+            updated_at=datetime.now(tz=timezone.utc),
+        )
+
+        repo = get_repository_from_config(config or {})
+        await repo.create(job_record)
+        logger.info(f"Filtered-out job {job_id} saved successfully")
+
+    except Exception as e:
+        logger.error(f"Failed to save filtered-out job {job_id}: {e}", exc_info=True)
+        state["error_message"] = f"Failed to save filtered-out job: {str(e)}"
 
     return state
 
@@ -355,6 +500,7 @@ async def save_to_db_node(state: PreparationWorkflowState, config: RunnableConfi
             raw_input=state.get("raw_input"),
             current_cv_json=cv_json,
             current_pdf_path=pdf_path,
+            filter_result=state.get("filter_result"),
             application_url=state.get("job_posting", {}).get("url"),
             error_message=state.get("error_message"),
             created_at=datetime.now(tz=timezone.utc),
