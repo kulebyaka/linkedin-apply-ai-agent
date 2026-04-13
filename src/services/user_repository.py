@@ -139,7 +139,7 @@ class UserRepository:
         Args:
             user_id: User ID.
             updates: Dict of fields to update. Supports: display_name,
-                     master_cv_json, search_preferences.
+                     master_cv_json, search_preferences, filter_preferences.
 
         Returns:
             The updated User.

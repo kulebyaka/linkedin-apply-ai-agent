@@ -5,7 +5,7 @@ This module contains models for:
 - UserFilterPreferences: Per-user filter configuration (prompts, thresholds)
 """
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, model_validator
 
 
 class FilterResult(BaseModel):
@@ -41,10 +41,12 @@ class UserFilterPreferences(BaseModel):
 
     natural_language_prefs: str = Field(
         "",
+        max_length=5000,
         description="User's natural language description of what they don't want (textarea 1)",
     )
     custom_prompt: str | None = Field(
         None,
+        max_length=20000,
         description="Custom filter prompt generated/edited by user (textarea 2). None means use default.",
     )
     reject_threshold: int = Field(
@@ -64,15 +66,13 @@ class UserFilterPreferences(BaseModel):
         description="Whether filtering is active for this user",
     )
 
-    @field_validator("warning_threshold")
-    @classmethod
-    def warning_gte_reject(cls, v: int, info) -> int:
-        reject = info.data.get("reject_threshold", 30)
-        if v < reject:
+    @model_validator(mode="after")
+    def warning_gte_reject(self) -> "UserFilterPreferences":
+        if self.warning_threshold < self.reject_threshold:
             raise ValueError(
-                f"warning_threshold ({v}) must be >= reject_threshold ({reject})"
+                f"warning_threshold ({self.warning_threshold}) must be >= reject_threshold ({self.reject_threshold})"
             )
-        return v
+        return self
 
 
 class GeneratePromptRequest(BaseModel):
@@ -80,5 +80,6 @@ class GeneratePromptRequest(BaseModel):
 
     natural_language_prefs: str = Field(
         ...,
+        max_length=5000,
         description="User's natural language description of what they want / don't want in a job",
     )

@@ -31,6 +31,11 @@
 	}
 
 	async function handleSave() {
+		if (warningThreshold < rejectThreshold) {
+			error = 'Warning threshold must be greater than or equal to reject threshold';
+			return;
+		}
+
 		saving = true;
 		error = null;
 		saved = false;
