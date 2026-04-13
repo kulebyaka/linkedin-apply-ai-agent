@@ -26,6 +26,7 @@ class UserTable(Table, tablename="user"):
     display_name = Varchar(length=100)
     master_cv_json = JSON(null=True)
     search_preferences = JSON(null=True)  # Serialized LinkedInSearchParams
+    filter_preferences = JSON(null=True)  # Serialized UserFilterPreferences
     created_at = Timestamptz(index=True)
     updated_at = Timestamptz()
 
@@ -70,6 +71,9 @@ class Job(Table):
 
     # Application data
     application_url = Varchar(length=500, null=True, index=True)
+
+    # Filter result (LLM job evaluation)
+    filter_result = JSON(null=True)
 
     # Error tracking
     error_message = Text(null=True)

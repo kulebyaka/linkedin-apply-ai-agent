@@ -8,6 +8,7 @@ import json
 import logging
 from datetime import datetime, timezone
 
+from src.models.job_filter import UserFilterPreferences
 from src.models.user import User, UserSearchPreferences
 
 logger = logging.getLogger(__name__)
@@ -148,6 +149,13 @@ class UserRepository:
                 db_updates["search_preferences"] = prefs.model_dump()
             else:
                 db_updates["search_preferences"] = prefs
+
+        if "filter_preferences" in updates:
+            fprefs = updates["filter_preferences"]
+            if isinstance(fprefs, UserFilterPreferences):
+                db_updates["filter_preferences"] = fprefs.model_dump()
+            else:
+                db_updates["filter_preferences"] = fprefs
 
         await UserTable.update(db_updates).where(UserTable.id == user_id).run()
 
@@ -316,6 +324,13 @@ class UserRepository:
             else None
         )
 
+        filter_prefs_raw = self._parse_json_field(row.get("filter_preferences"))
+        filter_prefs = (
+            UserFilterPreferences(**filter_prefs_raw)
+            if filter_prefs_raw
+            else None
+        )
+
         cv_json = self._parse_json_field(row.get("master_cv_json"))
 
         created_at = row.get("created_at")
@@ -336,6 +351,7 @@ class UserRepository:
             display_name=row.get("display_name", ""),
             master_cv_json=cv_json,
             search_preferences=search_prefs,
+            filter_preferences=filter_prefs,
             created_at=created_at or datetime.now(tz=timezone.utc),
             updated_at=updated_at or datetime.now(tz=timezone.utc),
         )

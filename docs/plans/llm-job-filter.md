@@ -97,14 +97,14 @@ Implement an LLM-powered job filter that detects hidden disqualifiers (fake remo
 - Modify: `src/services/user_repository.py`
 - Modify: `src/services/job_repository.py`
 
-- [ ] Add `filter_preferences = JSON(null=True)` column to `UserTable` in `src/services/tables.py`
-- [ ] Add `filter_result = JSON(null=True)` column to `Job` table in `src/services/tables.py`
-- [ ] Update `UserRepository.update()` to handle `filter_preferences` field (serialize `UserFilterPreferences` to dict, same pattern as `search_preferences`)
-- [ ] Update `UserRepository._row_to_user()` to parse `filter_preferences` JSON into `UserFilterPreferences` model
-- [ ] Update `SQLiteJobRepository` to read/write `filter_result` field on `JobRecord` (same pattern as existing JSON fields)
-- [ ] Update `InMemoryJobRepository` to store/return `filter_result` field
-- [ ] Write unit tests for filter preferences CRUD and filter_result persistence in both repository implementations
-- [ ] Run project test suite - must pass before task 3
+- [x] Add `filter_preferences = JSON(null=True)` column to `UserTable` in `src/services/tables.py`
+- [x] Add `filter_result = JSON(null=True)` column to `Job` table in `src/services/tables.py`
+- [x] Update `UserRepository.update()` to handle `filter_preferences` field (serialize `UserFilterPreferences` to dict, same pattern as `search_preferences`)
+- [x] Update `UserRepository._row_to_user()` to parse `filter_preferences` JSON into `UserFilterPreferences` model
+- [x] Update `SQLiteJobRepository` to read/write `filter_result` field on `JobRecord` (same pattern as existing JSON fields)
+- [x] Update `InMemoryJobRepository` to store/return `filter_result` field
+- [x] Write unit tests for filter preferences CRUD and filter_result persistence in both repository implementations
+- [x] Run project test suite - must pass before task 3
 
 ### Task 3: Job Filter Service Implementation
 
