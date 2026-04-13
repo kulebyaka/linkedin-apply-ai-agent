@@ -48,6 +48,22 @@ class UserRepository:
 
         await UserTable.create_table(if_not_exists=True).run()
         await MagicLinkTable.create_table(if_not_exists=True).run()
+
+        # Migrate: add columns that may be missing from older databases
+        conn = await engine.get_connection()
+        try:
+            cursor = await conn.execute("PRAGMA table_info(user)")
+            rows = await cursor.fetchall()
+            user_columns = {row["name"] for row in rows}
+            if "filter_preferences" not in user_columns:
+                logger.info("Migrating: adding filter_preferences column to user table")
+                await conn.execute(
+                    "ALTER TABLE user ADD COLUMN filter_preferences JSON NULL"
+                )
+            await conn.commit()
+        finally:
+            await conn.close()
+
         logger.info("UserRepository initialized with engine at %s", db_path)
 
     async def create_user(self, email: str, display_name: str = "") -> User:

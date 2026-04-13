@@ -204,12 +204,12 @@ Implement an LLM-powered job filter that detects hidden disqualifiers (fake remo
 
 ### Task 8: Verify acceptance criteria
 
-- [ ] End-to-end test: configure filter preferences via Settings UI → trigger LinkedIn search (or use fixture replay) → verify jobs are filtered → check filtered_out jobs are saved with reason → check warning jobs appear in HITL with badge → check clean-pass jobs appear without badge
-- [ ] Verify filtered_out jobs do NOT appear in HITL pending queue
-- [ ] Verify filter is skipped for manual/URL source jobs (only LinkedIn)
-- [ ] Run full test suite: `pytest`
-- [ ] Run linter: `uv run ruff check src/ tests/`
-- [ ] Run svelte check: `cd ui && npm run check`
+- [x] End-to-end test: configure filter preferences via Settings UI → trigger LinkedIn search (or use fixture replay) → verify jobs are filtered → check filtered_out jobs are saved with reason → check warning jobs appear in HITL with badge → check clean-pass jobs appear without badge
+- [x] Verify filtered_out jobs do NOT appear in HITL pending queue
+- [x] Verify filter is skipped for manual/URL source jobs (only LinkedIn)
+- [x] Run full test suite: `pytest`
+- [x] Run linter: `uv run ruff check src/ tests/`
+- [x] Run svelte check: `cd ui && npm run check`
 
 ### Task 9: Update documentation
 
