@@ -78,17 +78,17 @@ Implement an LLM-powered job filter that detects hidden disqualifiers (fake remo
 - Modify: `src/models/unified.py`
 - Modify: `src/models/user.py`
 
-- [ ] Create `src/models/job_filter.py` with:
+- [x] Create `src/models/job_filter.py` with:
   - `FilterResult(BaseModel)`: `score: int` (0-100), `red_flags: list[str]`, `disqualified: bool`, `disqualifier_reason: str | None`, `reasoning: str`
   - `UserFilterPreferences(BaseModel)`: `natural_language_prefs: str` (textarea 1 content), `custom_prompt: str | None` (textarea 2 content, null means use default), `reject_threshold: int = 30`, `warning_threshold: int = 70`, `enabled: bool = True`
-- [ ] Add `BusinessState.FILTERED_OUT = "filtered_out"` to `src/models/state_machine.py`
-- [ ] Add `FILTERED_OUT` to `ALLOWED_TRANSITIONS`: reachable from `QUEUED` and `PROCESSING`, terminal (empty outgoing set)
-- [ ] Add `filter_result: dict | None = None` field to `JobRecord` in `src/models/unified.py`
-- [ ] Add `filter_result: dict | None = None` field to `PendingApproval` in `src/models/unified.py`
-- [ ] Add `filter_preferences: UserFilterPreferences | None = None` field to `User` model in `src/models/user.py`
-- [ ] Add `filter_preferences: UserFilterPreferences | None = None` to `UserUpdateRequest` in `src/models/user.py`
-- [ ] Write unit tests for `FilterResult` and `UserFilterPreferences` validation, and `FILTERED_OUT` state transitions
-- [ ] Run project test suite - must pass before task 2
+- [x] Add `BusinessState.FILTERED_OUT = "filtered_out"` to `src/models/state_machine.py`
+- [x] Add `FILTERED_OUT` to `ALLOWED_TRANSITIONS`: reachable from `QUEUED` and `PROCESSING`, terminal (empty outgoing set)
+- [x] Add `filter_result: dict | None = None` field to `JobRecord` in `src/models/unified.py`
+- [x] Add `filter_result: dict | None = None` field to `PendingApproval` in `src/models/unified.py`
+- [x] Add `filter_preferences: UserFilterPreferences | None = None` field to `User` model in `src/models/user.py`
+- [x] Add `filter_preferences: UserFilterPreferences | None = None` to `UserUpdateRequest` in `src/models/user.py`
+- [x] Write unit tests for `FilterResult` and `UserFilterPreferences` validation, and `FILTERED_OUT` state transitions
+- [x] Run project test suite - must pass before task 2
 
 ### Task 2: Database Schema and Repository Updates
 

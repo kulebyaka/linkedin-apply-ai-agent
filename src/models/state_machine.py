@@ -47,6 +47,7 @@ class BusinessState(StrEnum):
     APPLYING = "applying"
     APPLIED = "applied"
     FAILED = "failed"
+    FILTERED_OUT = "filtered_out"
 
 
 class InvalidStateTransitionError(Exception):
@@ -73,11 +74,13 @@ ALLOWED_TRANSITIONS: dict[BusinessState, set[BusinessState]] = {
         BusinessState.CV_READY,
         BusinessState.PENDING_REVIEW,
         BusinessState.FAILED,
+        BusinessState.FILTERED_OUT,
     },
     BusinessState.PROCESSING: {
         BusinessState.CV_READY,
         BusinessState.PENDING_REVIEW,
         BusinessState.FAILED,
+        BusinessState.FILTERED_OUT,
     },
     BusinessState.CV_READY: set(),  # Terminal (MVP mode)
     BusinessState.PENDING_REVIEW: {
@@ -103,6 +106,7 @@ ALLOWED_TRANSITIONS: dict[BusinessState, set[BusinessState]] = {
     BusinessState.FAILED: {
         BusinessState.RETRYING,
     },
+    BusinessState.FILTERED_OUT: set(),  # Terminal
 }
 
 

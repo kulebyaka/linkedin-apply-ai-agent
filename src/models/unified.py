@@ -103,6 +103,7 @@ class PendingApproval(BaseModel):
     job_posting: dict = Field(..., description="Normalized job posting data")
     cv_json: dict = Field(..., description="Generated tailored CV as JSON")
     pdf_path: str | None = Field(None, description="Path to generated PDF file")
+    filter_result: dict | None = Field(None, description="LLM filter evaluation result")
     attempt_count: int = Field(0, description="Number of CV composition attempts")
     created_at: datetime
     source: Literal["url", "manual", "linkedin"]
@@ -138,6 +139,9 @@ class JobRecord(BaseModel):
 
     # Application data
     application_url: str | None = None
+
+    # Filter result (from LLM job evaluation)
+    filter_result: dict | None = None
 
     # Error tracking
     error_message: str | None = None
