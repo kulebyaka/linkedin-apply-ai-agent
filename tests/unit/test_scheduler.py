@@ -7,8 +7,8 @@ import pytest
 
 from src.models.job import ScrapedJob
 from src.models.user import User, UserSearchPreferences
-from src.services.job_queue import JobQueue
-from src.services.scheduler import LinkedInSearchScheduler
+from src.services.jobs.job_queue import JobQueue
+from src.services.jobs.scheduler import LinkedInSearchScheduler
 
 pytestmark = pytest.mark.asyncio
 
@@ -378,7 +378,7 @@ class TestLinkedInSearchAPI:
             from src.config.settings import Settings
             from src.context import AppContext
             from src.models.user import User
-            from src.services.job_queue import JobQueue
+            from src.services.jobs.job_queue import JobQueue
 
             # Create test settings that disable fixture replay mode
             test_settings = Settings(_env_file=None, seed_jobs_from_file=False)

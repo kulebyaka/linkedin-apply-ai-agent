@@ -31,7 +31,7 @@ class UserRepository:
         """
         from pathlib import Path
 
-        from .tables import MagicLinkTable, UserTable
+        from src.services.db.tables import MagicLinkTable, UserTable
 
         # Skip if engine already configured (e.g., by SQLiteJobRepository)
         if UserTable._meta._db is not None:
@@ -78,7 +78,7 @@ class UserRepository:
         """
         import uuid
 
-        from .tables import UserTable
+        from src.services.db.tables import UserTable
 
         user_id = str(uuid.uuid4())
         now = datetime.now(tz=timezone.utc)
@@ -113,7 +113,7 @@ class UserRepository:
         Returns:
             User if found, None otherwise.
         """
-        from .tables import UserTable
+        from src.services.db.tables import UserTable
 
         row = await UserTable.select().where(UserTable.id == user_id).first().run()
         if not row:
@@ -126,7 +126,7 @@ class UserRepository:
         Returns:
             User if found, None otherwise.
         """
-        from .tables import UserTable
+        from src.services.db.tables import UserTable
 
         row = await UserTable.select().where(UserTable.email == email).first().run()
         if not row:
@@ -147,7 +147,7 @@ class UserRepository:
         Raises:
             KeyError: If user not found.
         """
-        from .tables import UserTable
+        from src.services.db.tables import UserTable
 
         existing = await UserTable.select().where(UserTable.id == user_id).first().run()
         if not existing:
@@ -183,7 +183,7 @@ class UserRepository:
         Returns:
             List of Users with search_preferences set.
         """
-        from .tables import UserTable
+        from src.services.db.tables import UserTable
 
         rows = (
             await UserTable.select()
@@ -216,7 +216,7 @@ class UserRepository:
             token: The magic link token.
             expires_at: When the token expires.
         """
-        from .tables import MagicLinkTable
+        from src.services.db.tables import MagicLinkTable
 
         await MagicLinkTable.insert(
             MagicLinkTable(
@@ -244,7 +244,7 @@ class UserRepository:
         Returns:
             The email address if token is valid, None otherwise.
         """
-        from .tables import MagicLinkTable
+        from src.services.db.tables import MagicLinkTable
 
         row = (
             await MagicLinkTable.select()
@@ -296,7 +296,7 @@ class UserRepository:
         Returns:
             Number of tokens deleted.
         """
-        from .tables import MagicLinkTable
+        from src.services.db.tables import MagicLinkTable
 
         now = datetime.now(tz=timezone.utc)
 

@@ -142,8 +142,8 @@ async def process_queue(
             "job_repository is required: workflow nodes depend on it for state persistence"
         )
     if workflow is None or master_cv_loader is None:
-        from ..agents._shared import load_master_cv
-        from ..agents.preparation_workflow import create_preparation_workflow
+        from src.agents._shared import load_master_cv
+        from src.agents.preparation_workflow import create_preparation_workflow
         if workflow is None:
             workflow = create_preparation_workflow()
         if master_cv_loader is None:
@@ -386,7 +386,7 @@ class ConsumerManager:
                 ctx.register_workflow(job_id, thread_id, "preparation", user_id=user_id)
             )
 
-        from ..agents._shared import load_master_cv
+        from src.agents._shared import load_master_cv
 
         task = asyncio.create_task(
             process_queue(

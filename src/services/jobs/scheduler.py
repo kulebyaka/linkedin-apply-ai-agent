@@ -18,12 +18,12 @@ from typing import TYPE_CHECKING
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from src.config.settings import Settings
-from src.services.job_queue import JobQueue
-from src.services.linkedin_search import LinkedInSearchParams
+from .job_queue import JobQueue
+from src.services.linkedin.linkedin_search import LinkedInSearchParams
 
 if TYPE_CHECKING:
-    from src.services.linkedin_scraper import LinkedInJobScraper
-    from src.services.user_repository import UserRepository
+    from src.services.linkedin.linkedin_scraper import LinkedInJobScraper
+    from src.services.auth.user_repository import UserRepository
 
 logger = logging.getLogger(__name__)
 
@@ -153,7 +153,7 @@ class LinkedInSearchScheduler:
                     fixture_path = getattr(self.settings, "scraped_jobs_path", None)
                     if jobs and isinstance(fixture_path, str):
                         try:
-                            from src.services.job_fixtures import save_scraped_jobs
+                            from .job_fixtures import save_scraped_jobs
                             save_scraped_jobs(jobs, fixture_path)
                         except Exception:
                             logger.warning(

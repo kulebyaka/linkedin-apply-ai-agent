@@ -24,9 +24,9 @@ from abc import ABC, abstractmethod
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from ..models.cv_attempt import CVCompositionAttempt
-from ..models.state_machine import BusinessState, validate_transition
-from ..models.unified import JobRecord
+from src.models.cv_attempt import CVCompositionAttempt
+from src.models.state_machine import BusinessState, validate_transition
+from src.models.unified import JobRecord
 
 logger = logging.getLogger(__name__)
 

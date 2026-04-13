@@ -36,7 +36,7 @@ def eval_llm_client():
 @pytest.fixture
 def cv_composer_eval(eval_llm_client):
     """CV Composer with real LLM for eval tests"""
-    from src.services.cv_composer import CVComposer
+    from src.services.cv.cv_composer import CVComposer
     return CVComposer(llm_client=eval_llm_client)
 
 

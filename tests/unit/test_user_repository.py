@@ -10,7 +10,7 @@ import pytest
 import pytest_asyncio
 
 from src.models.user import UserSearchPreferences
-from src.services.user_repository import UserRepository
+from src.services.auth.user_repository import UserRepository
 
 
 @pytest_asyncio.fixture
@@ -18,7 +18,7 @@ async def db_and_repo(tmp_path):
     """Set up a temporary SQLite database with user tables and return a UserRepository."""
     from piccolo.engine.sqlite import SQLiteEngine
 
-    from src.services.tables import MagicLinkTable, UserTable
+    from src.services.db.tables import MagicLinkTable, UserTable
 
     db_path = tmp_path / "test_users.db"
     engine = SQLiteEngine(path=str(db_path))

@@ -6,7 +6,7 @@ import pytest
 
 from src.context import AppContext
 from src.models.unified import JobDescriptionInput, JobRecord, JobSubmitRequest
-from src.services.job_orchestrator import JobOrchestrator
+from src.services.jobs.job_orchestrator import JobOrchestrator
 
 pytestmark = pytest.mark.asyncio
 

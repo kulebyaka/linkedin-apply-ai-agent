@@ -10,7 +10,7 @@ import pytest
 import pytest_asyncio
 
 from src.models.unified import JobRecord
-from src.services.job_repository import (
+from src.services.db.job_repository import (
     RepositoryError,
     SQLiteJobRepository,
 )
@@ -494,7 +494,7 @@ async def test_data_persists_after_close_and_reopen(tmp_path):
 @pytest.mark.asyncio
 async def test_get_repository_factory_memory():
     """Test get_repository factory returns InMemoryJobRepository."""
-    from src.services.job_repository import InMemoryJobRepository, get_repository
+    from src.services.db.job_repository import InMemoryJobRepository, get_repository
 
     repo = get_repository(repo_type="memory")
     assert isinstance(repo, InMemoryJobRepository)
@@ -503,7 +503,7 @@ async def test_get_repository_factory_memory():
 @pytest.mark.asyncio
 async def test_get_repository_factory_sqlite(tmp_path):
     """Test get_repository factory returns SQLiteJobRepository."""
-    from src.services.job_repository import SQLiteJobRepository, get_repository
+    from src.services.db.job_repository import SQLiteJobRepository, get_repository
 
     db_path = tmp_path / "factory_test.db"
     repo = get_repository(repo_type="sqlite", db_path=str(db_path))
@@ -513,7 +513,7 @@ async def test_get_repository_factory_sqlite(tmp_path):
 @pytest.mark.asyncio
 async def test_get_repository_factory_invalid():
     """Test get_repository factory raises error for invalid type."""
-    from src.services.job_repository import get_repository
+    from src.services.db.job_repository import get_repository
 
     with pytest.raises(ValueError) as exc:
         get_repository(repo_type="invalid")

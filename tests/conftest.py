@@ -116,7 +116,7 @@ def llm_client(request):
 @pytest.fixture
 def cv_composer(llm_client):
     """Create CV composer with appropriate LLM client"""
-    from src.services.cv_composer import CVComposer
+    from src.services.cv.cv_composer import CVComposer
     return CVComposer(llm_client=llm_client)
 
 

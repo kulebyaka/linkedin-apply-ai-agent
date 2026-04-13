@@ -2,7 +2,7 @@
 
 from urllib.parse import parse_qs, urlparse
 
-from src.services.linkedin_search import (
+from src.services.linkedin.linkedin_search import (
     LINKEDIN_JOBS_SEARCH_BASE,
     LinkedInSearchParams,
     LinkedInSearchURLBuilder,

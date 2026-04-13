@@ -17,7 +17,7 @@ from typing import Any
 
 from src.llm.provider import BaseLLMClient
 from src.models.job_filter import FilterResult, UserFilterPreferences
-from src.services.cv_prompts import PromptLoader
+from src.services.cv.cv_prompts import PromptLoader
 
 logger = logging.getLogger(__name__)
 

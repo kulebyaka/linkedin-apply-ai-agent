@@ -37,9 +37,9 @@ from src.models.user import (
     UserSearchPreferences,
     UserUpdateRequest,
 )
-from src.services.hitl_processor import HITLProcessor
-from src.services.job_orchestrator import JobOrchestrator
-from src.services.job_queue import ConsumerManager
+from src.services.jobs.hitl_processor import HITLProcessor
+from src.services.jobs.job_orchestrator import JobOrchestrator
+from src.services.jobs.job_queue import ConsumerManager
 from src.utils.logger import setup_api_logger
 
 settings = get_settings()
@@ -160,7 +160,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             "Fixture replay mode enabled — LinkedIn scraping disabled. "
             "Loading jobs from %s", settings.scraped_jobs_path,
         )
-        from src.services.job_fixtures import enqueue_from_fixtures
+        from src.services.jobs.job_fixtures import enqueue_from_fixtures
 
         result = await enqueue_from_fixtures(
             settings.scraped_jobs_path,
@@ -176,9 +176,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             _consumer_manager.start(ctx)
     elif settings.linkedin_search_schedule_enabled:
         try:
-            from src.services.browser_automation import LinkedInAutomation
-            from src.services.linkedin_scraper import LinkedInJobScraper
-            from src.services.scheduler import LinkedInSearchScheduler
+            from src.services.linkedin.browser_automation import LinkedInAutomation
+            from src.services.linkedin.linkedin_scraper import LinkedInJobScraper
+            from src.services.jobs.scheduler import LinkedInSearchScheduler
 
             browser = LinkedInAutomation(settings)
             await browser.initialize()
@@ -416,7 +416,7 @@ async def generate_filter_prompt(
     """
     try:
         from src.agents._shared import create_llm_client
-        from src.services.job_filter import JobFilter, JobFilterError
+        from src.services.jobs.job_filter import JobFilter, JobFilterError
 
         llm_client = create_llm_client()
         job_filter = JobFilter(llm_client)
@@ -508,9 +508,9 @@ async def trigger_linkedin_search(request: Request, user: CurrentUser):
         if ctx.scheduler is None:
             # Create a temporary scheduler for one-off search
             try:
-                from src.services.browser_automation import LinkedInAutomation
-                from src.services.linkedin_scraper import LinkedInJobScraper
-                from src.services.scheduler import LinkedInSearchScheduler
+                from src.services.linkedin.browser_automation import LinkedInAutomation
+                from src.services.linkedin.linkedin_scraper import LinkedInJobScraper
+                from src.services.jobs.scheduler import LinkedInSearchScheduler
 
                 if ctx.browser is None:
                     browser = LinkedInAutomation(settings)
@@ -584,7 +584,7 @@ async def replay_fixtures(request: Request, user: CurrentUser, limit: Annotated[
     """
     ctx = _get_ctx(request)
 
-    from src.services.job_fixtures import enqueue_from_fixtures
+    from src.services.jobs.job_fixtures import enqueue_from_fixtures
 
     path = settings.scraped_jobs_path
     result = await enqueue_from_fixtures(
@@ -723,7 +723,7 @@ async def get_job_cv_html(job_id: str, request: Request, user: CurrentUser) -> H
             raise HTTPException(404, "CV JSON not found for this job")
 
         # Render HTML using existing template system
-        from src.services.pdf_generator import PDFGenerator
+        from src.services.cv.pdf_generator import PDFGenerator
 
         # Get template name from job state
         template_name = "compact"  # Default template

@@ -40,24 +40,31 @@ src/
 │   └── retry_workflow.py       # Re-compose CV with user feedback
 ├── llm/                        # LLM provider integrations
 │   └── provider.py             # Abstract base + provider implementations
-├── services/                   # Business logic services
-│   ├── auth.py                 # AuthService: magic link + JWT authentication
-│   ├── user_repository.py      # UserRepository: user CRUD + search prefs + magic links
-│   ├── job_orchestrator.py     # Domain service: job submission & status queries
-│   ├── hitl_processor.py       # Domain service: HITL decision processing
-│   ├── job_source.py           # Job source adapters (URL, manual, LinkedIn)
-│   ├── job_filter.py           # LLM-based job filtering with two-threshold routing
-│   ├── job_repository.py       # Data access layer (in-memory + SQLite via Piccolo)
-│   ├── cv_composer.py          # LLM-powered CV tailoring
-│   ├── cv_validator.py         # CV validation with configurable hallucination policy
-│   ├── cv_prompts.py           # CV composition prompts
-│   ├── pdf_generator.py        # PDF generation from JSON (WeasyPrint)
-│   ├── browser_automation.py   # Playwright stealth browser with cookie auth
-│   ├── linkedin_scraper.py     # LinkedIn job search results scraper
-│   ├── linkedin_search.py      # LinkedIn search URL builder + filters
-│   ├── job_queue.py            # Async job queue + ConsumerManager for lifecycle
-│   ├── scheduler.py            # APScheduler-based per-user LinkedIn search scheduler
-│   └── notification.py         # Webhook/email notifications (skeleton)
+├── services/                   # Business logic services (grouped by domain)
+│   ├── auth/                   # Authentication & user management
+│   │   ├── auth.py             # AuthService: magic link + JWT authentication
+│   │   └── user_repository.py  # UserRepository: user CRUD + search prefs + magic links
+│   ├── cv/                     # CV composition, validation & PDF generation
+│   │   ├── cv_composer.py      # LLM-powered CV tailoring
+│   │   ├── cv_validator.py     # CV validation with configurable hallucination policy
+│   │   ├── cv_prompts.py       # CV composition prompts + PromptLoader
+│   │   └── pdf_generator.py    # PDF generation from JSON (WeasyPrint)
+│   ├── db/                     # Persistence layer (Piccolo ORM + repository)
+│   │   ├── job_repository.py   # Data access layer (in-memory + SQLite via Piccolo)
+│   │   ├── tables.py           # Piccolo ORM table definitions
+│   │   └── piccolo_app.py      # Piccolo app config for migrations
+│   ├── jobs/                   # Job pipeline, queue, filter, scheduling, HITL
+│   │   ├── job_orchestrator.py # Domain service: job submission & status queries
+│   │   ├── hitl_processor.py   # Domain service: HITL decision processing
+│   │   ├── job_filter.py       # LLM-based job filtering with two-threshold routing
+│   │   ├── job_source.py       # Job source adapters (URL, manual, LinkedIn)
+│   │   ├── job_queue.py        # Async job queue + ConsumerManager for lifecycle
+│   │   ├── job_fixtures.py     # Record/replay scraped jobs for testing
+│   │   └── scheduler.py        # APScheduler-based per-user LinkedIn search scheduler
+│   └── linkedin/               # LinkedIn scraping & browser automation
+│       ├── browser_automation.py # Playwright stealth browser with cookie auth
+│       ├── linkedin_scraper.py # LinkedIn job search results scraper
+│       └── linkedin_search.py  # LinkedIn search URL builder + filters
 ├── models/                     # Pydantic data models
 │   ├── job.py                  # Job posting models
 │   ├── cv.py                   # CV data models

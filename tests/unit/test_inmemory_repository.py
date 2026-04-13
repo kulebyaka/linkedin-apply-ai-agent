@@ -9,7 +9,7 @@ import asyncio
 import pytest
 
 from src.models.unified import JobRecord
-from src.services.job_repository import InMemoryJobRepository, RepositoryError
+from src.services.db.job_repository import InMemoryJobRepository, RepositoryError
 
 pytestmark = pytest.mark.asyncio
 

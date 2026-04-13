@@ -14,14 +14,14 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
 
-    from src.services.auth import AuthService
-    from src.services.browser_automation import LinkedInAutomation
-    from src.services.hitl_processor import HITLProcessor
-    from src.services.job_orchestrator import JobOrchestrator
-    from src.services.job_queue import JobQueue
-    from src.services.job_repository import JobRepository
-    from src.services.scheduler import LinkedInSearchScheduler
-    from src.services.user_repository import UserRepository
+    from src.services.auth.auth import AuthService
+    from src.services.auth.user_repository import UserRepository
+    from src.services.db.job_repository import JobRepository
+    from src.services.jobs.hitl_processor import HITLProcessor
+    from src.services.jobs.job_orchestrator import JobOrchestrator
+    from src.services.jobs.job_queue import JobQueue
+    from src.services.jobs.scheduler import LinkedInSearchScheduler
+    from src.services.linkedin.browser_automation import LinkedInAutomation
 
 from src.config.settings import Settings, get_settings
 
@@ -105,12 +105,12 @@ def create_app_context(
     """
     from src.agents.preparation_workflow import create_preparation_workflow
     from src.agents.retry_workflow import create_retry_workflow
-    from src.services.auth import AuthService
-    from src.services.hitl_processor import HITLProcessor
-    from src.services.job_orchestrator import JobOrchestrator
-    from src.services.job_queue import JobQueue
-    from src.services.job_repository import get_repository
-    from src.services.user_repository import UserRepository
+    from src.services.auth.auth import AuthService
+    from src.services.auth.user_repository import UserRepository
+    from src.services.db.job_repository import get_repository
+    from src.services.jobs.hitl_processor import HITLProcessor
+    from src.services.jobs.job_orchestrator import JobOrchestrator
+    from src.services.jobs.job_queue import JobQueue
 
     if settings is None:
         settings = get_settings()

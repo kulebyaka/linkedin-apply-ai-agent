@@ -17,10 +17,10 @@ from pathlib import Path
 
 from ..config.settings import get_settings
 from ..llm.provider import LLMClientFactory, LLMProvider
-from ..services.cv_composer import CVComposer
-from ..services.cv_validator import CVValidator, HallucinationPolicy
-from ..services.job_repository import JobRepository
-from ..services.pdf_generator import PDFGenerator
+from src.services.cv.cv_composer import CVComposer
+from src.services.cv.cv_validator import CVValidator, HallucinationPolicy
+from src.services.db.job_repository import JobRepository
+from src.services.cv.pdf_generator import PDFGenerator
 
 logger = logging.getLogger(__name__)
 settings = get_settings()

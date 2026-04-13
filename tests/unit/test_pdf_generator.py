@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from src.services.pdf_generator import PDFGenerator
+from src.services.cv.pdf_generator import PDFGenerator
 
 
 # WeasyPrint requires system libraries (Pango, GLib).  On macOS they are found

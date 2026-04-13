@@ -8,8 +8,8 @@ import pytest
 
 from src.llm.provider import BaseLLMClient
 from src.models.cv import CVLLMOutput, JobSummary
-from src.services.cv_composer import CVComposer, CVCompositionError
-from src.services.cv_validator import (
+from src.services.cv.cv_composer import CVComposer, CVCompositionError
+from src.services.cv.cv_validator import (
     CVHallucinationError,
     CVValidator,
     HallucinationPolicy,
@@ -224,7 +224,7 @@ class TestComposeCVIntegration:
 
     def test_compose_cv_applies_length_limits(self, mock_llm_client, master_cv, job_posting):
         """Test that compose_cv enforces length limits from settings"""
-        from src.services.cv_composer import CVComposerSettings
+        from src.services.cv.cv_composer import CVComposerSettings
 
         settings = CVComposerSettings(cv_max_experiences=1, cv_max_skills=1)
         composer = CVComposer(llm_client=mock_llm_client, settings=settings)
@@ -363,7 +363,7 @@ class TestValidation:
             "technologies": [],
         })
 
-        with patch("src.services.cv_composer.logger") as mock_logger:
+        with patch("src.services.cv.cv_composer.logger") as mock_logger:
             cv_composer._validate_output(valid_tailored_cv, master_cv)
             mock_logger.warning.assert_called()
 
@@ -377,7 +377,7 @@ class TestValidation:
             "end_date": "2019-06-01",
         })
 
-        with patch("src.services.cv_composer.logger") as mock_logger:
+        with patch("src.services.cv.cv_composer.logger") as mock_logger:
             cv_composer._validate_output(valid_tailored_cv, master_cv)
             mock_logger.warning.assert_called()
 
@@ -599,7 +599,7 @@ class TestCVValidator:
         })
         validator = CVValidator(master_cv=master_cv, policy=HallucinationPolicy.WARN)
 
-        with patch("src.services.cv_validator.logger") as mock_logger:
+        with patch("src.services.cv.cv_validator.logger") as mock_logger:
             result = validator.validate_output(valid_tailored_cv)
             assert isinstance(result, CVLLMOutput)
             mock_logger.warning.assert_called_once()

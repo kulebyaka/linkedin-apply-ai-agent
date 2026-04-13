@@ -12,5 +12,5 @@ DB = SQLiteEngine(path=settings.db_path)
 
 # Register Piccolo apps
 APP_REGISTRY = AppRegistry(
-    apps=["src.services.piccolo_app"]
+    apps=["src.services.db.piccolo_app"]
 )

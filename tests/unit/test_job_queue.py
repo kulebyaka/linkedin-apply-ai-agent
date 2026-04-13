@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.models.job import ScrapedJob
-from src.services.job_queue import ConsumerManager, JobQueue, QueueItem, process_queue
-from src.services.job_source import LinkedInJobAdapter
+from src.services.jobs.job_queue import ConsumerManager, JobQueue, QueueItem, process_queue
+from src.services.jobs.job_source import LinkedInJobAdapter
 
 pytestmark = pytest.mark.asyncio
 
@@ -436,7 +436,7 @@ class TestPutBatchDroppedDetails:
             _job("c", title="PM"),
             _job("d", title="Analyst"),
         ]
-        with caplog.at_level(logging.WARNING, logger="src.services.job_queue"):
+        with caplog.at_level(logging.WARNING, logger="src.services.jobs.job_queue"):
             count = await q.put_batch(jobs)
 
         assert count == 2
@@ -513,7 +513,7 @@ class TestConsumerManagerStartStop:
         ctx = _make_mock_ctx()
 
         # Patch process_queue to exit immediately
-        with patch("src.services.job_queue.process_queue", new_callable=AsyncMock, return_value=0):
+        with patch("src.services.jobs.job_queue.process_queue", new_callable=AsyncMock, return_value=0):
             task = cm.start(ctx)
             assert task is not None
             assert cm.task is task
@@ -533,7 +533,7 @@ class TestConsumerManagerStartStop:
             await asyncio.sleep(3600)
             return 0
 
-        with patch("src.services.job_queue.process_queue", side_effect=_hang_forever):
+        with patch("src.services.jobs.job_queue.process_queue", side_effect=_hang_forever):
             cm.start(ctx)
             assert cm.task is not None
             assert not cm.task.done()
@@ -557,7 +557,7 @@ class TestConsumerManagerStartStop:
             await asyncio.sleep(0.05)
             return 0
 
-        with patch("src.services.job_queue.process_queue", side_effect=_crash_then_stop):
+        with patch("src.services.jobs.job_queue.process_queue", side_effect=_crash_then_stop):
             cm.start(ctx)
             # Wait for crash and restart cycle
             await asyncio.sleep(0.3)
@@ -572,8 +572,8 @@ class TestConsumerManagerStartStop:
         async def _always_crash(queue, **kwargs):
             raise RuntimeError("persistent failure")
 
-        with patch("src.services.job_queue.process_queue", side_effect=_always_crash):
-            with caplog.at_level(logging.CRITICAL, logger="src.services.job_queue"):
+        with patch("src.services.jobs.job_queue.process_queue", side_effect=_always_crash):
+            with caplog.at_level(logging.CRITICAL, logger="src.services.jobs.job_queue"):
                 cm.start(ctx)
                 # Wait for crashes to exhaust restarts: crash 1 (delay 0.01), crash 2 (delay 0.02), crash 3 gives up
                 await asyncio.sleep(0.5)

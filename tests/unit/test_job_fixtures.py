@@ -6,12 +6,12 @@ from unittest.mock import AsyncMock
 import pytest
 
 from src.models.job import ScrapedJob
-from src.services.job_fixtures import (
+from src.services.jobs.job_fixtures import (
     enqueue_from_fixtures,
     load_scraped_jobs,
     save_scraped_jobs,
 )
-from src.services.job_queue import JobQueue
+from src.services.jobs.job_queue import JobQueue
 
 
 def _make_job(job_id: str = "test-001", title: str = "Engineer") -> ScrapedJob:

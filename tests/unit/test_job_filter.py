@@ -7,7 +7,7 @@ import pytest
 
 from src.llm.provider import BaseLLMClient
 from src.models.job_filter import FilterResult, UserFilterPreferences
-from src.services.job_filter import JobFilter, JobFilterError
+from src.services.jobs.job_filter import JobFilter, JobFilterError
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 

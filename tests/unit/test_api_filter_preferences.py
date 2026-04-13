@@ -269,7 +269,7 @@ class TestGenerateFilterPrompt:
 
         with (
             patch.dict(sys.modules, {"src.agents._shared": _mock_shared_module()}),
-            patch("src.services.job_filter.JobFilter", return_value=mock_filter_instance),
+            patch("src.services.jobs.job_filter.JobFilter", return_value=mock_filter_instance),
         ):
             resp = client.post(
                 "/api/users/me/filter-preferences/generate-prompt",
@@ -288,7 +288,7 @@ class TestGenerateFilterPrompt:
 
         with (
             patch.dict(sys.modules, {"src.agents._shared": _mock_shared_module()}),
-            patch("src.services.job_filter.JobFilter", return_value=mock_filter_instance),
+            patch("src.services.jobs.job_filter.JobFilter", return_value=mock_filter_instance),
         ):
             client.post(
                 "/api/users/me/filter-preferences/generate-prompt",
@@ -313,7 +313,7 @@ class TestGenerateFilterPrompt:
 
     def test_500_when_job_filter_raises(self, api_client):
         client, _ = api_client
-        from src.services.job_filter import JobFilterError
+        from src.services.jobs.job_filter import JobFilterError
 
         mock_filter_instance = MagicMock()
         mock_filter_instance.generate_prompt_from_preferences.side_effect = JobFilterError(
@@ -321,7 +321,7 @@ class TestGenerateFilterPrompt:
         )
         with (
             patch.dict(sys.modules, {"src.agents._shared": _mock_shared_module()}),
-            patch("src.services.job_filter.JobFilter", return_value=mock_filter_instance),
+            patch("src.services.jobs.job_filter.JobFilter", return_value=mock_filter_instance),
         ):
             resp = client.post(
                 "/api/users/me/filter-preferences/generate-prompt",

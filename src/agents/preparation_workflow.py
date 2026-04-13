@@ -24,9 +24,9 @@ from ..config.settings import get_settings
 from ..models.cv_attempt import CVCompositionAttempt
 from ..models.state_machine import BusinessState, WorkflowStep
 from ..models.unified import JobRecord
-from ..services.job_filter import JobFilter
-from ..services.job_fixtures import get_cached_llm_response, save_llm_response
-from ..services.job_source import JobExtractionError, JobSourceFactory
+from src.services.jobs.job_filter import JobFilter
+from src.services.jobs.job_fixtures import get_cached_llm_response, save_llm_response
+from src.services.jobs.job_source import JobExtractionError, JobSourceFactory
 from ._shared import (
     compose_cv,
     create_llm_client,

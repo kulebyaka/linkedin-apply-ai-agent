@@ -11,7 +11,7 @@ import pytest_asyncio
 
 from src.models.cv_attempt import CVCompositionAttempt
 from src.models.unified import JobRecord
-from src.services.job_repository import InMemoryJobRepository, SQLiteJobRepository
+from src.services.db.job_repository import InMemoryJobRepository, SQLiteJobRepository
 
 pytestmark = pytest.mark.asyncio
 

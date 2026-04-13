@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from src.models.job import ScrapedJob
-from src.services.job_queue import JobQueue, _scoped_job_id
+from .job_queue import JobQueue, _scoped_job_id
 
 logger = logging.getLogger(__name__)
 

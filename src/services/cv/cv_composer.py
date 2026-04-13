@@ -13,10 +13,10 @@ from src.models.cv import (
     CVLLMOutput,
     JobSummary,
 )
-from src.services.cv_prompts import CVPromptManager
+from .cv_prompts import CVPromptManager
 
 if TYPE_CHECKING:
-    from src.services.cv_validator import CVValidator
+    from .cv_validator import CVValidator
 
 logger = logging.getLogger(__name__)
 

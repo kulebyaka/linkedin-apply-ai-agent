@@ -24,7 +24,7 @@ from pathlib import Path
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.services.pdf_generator import PDFGenerator
+from src.services.cv.pdf_generator import PDFGenerator
 
 
 def test_template(template_name: str, cv_json: dict, verbose: bool = True) -> bool:

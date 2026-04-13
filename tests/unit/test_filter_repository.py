@@ -11,7 +11,7 @@ import pytest_asyncio
 
 from src.models.job_filter import UserFilterPreferences
 from src.models.unified import JobRecord
-from src.services.job_repository import InMemoryJobRepository, SQLiteJobRepository
+from src.services.db.job_repository import InMemoryJobRepository, SQLiteJobRepository
 
 TEST_USER_ID = "user-filter-test"
 
@@ -53,7 +53,7 @@ async def user_repo(tmp_path):
     """Set up a temporary SQLite database with user tables."""
     from piccolo.engine.sqlite import SQLiteEngine
 
-    from src.services.tables import MagicLinkTable, UserTable
+    from src.services.db.tables import MagicLinkTable, UserTable
 
     db_path = tmp_path / "test_filter_users.db"
     engine = SQLiteEngine(path=str(db_path))
@@ -64,7 +64,7 @@ async def user_repo(tmp_path):
     await UserTable.create_table(if_not_exists=True).run()
     await MagicLinkTable.create_table(if_not_exists=True).run()
 
-    from src.services.user_repository import UserRepository
+    from src.services.auth.user_repository import UserRepository
 
     repo = UserRepository()
     yield repo
@@ -341,7 +341,7 @@ async def test_sqlite_migration_adds_filter_result_column(tmp_path):
     """
     from piccolo.engine.sqlite import SQLiteEngine
 
-    from src.services.tables import CVAttemptTable, Job, MagicLinkTable, UserTable
+    from src.services.db.tables import CVAttemptTable, Job, MagicLinkTable, UserTable
 
     db_path = tmp_path / "migrate_test.db"
     engine = SQLiteEngine(path=str(db_path))

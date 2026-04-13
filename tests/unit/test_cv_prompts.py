@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from src.services.cv_prompts import CVPromptManager, PromptLoader
+from src.services.cv.cv_prompts import CVPromptManager, PromptLoader
 
 
 class TestPromptLoader:

@@ -41,7 +41,12 @@ Every hour, based on a set of filters (in the future, filters will be built base
 | **LinkedIn Search Builder** | ✅ Complete | `src/services/linkedin_search.py` - URL builder with filter models. |
 | **Async Job Queue** | ✅ Complete | `src/services/job_queue.py` - queue with ConsumerManager. |
 | **LinkedIn Search Scheduler** | ✅ Complete | `src/services/scheduler.py` - APScheduler with API endpoints. |
-| **Job Filter (LLM)** | 🔴 Pending | `src/services/job_filter.py` skeleton exists. |
+| **Multi-User Auth** | ✅ Complete | `src/services/auth.py` - magic link + JWT, `src/services/user_repository.py` - user CRUD. |
+| **Per-User Data Ownership** | ✅ Complete | user_id FK on all job data, per-user CV storage, search prefs, filter prefs. |
+| **Per-User Search Scheduler** | ✅ Complete | `src/services/scheduler.py` - iterates users with search preferences. |
+| **Frontend Auth Flow** | ✅ Complete | Login, magic link verify, protected routes, auth state store. |
+| **Settings UI** | ✅ Complete | Profile editing, CV upload (JSON), search preferences, filter preferences. |
+| **Job Filter (LLM)** | ✅ Complete | `src/services/job_filter.py` — two-threshold routing, hidden disqualifier detection, per-user prompt, HITL badge. |
 
 ## Two-Workflow Pipeline Architecture
 
@@ -111,19 +116,58 @@ Defined in `src/services/job_source.py`:
 
 ## API Endpoints
 
+### Authentication (public)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/auth/login` | Request magic link email |
+| GET | `/api/auth/verify?token=...` | Verify magic link, set JWT cookie |
+| GET | `/api/auth/me` | Get current authenticated user |
+| POST | `/api/auth/logout` | Clear auth cookie |
+
+### User Settings (requires auth)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| PUT | `/api/users/me` | Update user profile (display_name, master_cv_json, search_preferences) |
+| GET | `/api/users/me/search-preferences` | Get current search preferences |
+| PUT | `/api/users/me/search-preferences` | Update search preferences |
+| GET | `/api/users/me/filter-preferences` | Get current filter preferences |
+| PUT | `/api/users/me/filter-preferences` | Update filter preferences |
+| POST | `/api/users/me/filter-preferences/generate-prompt` | Generate filter prompt from natural language description |
+
+### Jobs & HITL (requires auth, user-scoped)
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/api/jobs/submit` | Submit job for CV generation (URL or manual input) |
 | GET | `/api/jobs/{job_id}/status` | Get job status and details |
 | GET | `/api/jobs/{job_id}/pdf` | Download generated CV PDF |
+| GET | `/api/jobs/{job_id}/html` | Get generated CV as HTML |
 | GET | `/api/hitl/pending` | Get all jobs pending HITL review |
 | POST | `/api/hitl/{job_id}/decide` | Submit HITL decision (approve/decline/retry) |
 | GET | `/api/hitl/history` | Get application history |
+| DELETE | `/api/jobs/cleanup` | Clean up old job records |
+
+### System (public)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
 | POST | `/api/jobs/linkedin-search` | Trigger LinkedIn job search manually |
 | GET | `/api/jobs/linkedin-search/status` | Get scheduler state and last run info |
 | GET | `/api/health` | Health check (includes queue consumer status) |
 
 ## Data Models
+
+### User & Auth Models (`src/models/user.py`)
+
+- `User` - User entity: id, email, display_name, master_cv_json, search_preferences, filter_preferences, timestamps
+- `LoginRequest` - Email input for magic link request
+- `LoginResponse` - Success message after magic link sent
+- `VerifyRequest` - Token for magic link verification
+- `AuthResponse` - User object + message after successful auth
+- `UserUpdateRequest` - Optional fields for profile update (display_name, master_cv_json, search_preferences, filter_preferences)
+- `UserSearchPreferences` - Mirrors LinkedInSearchParams: keywords, location, remote_filter, date_posted, experience_level, job_type, easy_apply_only, max_jobs
 
 ### Core Models (`src/models/unified.py`)
 
@@ -131,21 +175,27 @@ Defined in `src/services/job_source.py`:
 - `JobSubmitResponse` - Response with job_id and status
 - `HITLDecision` - User decision (approved/declined/retry + feedback + reasoning)
 - `HITLDecisionResponse` - Response after decision processed
-- `PendingApproval` - Job details for HITL review UI
+- `PendingApproval` - Job details for HITL review UI (includes `filter_result` for score badge display)
 - `JobStatusResponse` - Full job status with CV and PDF info
-- `JobRecord` - Focused database record (job metadata + current CV pointer, no CV history)
+- `JobRecord` - Database record (includes `user_id` for ownership, `filter_result` for LLM filter output)
 - `ApplicationHistoryItem` - History entry for completed jobs
 
 ### State Machine (`src/models/state_machine.py`)
 
-- `BusinessState` - Job lifecycle states: queued, processing, cv_ready, pending_review, approved, declined, retrying, applying, applied, failed
+- `BusinessState` - Job lifecycle states: queued, processing, cv_ready, pending_review, approved, declined, retrying, applying, applied, failed, filtered_out
+  - `filtered_out`: terminal state for LLM-rejected jobs (score below reject threshold or hard disqualifier); reachable from `queued` and `processing`
 - `WorkflowStep` - Transient step tracking: extracting, filtering, composing_cv, generating_pdf, etc.
 - `ALLOWED_TRANSITIONS` - Valid state change map, enforced by repository
-- `InvalidStateTransition` - Raised on illegal transitions
+- `InvalidStateTransitionError` - Raised on illegal transitions
 
 ### CV Attempt History (`src/models/cv_attempt.py`)
 
 - `CVCompositionAttempt` - Tracks each CV composition: attempt_number, user_feedback, cv_json, pdf_path
+
+### Job Filter Models (`src/models/job_filter.py`)
+
+- `FilterResult` - LLM filter output: score (0-100), red_flags (list), disqualified (bool), disqualifier_reason (str|None), reasoning (str)
+- `UserFilterPreferences` - Per-user filter config: natural_language_prefs, custom_prompt, reject_threshold (default 30), warning_threshold (default 70), enabled (bool)
 
 ## Deleted Files
 
@@ -176,16 +226,19 @@ Overview: This option keeps a Python-centric solution but introduces a structure
 6. **Job Lifecycle State Machine**: `BusinessState` + `WorkflowStep` enums with enforced transition validation
 7. **Job Source Adapters**: Abstract interface for URL extraction, manual input, LinkedIn scraping
 8. **Repository Pattern**: DAL with in-memory (dev) and SQLite via Piccolo (production) implementations
+9. **Multi-User Authentication**: Magic link via Resend.com + JWT (httpOnly cookie), open registration
+10. **Per-User Data Ownership**: All job data user-scoped via `user_id` FK, per-user CV/search/filter preferences
 
 ### Node Descriptions
 
 **Preparation Workflow Nodes:**
 
 1. **extract_job_node** - Extracts structured job data from raw input (URL or manual)
-2. **filter_job_node** - LLM evaluates job suitability (currently passthrough)
-3. **compose_cv_node** - LLM tailors CV to job description
-4. **generate_pdf_node** - Creates PDF from tailored CV JSON
-5. **save_to_db_node** - Persists job record (MVP: completed, Full: pending)
+2. **filter_job_node** - LLM evaluates job suitability (LinkedIn only); scores 0-100, hard rejects go to `save_filtered_out_node`, warnings surfaced in HITL review
+3. **save_filtered_out_node** - Persists a minimal `JobRecord` with status=`filtered_out` for LLM-rejected jobs; terminal — workflow ends here
+4. **compose_cv_node** - LLM tailors CV to job description
+5. **generate_pdf_node** - Creates PDF from tailored CV JSON
+6. **save_to_db_node** - Persists job record (MVP: completed, Full: pending)
 
 **Retry Workflow Nodes:**
 
@@ -220,7 +273,7 @@ The two-workflow architecture enables true batch HITL:
 
 ## Web UI
 
-A web interface with two main features: HITL Review (batch approval) and CV Generator (MVP mode).
+A web interface with authentication, HITL Review (batch approval), CV Generator (MVP mode), and user Settings.
 
 **Location**: `ui/`
 **Tech Stack**: SvelteKit 2.x with Svelte 5 (Runes API), TypeScript, Tailwind CSS v3
@@ -228,9 +281,15 @@ A web interface with two main features: HITL Review (batch approval) and CV Gene
 
 ### Features
 
+#### Authentication
+- Magic link login flow (email → click link → JWT cookie)
+- Protected routes redirect to login when unauthenticated
+- Auth state store with automatic session check on load
+
 #### HITL Review UI (Homepage `/`)
 - Tinder-like batch review interface for pending applications
 - Job card with toggle between Job Description and CV Preview panels
+- Filter score badge (green/yellow/red) and red flag pills on job cards when filter result present
 - Decision buttons: Approve (green), Decline (red), Retry (amber)
 - Keyboard shortcuts: Arrow keys for navigation, 1/2/3 for actions
 - Feedback modal for decline/retry with optional/required notes
@@ -244,6 +303,12 @@ A web interface with two main features: HITL Review (batch approval) and CV Gene
 - Toast notifications for error handling
 - Responsive design (mobile-friendly)
 
+#### Settings (`/settings`)
+- Profile editing (display name)
+- CV upload (JSON format)
+- LinkedIn search preferences (keywords, location, remote filter, etc.)
+- Job filter preferences: enable/disable, natural language prefs, LLM-generated custom prompt, reject/warning thresholds
+
 ### Architecture
 
 ```
@@ -253,12 +318,16 @@ ui/
 │   │   ├── +layout.svelte       # Root layout with navigation
 │   │   ├── +layout.ts           # Prerender config
 │   │   ├── +page.svelte         # HITL Review page (homepage)
-│   │   └── generate/
-│   │       └── +page.svelte     # CV Generator page
+│   │   ├── generate/
+│   │   │   └── +page.svelte     # CV Generator page
+│   │   ├── settings/
+│   │   │   └── +page.svelte     # Settings page
+│   │   └── login/
+│   │       └── +page.svelte     # Login page
 │   ├── lib/
 │   │   ├── components/
 │   │   │   ├── review/          # HITL Review components
-│   │   │   │   ├── JobCard.svelte
+│   │   │   │   ├── JobCard.svelte           # Includes filter score badge + red flags
 │   │   │   │   ├── PanelSwitcher.svelte
 │   │   │   │   ├── JobDescriptionPanel.svelte
 │   │   │   │   ├── CVPreviewPanel.svelte
@@ -266,19 +335,27 @@ ui/
 │   │   │   │   ├── NavigationControls.svelte
 │   │   │   │   ├── FeedbackModal.svelte
 │   │   │   │   └── EmptyState.svelte
+│   │   │   ├── settings/        # Settings page sections
+│   │   │   │   ├── ProfileSection.svelte
+│   │   │   │   ├── CVUploadSection.svelte
+│   │   │   │   ├── SearchPreferencesSection.svelte
+│   │   │   │   └── FilterPreferencesSection.svelte
 │   │   │   ├── JobDescriptionForm.svelte
 │   │   │   ├── ProgressStepper.svelte
 │   │   │   └── ToastNotification.svelte
 │   │   ├── stores/
 │   │   │   ├── appState.svelte.ts    # CV generator state
+│   │   │   ├── auth.svelte.ts        # Auth state store
 │   │   │   └── reviewQueue.svelte.ts # HITL review queue state
 │   │   ├── api/
+│   │   │   ├── auth.ts               # Auth API client
 │   │   │   ├── client.ts             # CV generator API client
-│   │   │   └── hitl.ts               # HITL API client (with mock data)
+│   │   │   ├── hitl.ts               # HITL API client (with mock data)
+│   │   │   └── settings.ts           # Settings API client (search + filter prefs)
 │   │   ├── utils/
 │   │   │   └── validation.ts         # Input validation
 │   │   └── types/
-│   │       └── index.ts              # TypeScript types (includes HITL types)
+│   │       └── index.ts              # TypeScript types (includes HITL, FilterResult, UserFilterPreferences)
 │   ├── app.html
 │   └── app.css                  # Tailwind + neo-brutalist styles
 ├── build/                        # Production build (served by FastAPI)
@@ -289,9 +366,12 @@ ui/
 
 - FastAPI serves static files from `ui/build/` at root path `/`
 - API endpoints remain at `/api/*` (no conflicts)
+- Auth flow uses `/api/auth/login`, `/api/auth/verify`, `/api/auth/me`, `/api/auth/logout`
 - HITL Review uses `/api/hitl/pending` and `/api/hitl/{job_id}/decide`
 - CV Generator polls `/api/jobs/{job_id}/status` every 2 seconds
 - CV HTML preview fetched from `/api/jobs/{job_id}/html`
+- Settings uses `/api/users/me/*` for profile, search prefs, and filter prefs
+- Filter prompt generation via `/api/users/me/filter-preferences/generate-prompt`
 
 ### Usage
 
@@ -313,6 +393,4 @@ See `ui/README.md` for detailed documentation and `docs/plans/hitl-svelte-conver
 ## Next Steps
 
 1. **Implement Application Workflow** - Deep agent with Playwright for browser automation (currently stubs)
-2. **Add Job Filter Logic** - LLM-based job suitability evaluation (`src/services/job_filter.py` skeleton exists)
-3. **LinkedIn Easy Apply** - Automated application submission via browser automation
-4. **Build HITL Frontend** - Connect to real API (currently uses mock data)
+2. **LinkedIn Easy Apply** - Automated application submission via browser automation

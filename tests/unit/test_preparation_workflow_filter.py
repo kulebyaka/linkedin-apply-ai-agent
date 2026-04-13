@@ -437,7 +437,7 @@ class TestSaveFilteredOutNode:
 class TestHITLProcessorFilterResult:
     async def test_get_pending_includes_filter_result(self):
         from src.context import AppContext
-        from src.services.hitl_processor import HITLProcessor
+        from src.services.jobs.hitl_processor import HITLProcessor
 
         filter_data = {
             "score": 55,
@@ -479,7 +479,7 @@ class TestHITLProcessorFilterResult:
 
     async def test_get_pending_filter_result_none_for_non_linkedin(self):
         from src.context import AppContext
-        from src.services.hitl_processor import HITLProcessor
+        from src.services.jobs.hitl_processor import HITLProcessor
 
         job = JobRecord(
             job_id="job-2",

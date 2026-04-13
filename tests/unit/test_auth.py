@@ -11,8 +11,8 @@ import pytest
 
 from src.config.settings import Settings
 from src.models.user import User
-from src.services.auth import AuthService
-from src.services.user_repository import UserRepository
+from src.services.auth.auth import AuthService
+from src.services.auth.user_repository import UserRepository
 
 
 @pytest.fixture

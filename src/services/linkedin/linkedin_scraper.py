@@ -11,8 +11,8 @@ from datetime import datetime, timedelta, timezone
 
 from src.config.settings import Settings
 from src.models.job import ScrapedJob
-from src.services.browser_automation import LinkedInAutomation
-from src.services.linkedin_search import LinkedInSearchParams, LinkedInSearchURLBuilder
+from .browser_automation import LinkedInAutomation
+from .linkedin_search import LinkedInSearchParams, LinkedInSearchURLBuilder
 
 logger = logging.getLogger(__name__)
 

@@ -6,7 +6,7 @@ import pytest
 
 from src.context import AppContext
 from src.models.unified import HITLDecision, JobRecord
-from src.services.hitl_processor import HITLProcessor
+from src.services.jobs.hitl_processor import HITLProcessor
 
 pytestmark = pytest.mark.asyncio
 

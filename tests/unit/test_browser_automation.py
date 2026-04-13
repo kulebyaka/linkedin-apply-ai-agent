@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.services.browser_automation import LinkedInAutomation
+from src.services.linkedin.browser_automation import LinkedInAutomation
 
 pytestmark = pytest.mark.asyncio
 
@@ -163,14 +163,14 @@ class TestEnsureAuthenticated:
 
 class TestRandomDelay:
     async def test_uses_default_delays(self, automation):
-        with patch("src.services.browser_automation.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+        with patch("src.services.linkedin.browser_automation.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
             await automation.random_delay()
             mock_sleep.assert_awaited_once()
             delay = mock_sleep.call_args[0][0]
             assert automation.min_delay <= delay <= automation.max_delay
 
     async def test_uses_custom_delays(self, automation):
-        with patch("src.services.browser_automation.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+        with patch("src.services.linkedin.browser_automation.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
             await automation.random_delay(min_s=1.0, max_s=2.0)
             delay = mock_sleep.call_args[0][0]
             assert 1.0 <= delay <= 2.0
@@ -181,8 +181,8 @@ class TestHumanScroll:
         mock_page = AsyncMock()
         mock_page.evaluate = AsyncMock()
 
-        with patch("src.services.browser_automation.random.randint", return_value=3):
-            with patch("src.services.browser_automation.asyncio.sleep", new_callable=AsyncMock):
+        with patch("src.services.linkedin.browser_automation.random.randint", return_value=3):
+            with patch("src.services.linkedin.browser_automation.asyncio.sleep", new_callable=AsyncMock):
                 await automation.human_scroll(mock_page)
 
         assert mock_page.evaluate.await_count == 3
@@ -191,8 +191,8 @@ class TestHumanScroll:
         automation.page = AsyncMock()
         automation.page.evaluate = AsyncMock()
 
-        with patch("src.services.browser_automation.random.randint", return_value=2):
-            with patch("src.services.browser_automation.asyncio.sleep", new_callable=AsyncMock):
+        with patch("src.services.linkedin.browser_automation.random.randint", return_value=2):
+            with patch("src.services.linkedin.browser_automation.asyncio.sleep", new_callable=AsyncMock):
                 await automation.human_scroll()
 
         assert automation.page.evaluate.await_count == 2
