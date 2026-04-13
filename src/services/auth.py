@@ -28,13 +28,29 @@ class AuthService:
     3. JWT cookie set -> subsequent requests authenticated via decode_jwt()
     """
 
+    _MIN_SECRET_LENGTH = 32
+
     def __init__(self, settings: Settings, user_repository: UserRepository) -> None:
         self._settings = settings
         self._user_repo = user_repository
-        if settings.jwt_secret == "change-me-in-production":
-            logger.warning(
-                "JWT_SECRET is using the default value. "
-                "Set JWT_SECRET in .env for production use."
+        secret = settings.jwt_secret
+        if not secret:
+            raise RuntimeError(
+                "SECURITY: JWT_SECRET is empty. Set a unique JWT_SECRET in .env "
+                "before starting the server."
+            )
+        if secret == "change-me-in-production":
+            raise RuntimeError(
+                "SECURITY: JWT_SECRET is using the default value "
+                "'change-me-in-production'. Anyone who knows this value can "
+                "forge authentication tokens. Set a unique JWT_SECRET in .env "
+                "before starting the server."
+            )
+        if len(secret) < self._MIN_SECRET_LENGTH:
+            raise RuntimeError(
+                f"SECURITY: JWT_SECRET is too short ({len(secret)} chars). "
+                f"Use at least {self._MIN_SECRET_LENGTH} characters — "
+                "generate one with `openssl rand -hex 32`."
             )
 
     async def send_magic_link(self, email: str) -> None:
@@ -104,11 +120,21 @@ class AuthService:
         if email is None:
             raise ValueError("Invalid or expired magic link token")
 
-        # Get or create user
+        # Get or create user.
+        # Race guard: two concurrent magic-link verifications for the same
+        # email can both pass get_by_email() == None, then both try
+        # create_user(). The second INSERT will fail on the unique email
+        # constraint. Catch it and re-fetch.
         user = await self._user_repo.get_by_email(email)
         if user is None:
-            user = await self._user_repo.create_user(email)
-            logger.info("Auto-created user for %s on first login", email)
+            try:
+                user = await self._user_repo.create_user(email)
+                logger.info("Auto-created user for %s on first login", email)
+            except Exception:
+                # Likely a unique constraint violation from a concurrent insert
+                user = await self._user_repo.get_by_email(email)
+                if user is None:
+                    raise
 
         return user
 

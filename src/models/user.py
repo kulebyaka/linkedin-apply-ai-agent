@@ -84,6 +84,6 @@ class UserUpdateRequest(BaseModel):
     All fields are optional - only provided fields are updated.
     """
 
-    display_name: str | None = None
+    display_name: str | None = Field(default=None, min_length=1)
     master_cv_json: dict | None = None
     search_preferences: UserSearchPreferences | None = None

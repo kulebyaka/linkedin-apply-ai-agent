@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from src.models.job import ScrapedJob
-from src.services.job_queue import JobQueue
+from src.services.job_queue import JobQueue, _scoped_job_id
 
 logger = logging.getLogger(__name__)
 
@@ -150,15 +150,16 @@ async def enqueue_from_fixtures(
     if not jobs:
         return {"enqueued": 0, "skipped": 0, "total_in_file": 0}
 
-    # Deduplicate against repository
+    # Deduplicate against repository using user-scoped job IDs
     skipped = 0
     to_enqueue: list[ScrapedJob] = []
     for job in jobs:
         if repository is not None:
             try:
-                existing = await repository.get(job.job_id)
+                scoped_id = _scoped_job_id(job.job_id, user_id)
+                existing = await repository.get(scoped_id)
                 if existing is not None:
-                    logger.debug("Fixture dedup: skipping job %s (already in repo)", job.job_id)
+                    logger.debug("Fixture dedup: skipping job %s (already in repo)", scoped_id)
                     skipped += 1
                     continue
             except Exception:

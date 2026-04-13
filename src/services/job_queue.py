@@ -22,6 +22,20 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _scoped_job_id(raw_job_id: str, user_id: str | None) -> str:
+    """Return a user-scoped job_id for multi-user isolation.
+
+    For LinkedIn jobs the raw job_id is the global LinkedIn posting ID.
+    Without scoping, two users who find the same posting would collide on
+    the primary key.  When a user_id is present we append it in full to
+    form a deterministic composite key (the job_id column is VARCHAR(80)
+    to accommodate this).
+    """
+    if user_id:
+        return f"{raw_job_id}:{user_id}"
+    return raw_job_id
+
+
 @dataclass
 class QueueItem:
     """A scraped job with its owning user context."""
@@ -150,17 +164,22 @@ async def process_queue(
         job = item.job
         user_id = item.user_id
 
-        logger.info("Processing queued job %s (user=%s)", job.job_id, user_id or "global")
+        # Build a user-scoped job_id so the same LinkedIn posting can exist
+        # independently for different users.  The original LinkedIn ID is
+        # preserved in raw_input for reference.
+        scoped_job_id = _scoped_job_id(job.job_id, user_id)
+
+        logger.info("Processing queued job %s (user=%s)", scoped_job_id, user_id or "global")
 
         # Cross-cycle dedup: skip jobs already in the repository
         if job_repository is not None:
             try:
-                existing = await job_repository.get(job.job_id)
+                existing = await job_repository.get(scoped_job_id)
                 if existing is not None:
-                    logger.info("Skipping already-processed job %s (status: %s)", job.job_id, existing.status)
+                    logger.info("Skipping already-processed job %s (status: %s)", scoped_job_id, existing.status)
                     continue
             except Exception:
-                logger.warning("Dedup check failed for job %s, proceeding with processing", job.job_id)
+                logger.warning("Dedup check failed for job %s, proceeding with processing", scoped_job_id)
 
         try:
             # Load master CV: from user's DB record if user_id is present, else fallback
@@ -177,7 +196,7 @@ async def process_queue(
                 master_cv = master_cv_loader()
 
             initial_state = {
-                "job_id": job.job_id,
+                "job_id": scoped_job_id,
                 "source": "linkedin",
                 "mode": "full",
                 "raw_input": job.model_dump(),
@@ -192,16 +211,16 @@ async def process_queue(
                 "user_id": user_id or "",
             }
 
-            config = {"configurable": {"thread_id": f"linkedin-{job.job_id}", "repository": job_repository}}
+            config = {"configurable": {"thread_id": f"linkedin-{scoped_job_id}", "repository": job_repository}}
             await workflow.ainvoke(initial_state, config=config)
-            logger.info("Workflow completed for job %s", job.job_id)
+            logger.info("Workflow completed for job %s", scoped_job_id)
             processed += 1
 
             if on_job_processed is not None:
                 try:
-                    on_job_processed(job.job_id, config["configurable"]["thread_id"], user_id or "")
+                    on_job_processed(scoped_job_id, config["configurable"]["thread_id"], user_id or "")
                 except Exception:
-                    logger.debug("on_job_processed callback failed for %s", job.job_id)
+                    logger.debug("on_job_processed callback failed for %s", scoped_job_id)
 
         except Exception:
             logger.exception("Workflow failed for queued job %s", job.job_id)

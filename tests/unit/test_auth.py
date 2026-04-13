@@ -20,7 +20,7 @@ def settings():
     """Test settings with known JWT secret."""
     return Settings(
         _env_file=None,
-        jwt_secret="test-secret-key-for-testing",
+        jwt_secret="test-secret-key-for-testing-extended",
         jwt_expiry_days=30,
         magic_link_ttl_minutes=15,
         app_url="http://localhost:5173",

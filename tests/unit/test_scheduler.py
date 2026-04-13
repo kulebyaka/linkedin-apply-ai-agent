@@ -36,14 +36,30 @@ def _user(
 # ---------------------------------------------------------------------------
 
 
+def _default_user_repo() -> MagicMock:
+    """Return a mock user_repository with a single user who has search preferences."""
+    default_user = _user(
+        "default-user",
+        email="default@test.com",
+        prefs=UserSearchPreferences(keywords="python", location="San Francisco"),
+    )
+    repo = MagicMock()
+    repo.get_all_with_search_prefs = AsyncMock(return_value=[default_user])
+    return repo
+
+
 def _make_scheduler(
     *,
     scrape_result: list[ScrapedJob] | None = None,
     scrape_error: Exception | None = None,
     interval_hours: int = 1,
-    user_repository: MagicMock | None = None,
+    user_repository: MagicMock | None | str = "default",
 ) -> tuple[LinkedInSearchScheduler, MagicMock, MagicMock, JobQueue]:
-    """Return (scheduler, mock_settings, mock_scraper, queue)."""
+    """Return (scheduler, mock_settings, mock_scraper, queue).
+
+    Pass ``user_repository=None`` to explicitly omit the user repo.
+    Default provides a single user with search prefs matching the settings.
+    """
     settings = MagicMock()
     settings.linkedin_search_keywords = "python"
     settings.linkedin_search_location = "San Francisco"
@@ -63,6 +79,9 @@ def _make_scheduler(
         scraper.scrape_and_enrich = AsyncMock(side_effect=scrape_error)
     else:
         scraper.scrape_and_enrich = AsyncMock(return_value=scrape_result or [])
+
+    if user_repository == "default":
+        user_repository = _default_user_repo()
 
     queue = JobQueue(max_size=100)
     scheduler = LinkedInSearchScheduler(
@@ -120,7 +139,7 @@ class TestRunSearch:
         assert scheduler.last_run_time is not None
         assert scheduler.last_run_jobs == 1
 
-    async def test_run_search_builds_params_from_settings(self):
+    async def test_run_search_builds_params_from_user_prefs(self):
         scheduler, settings, scraper, _ = _make_scheduler(scrape_result=[])
 
         await scheduler.run_search()
@@ -239,9 +258,9 @@ class TestPerUserSearch:
         assert item3.user_id == "user-b"
         assert item3.job.job_id == "j3"
 
-    async def test_fallback_to_global_when_no_users_have_prefs(self):
-        """When user_repository returns no users with prefs, falls back to
-        env-var-based global search params."""
+    async def test_skips_search_when_no_users_have_prefs(self):
+        """When user_repository returns no users with prefs, search is skipped
+        to avoid creating ownerless jobs that no authenticated user can access."""
         mock_user_repo = MagicMock()
         mock_user_repo.get_all_with_search_prefs = AsyncMock(return_value=[])
 
@@ -252,18 +271,12 @@ class TestPerUserSearch:
 
         count = await scheduler.run_search()
 
-        assert count == 1
-        # Used global settings
-        call_args = scraper.scrape_and_enrich.call_args[0][0]
-        assert call_args.keywords == "python"
-        assert call_args.location == "San Francisco"
+        assert count == 0
+        assert queue.is_empty()
+        scraper.scrape_and_enrich.assert_not_awaited()
 
-        # Queue item has user_id=None (global)
-        item = await queue.get()
-        assert item.user_id is None
-
-    async def test_fallback_when_user_repo_is_none(self):
-        """When user_repository is None, uses global settings."""
+    async def test_skips_search_when_user_repo_is_none(self):
+        """When user_repository is None, search is skipped."""
         scheduler, _, scraper, queue = _make_scheduler(
             scrape_result=[_job("g1")],
             user_repository=None,
@@ -271,13 +284,12 @@ class TestPerUserSearch:
 
         count = await scheduler.run_search()
 
-        assert count == 1
-        call_args = scraper.scrape_and_enrich.call_args[0][0]
-        assert call_args.keywords == "python"
+        assert count == 0
+        assert queue.is_empty()
 
-    async def test_fallback_when_user_repo_raises(self):
-        """When user_repository.get_all_with_search_prefs() raises, falls back
-        to global settings gracefully."""
+    async def test_skips_search_when_user_repo_raises(self):
+        """When user_repository.get_all_with_search_prefs() raises, search is
+        skipped gracefully (no ownerless jobs created)."""
         mock_user_repo = MagicMock()
         mock_user_repo.get_all_with_search_prefs = AsyncMock(
             side_effect=RuntimeError("DB error")
@@ -290,10 +302,8 @@ class TestPerUserSearch:
 
         count = await scheduler.run_search()
 
-        assert count == 1
-        # Fell back to global
-        call_args = scraper.scrape_and_enrich.call_args[0][0]
-        assert call_args.keywords == "python"
+        assert count == 0
+        assert queue.is_empty()
 
     async def test_per_user_search_failure_continues_to_next_user(self):
         """If scraping fails for one user, the scheduler continues to the next."""
@@ -350,7 +360,17 @@ class TestLinkedInSearchAPI:
 
     @pytest.fixture
     def client(self):
-        """Create a test client with mocked AppContext."""
+        """Create a test client with mocked AppContext.
+
+        The real lifespan calls create_app_context() which requires
+        JWT_SECRET and may trigger WeasyPrint imports. With
+        raise_server_exceptions=False the lifespan failure is swallowed,
+        leaving app.state.ctx as we set it beforehand.
+
+        The module-level _consumer_manager is also mocked to prevent
+        the trigger-search endpoint from importing the WeasyPrint chain
+        (via job_queue -> _shared -> pdf_generator).
+        """
         try:
             from fastapi.testclient import TestClient
 
@@ -384,9 +404,17 @@ class TestLinkedInSearchAPI:
             original_settings = main_module.settings
             main_module.settings = test_settings
 
+            # Mock the consumer manager to avoid WeasyPrint import chain
+            original_cm = main_module._consumer_manager
+            mock_cm = MagicMock()
+            mock_cm.task = MagicMock()
+            mock_cm.task.done.return_value = False  # pretend consumer is running
+            main_module._consumer_manager = mock_cm
+
             yield TestClient(main_module.app, raise_server_exceptions=False), ctx
 
             main_module.settings = original_settings
+            main_module._consumer_manager = original_cm
             main_module.app.dependency_overrides.pop(main_module.get_current_user, None)
         except OSError:
             pytest.skip("WeasyPrint system libraries not available")

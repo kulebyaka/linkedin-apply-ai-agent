@@ -16,7 +16,7 @@
 		if (!user.master_cv_json) return null;
 		const cv = user.master_cv_json as Record<string, unknown>;
 		const contact = cv.contact as Record<string, unknown> | undefined;
-		const name = contact?.name ?? 'Unknown';
+		const name = (contact?.full_name ?? contact?.name ?? 'Unknown') as string;
 		const experiences = Array.isArray(cv.experience) ? cv.experience.length : 0;
 		const skills = Array.isArray(cv.skills) ? cv.skills.length : 0;
 		return { name, experiences, skills };
@@ -102,7 +102,7 @@
 			id="cvJson"
 			bind:value={cvText}
 			oninput={handleInput}
-			placeholder={'{"contact": {"name": "..."}, "experience": [...], "skills": [...]}'}
+			placeholder={'{"contact": {"full_name": "..."}, "experience": [...], "skills": [...]}'}
 			disabled={saving}
 			rows="12"
 			class="font-mono w-full border-2 bg-white px-3 py-2 text-xs leading-relaxed text-[var(--color-foreground)] placeholder:text-[var(--color-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] disabled:opacity-50 {jsonValid ? 'border-[var(--color-foreground)]' : 'border-[var(--color-error)]'}"

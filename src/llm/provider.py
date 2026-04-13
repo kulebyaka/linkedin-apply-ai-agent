@@ -40,12 +40,12 @@ import json
 import logging
 import time
 from abc import ABC, abstractmethod
-from enum import Enum
+from enum import StrEnum
 
 logger = logging.getLogger(__name__)
 
 
-class LLMProvider(str, Enum):
+class LLMProvider(StrEnum):
     """Supported LLM providers"""
 
     OPENAI = "openai"

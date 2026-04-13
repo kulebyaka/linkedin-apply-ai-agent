@@ -2,7 +2,10 @@
 
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
+
+_JWT_SECRET_MIN_LENGTH = 32
 
 
 class Settings(BaseSettings):
@@ -59,8 +62,12 @@ class Settings(BaseSettings):
     linkedin_search_location: str = ""
     linkedin_search_remote_filter: str | None = None  # "remote", "on-site", "hybrid"
     linkedin_search_date_posted: str | None = None  # "24h", "week", "month"
-    linkedin_search_experience_level: list[str] | None = None  # "entry", "associate", "mid-senior", "director", "executive"
-    linkedin_search_job_type: list[str] | None = None  # "full-time", "part-time", "contract", "temporary", "internship"
+    linkedin_search_experience_level: list[str] | None = (
+        None  # "entry", "associate", "mid-senior", "director", "executive"
+    )
+    linkedin_search_job_type: list[str] | None = (
+        None  # "full-time", "part-time", "contract", "temporary", "internship"
+    )
     linkedin_search_easy_apply_only: bool = False
     linkedin_search_max_jobs: int = 50
     linkedin_session_cookie_path: str = "./data/linkedin_cookies.json"
@@ -89,7 +96,9 @@ class Settings(BaseSettings):
     cv_composer_temperature_sections: float = 0.4  # Balanced for CV sections
     cv_composer_max_retries: int = 3  # Max retries for JSON generation
     cv_composer_enable_hallucination_checks: bool = True  # Validate against master CV
-    cv_composer_hallucination_policy: str = "strict"  # Fine-grained control: "strict", "warn", "disabled"
+    cv_composer_hallucination_policy: str = (
+        "strict"  # Fine-grained control: "strict", "warn", "disabled"
+    )
     cv_composer_model_override: str | None = None  # Override LLM model for CV composition
 
     # CV Length Limits (for 2-page target)
@@ -111,10 +120,34 @@ class Settings(BaseSettings):
     jwt_expiry_days: int = 30
     app_url: str = "http://localhost:5173"  # Base URL for magic link callback
 
+    @field_validator("jwt_secret")
+    @classmethod
+    def jwt_secret_must_be_strong(cls, v: str) -> str:
+        if not v:
+            raise ValueError(
+                "JWT_SECRET must not be empty. Set a strong unique value in .env."
+            )
+        if v == "change-me-in-production":
+            # Allow the default at settings-load time so tests that don't need
+            # auth can still import Settings. AuthService performs this check
+            # too and raises at runtime before any tokens are signed.
+            return v
+        if len(v) < _JWT_SECRET_MIN_LENGTH:
+            raise ValueError(
+                f"JWT_SECRET must be at least {_JWT_SECRET_MIN_LENGTH} characters long. "
+                "Use a randomly generated value (e.g. `openssl rand -hex 32`)."
+            )
+        return v
+
     # API Server (for HITL UI)
     api_host: str = "0.0.0.0"
     api_port: int = 8000
-    cors_origins: list = ["http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:8000", "http://localhost:8000"]
+    cors_origins: list = [
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:8000",
+        "http://localhost:8000",
+    ]
 
     class Config:
         env_file = ".env"

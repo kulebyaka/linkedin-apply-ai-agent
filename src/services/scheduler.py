@@ -4,8 +4,8 @@ Wraps APScheduler's AsyncIOScheduler to run LinkedIn scraping at configurable
 intervals, feeding results into the async job queue for workflow processing.
 
 Supports per-user search: iterates users with configured search preferences
-and tags scraped jobs with their user_id. Falls back to env-var-based global
-search params when no users have preferences configured.
+and tags scraped jobs with their user_id. Skips the search cycle when no
+users have preferences configured.
 """
 
 from __future__ import annotations
@@ -67,36 +67,17 @@ class LinkedInSearchScheduler:
         async with self._search_lock:
             return await self._do_search()
 
-    def _build_global_params(self) -> LinkedInSearchParams:
-        """Build search params from environment-variable-based settings."""
-        return LinkedInSearchParams(
-            keywords=self.settings.linkedin_search_keywords,
-            location=self.settings.linkedin_search_location,
-            remote_filter=self.settings.linkedin_search_remote_filter,
-            date_posted=self.settings.linkedin_search_date_posted,
-            experience_level=self.settings.linkedin_search_experience_level,
-            job_type=self.settings.linkedin_search_job_type,
-            easy_apply_only=self.settings.linkedin_search_easy_apply_only,
-            max_jobs=self.settings.linkedin_search_max_jobs,
-        )
-
     async def _do_search(self) -> int:
         """Internal search implementation.
 
-        If a user_repository is available, queries all users with configured
-        search preferences and runs a separate scrape per user. Falls back
-        to global env-var settings when no users have preferences.
+        Queries all users with configured search preferences and runs a
+        separate scrape per user. Skips the cycle when no users have
+        preferences configured.
         """
         try:
             logger.info("Starting LinkedIn search cycle")
 
-            # Reset dedup state so returning jobs from previous cycles are not skipped
-            self.scraper.reset_seen()
-
-            # Ensure authenticated
-            await self.scraper.browser.ensure_authenticated()
-
-            # Build per-user search plans, or fall back to global params
+            # Build per-user search plans.
             search_plans: list[tuple[str | None, LinkedInSearchParams]] = []
 
             if self.user_repository is not None:
@@ -123,18 +104,34 @@ class LinkedInSearchScheduler:
                         )
                 except Exception:
                     logger.warning(
-                        "Failed to load users with search prefs, falling back to global params",
+                        "Failed to load users with search prefs, skipping search",
                         exc_info=True,
                     )
 
-            # Fallback: no users with prefs → use global env-var settings
+            # Skip search if no users have configured search preferences.
+            # Checked before authenticate so we avoid browser/auth work when
+            # there is nothing to search.
             if not search_plans:
-                logger.info("No per-user search prefs found, using global settings")
-                search_plans.append((None, self._build_global_params()))
+                logger.info(
+                    "No users with search preferences found — skipping LinkedIn search. "
+                    "Configure search preferences in Settings to enable scheduled searches."
+                )
+                self._last_run_time = datetime.now(tz=timezone.utc)
+                self._last_run_jobs = 0
+                return 0
+
+            # Authenticate only when there are actual searches to perform.
+            await self.scraper.browser.ensure_authenticated()
 
             total_enqueued = 0
 
             for user_id, params in search_plans:
+                # Reset scraper dedup state before each user's search so that
+                # the same LinkedIn posting can be found independently by
+                # different users (the within-user pagination dedup is rebuilt
+                # fresh each time).
+                self.scraper.reset_seen()
+
                 try:
                     jobs = await self.scraper.scrape_and_enrich(params)
                     logger.info(

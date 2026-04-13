@@ -138,7 +138,7 @@ class UserRepository:
 
         db_updates = {"updated_at": datetime.now(tz=timezone.utc)}
 
-        if "display_name" in updates:
+        if "display_name" in updates and updates["display_name"] is not None:
             db_updates["display_name"] = updates["display_name"]
         if "master_cv_json" in updates:
             db_updates["master_cv_json"] = updates["master_cv_json"]
@@ -166,7 +166,17 @@ class UserRepository:
             .where(UserTable.search_preferences.is_not_null())
             .run()
         )
-        return [self._row_to_user(row) for row in rows]
+        users: list[User] = []
+        for row in rows:
+            try:
+                users.append(self._row_to_user(row))
+            except Exception:
+                logger.warning(
+                    "Failed to parse user row (id=%s), skipping",
+                    row.get("id"),
+                    exc_info=True,
+                )
+        return users
 
     # =========================================================================
     # Magic Link Methods
@@ -234,17 +244,21 @@ class UserRepository:
         if expires_at < datetime.now(tz=timezone.utc):
             return None
 
-        # Atomic claim: UPDATE only if still unused, check rowcount to
-        # ensure THIS request was the one that consumed the token.
+        # Atomic claim: UPDATE only if still unused AND not expired.
+        # Including the expiry check in the WHERE clause prevents a race
+        # where a token passes the SELECT expiry check but expires before
+        # the UPDATE executes.
         engine = MagicLinkTable._meta._db
         conn = await engine.get_connection()
         try:
             cursor = await conn.execute(
-                "UPDATE magic_link SET used = 1 WHERE token = ? AND used = 0",
+                "UPDATE magic_link SET used = 1 "
+                "WHERE token = ? AND used = 0 AND expires_at > datetime('now')",
                 (token,),
             )
             if cursor.rowcount == 0:
-                # Another concurrent request already consumed this token
+                # Another concurrent request already consumed this token,
+                # or the token expired between SELECT and UPDATE.
                 return None
             await conn.commit()
         finally:

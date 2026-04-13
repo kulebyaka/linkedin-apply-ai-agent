@@ -119,7 +119,7 @@ class TestCreateAppContext:
         """Test that create_app_context returns a properly wired context."""
         from src.config.settings import Settings
 
-        test_settings = Settings(_env_file=None)
+        test_settings = Settings(_env_file=None, jwt_secret="test-secret-for-unit-tests-extended")
         ctx = create_app_context(settings=test_settings)
 
         assert ctx.repository is not None
@@ -131,7 +131,7 @@ class TestCreateAppContext:
     def test_creates_context_uses_provided_settings(self):
         from src.config.settings import Settings
 
-        test_settings = Settings(_env_file=None, repo_type="memory")
+        test_settings = Settings(_env_file=None, repo_type="memory", jwt_secret="test-secret-for-unit-tests-extended")
         ctx = create_app_context(settings=test_settings)
 
         assert ctx.settings.repo_type == "memory"

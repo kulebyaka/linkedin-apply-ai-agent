@@ -1,9 +1,9 @@
 """Service for sending notifications"""
 
-from enum import Enum
+from enum import StrEnum
 
 
-class NotificationType(str, Enum):
+class NotificationType(StrEnum):
     """Types of notifications"""
 
     ERROR = "error"

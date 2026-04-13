@@ -50,7 +50,7 @@ class Job(Table):
     """
 
     # Primary key
-    job_id = Varchar(length=36, primary_key=True)  # UUID
+    job_id = Varchar(length=80, primary_key=True)  # UUID or composite key (linkedin_id:user_id)
 
     # Owner
     user_id = Varchar(length=36, index=True)
@@ -86,7 +86,7 @@ class CVAttemptTable(Table, tablename="cv_attempt"):
     """
 
     # Composite identity: job_id + attempt_number
-    job_id = Varchar(length=36, index=True)
+    job_id = Varchar(length=80, index=True)
     attempt_number = Integer()
 
     # Owner

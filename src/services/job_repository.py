@@ -669,29 +669,50 @@ class SQLiteJobRepository(JobRepository):
     async def _migrate_legacy_columns(self) -> None:
         """Migrate legacy schema columns if upgrading from an older database.
 
-        Renames cv_json -> current_cv_json and pdf_path -> current_pdf_path
-        in the job table if the old columns exist.
+        Handles two migration paths:
+        1. Renames cv_json -> current_cv_json and pdf_path -> current_pdf_path
+        2. Adds user_id column to job and cv_attempt tables (multi-user support)
 
         Raises:
             RepositoryError: If migration detection or execution fails.
         """
         conn = await self._engine.get_connection()
         try:
+            # --- Job table migrations ---
             cursor = await conn.execute("PRAGMA table_info(job)")
             rows = await cursor.fetchall()
-            column_names = {row["name"] for row in rows}
+            job_columns = {row["name"] for row in rows}
 
-            if "cv_json" in column_names and "current_cv_json" not in column_names:
+            if "cv_json" in job_columns and "current_cv_json" not in job_columns:
                 logger.info("Migrating legacy column: cv_json -> current_cv_json")
                 await conn.execute(
                     "ALTER TABLE job RENAME COLUMN cv_json TO current_cv_json"
                 )
 
-            if "pdf_path" in column_names and "current_pdf_path" not in column_names:
+            if "pdf_path" in job_columns and "current_pdf_path" not in job_columns:
                 logger.info("Migrating legacy column: pdf_path -> current_pdf_path")
                 await conn.execute(
                     "ALTER TABLE job RENAME COLUMN pdf_path TO current_pdf_path"
                 )
+
+            if "user_id" not in job_columns:
+                logger.info("Migrating: adding user_id column to job table")
+                await conn.execute(
+                    "ALTER TABLE job ADD COLUMN user_id VARCHAR(36) NOT NULL DEFAULT ''"
+                )
+
+            # --- CV attempt table migrations ---
+            cursor = await conn.execute("PRAGMA table_info(cv_attempt)")
+            rows = await cursor.fetchall()
+            cv_columns = {row["name"] for row in rows}
+
+            if "user_id" not in cv_columns:
+                logger.info("Migrating: adding user_id column to cv_attempt table")
+                await conn.execute(
+                    "ALTER TABLE cv_attempt ADD COLUMN user_id VARCHAR(36) NOT NULL DEFAULT ''"
+                )
+
+            await conn.commit()
         finally:
             await conn.close()
 
