@@ -157,12 +157,12 @@ Implement an LLM-powered job filter that detects hidden disqualifiers (fake remo
 **Files:**
 - Modify: `src/api/main.py`
 
-- [ ] Add `GET /api/users/me/filter-preferences` endpoint: returns user's `UserFilterPreferences` (or default values if not set)
-- [ ] Add `PUT /api/users/me/filter-preferences` endpoint: accepts `UserFilterPreferences`, saves to user via `UserRepository.update()`
-- [ ] Add `POST /api/users/me/filter-preferences/generate-prompt` endpoint: accepts `{"natural_language_prefs": "..."}`, creates `JobFilter` with primary LLM, calls `generate_prompt_from_preferences()`, returns `{"prompt": "..."}`
-- [ ] All endpoints require authentication (`CurrentUser` dependency)
-- [ ] Write API tests using `TestClient` for all three endpoints
-- [ ] Run project test suite - must pass before task 6
+- [x] Add `GET /api/users/me/filter-preferences` endpoint: returns user's `UserFilterPreferences` (or default values if not set)
+- [x] Add `PUT /api/users/me/filter-preferences` endpoint: accepts `UserFilterPreferences`, saves to user via `UserRepository.update()`
+- [x] Add `POST /api/users/me/filter-preferences/generate-prompt` endpoint: accepts `{"natural_language_prefs": "..."}`, creates `JobFilter` with primary LLM, calls `generate_prompt_from_preferences()`, returns `{"prompt": "..."}`
+- [x] All endpoints require authentication (`CurrentUser` dependency)
+- [x] Write API tests using `TestClient` for all three endpoints
+- [x] Run project test suite - must pass before task 6
 
 ### Task 6: Settings UI — Filter Preferences Section
 

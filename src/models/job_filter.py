@@ -73,3 +73,12 @@ class UserFilterPreferences(BaseModel):
                 f"warning_threshold ({v}) must be >= reject_threshold ({reject})"
             )
         return v
+
+
+class GeneratePromptRequest(BaseModel):
+    """Request body for generating a filter prompt from natural language preferences."""
+
+    natural_language_prefs: str = Field(
+        ...,
+        description="User's natural language description of what they want / don't want in a job",
+    )
