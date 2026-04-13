@@ -137,6 +137,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await ctx.user_repository.initialize(db_path=settings.db_path)
     logger.info("Repository initialized successfully")
 
+    # Schedule periodic cleanup of expired magic link tokens (every 24 hours)
+    async def _cleanup_magic_links_loop():
+        while True:
+            await asyncio.sleep(86400)  # 24 hours
+            if ctx.user_repository:
+                try:
+                    deleted = await ctx.user_repository.cleanup_expired_magic_links()
+                    if deleted:
+                        logger.info("Cleaned up %d expired magic link tokens", deleted)
+                except Exception:
+                    logger.warning("Failed to clean up expired magic link tokens", exc_info=True)
+
+    ctx.create_background_task(_cleanup_magic_links_loop())
+
     # Fixture replay mode: seed jobs from file, skip LinkedIn entirely
     if settings.seed_jobs_from_file:
         logger.info(
@@ -304,9 +318,16 @@ async def auth_me(user: CurrentUser) -> User:
 
 
 @app.post("/api/auth/logout")
-async def auth_logout(response: Response):
+async def auth_logout(request: Request, response: Response):
     """Clear auth cookie to log out."""
-    response.delete_cookie(key="auth_token", path="/")
+    ctx = _get_ctx(request)
+    response.delete_cookie(
+        key="auth_token",
+        path="/",
+        httponly=True,
+        samesite="lax",
+        secure=not ctx.settings.debug,
+    )
     return {"message": "Logged out"}
 
 
@@ -452,9 +473,11 @@ async def trigger_linkedin_search(request: Request, user: CurrentUser):
             cm.reset()
             cm.start(ctx)
 
+    requesting_user_id = user.id
+
     async def _run_search():
         try:
-            count = await ctx.scheduler.run_search()
+            count = await ctx.scheduler.run_search(user_id=requesting_user_id)
             logger.info("Manual LinkedIn search completed: %d jobs found", count)
         except Exception:
             logger.exception("Manual LinkedIn search failed")

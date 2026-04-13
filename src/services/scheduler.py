@@ -48,8 +48,12 @@ class LinkedInSearchScheduler:
         self._last_run_jobs: int = 0
         self._running = False
 
-    async def run_search(self) -> int:
+    async def run_search(self, user_id: str | None = None) -> int:
         """Execute one search cycle: authenticate, scrape, enqueue.
+
+        Args:
+            user_id: If provided, only search for this user's preferences.
+                     If None, search for all users (scheduled runs).
 
         Returns the number of jobs enqueued. Never raises — all exceptions
         are caught and logged so the scheduler keeps running.
@@ -65,12 +69,16 @@ class LinkedInSearchScheduler:
             return 0
 
         async with self._search_lock:
-            return await self._do_search()
+            return await self._do_search(user_id=user_id)
 
-    async def _do_search(self) -> int:
+    async def _do_search(self, user_id: str | None = None) -> int:
         """Internal search implementation.
 
-        Queries all users with configured search preferences and runs a
+        Args:
+            user_id: If provided, only search for this user's preferences.
+                     If None, search for all users (scheduled runs).
+
+        Queries users with configured search preferences and runs a
         separate scrape per user. Skips the cycle when no users have
         preferences configured.
         """
@@ -84,6 +92,9 @@ class LinkedInSearchScheduler:
                 try:
                     users = await self.user_repository.get_all_with_search_prefs()
                     for user in users:
+                        # When user_id filter is set, only search for that user
+                        if user_id is not None and user.id != user_id:
+                            continue
                         prefs = user.search_preferences
                         if prefs is None:
                             continue

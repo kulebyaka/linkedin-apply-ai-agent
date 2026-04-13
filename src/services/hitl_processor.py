@@ -293,4 +293,6 @@ class HITLProcessor:
                 )
             except Exception:
                 logger.warning("Failed to mark job %s as FAILED in repository", job_id)
+        finally:
+            await self._ctx.unregister_workflow(job_id)
 
