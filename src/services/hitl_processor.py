@@ -120,6 +120,19 @@ class HITLProcessor:
         """Get all jobs pending HITL review for a user."""
         try:
             pending_jobs = await self._ctx.repository.get_pending(user_id)
+
+            # Load user's filter thresholds once for the whole batch
+            reject_threshold = 30
+            warning_threshold = 70
+            if self._ctx.user_repository:
+                try:
+                    user = await self._ctx.user_repository.get_by_id(user_id)
+                    if user and user.filter_preferences:
+                        reject_threshold = user.filter_preferences.reject_threshold
+                        warning_threshold = user.filter_preferences.warning_threshold
+                except Exception:
+                    logger.warning("Could not load filter preferences for user %s, using defaults", user_id)
+
             result = []
             for job in pending_jobs:
                 attempts = await self._ctx.repository.get_cv_attempts(job.job_id)
@@ -129,11 +142,14 @@ class HITLProcessor:
                         job_posting=job.job_posting or {},
                         cv_json=job.current_cv_json or {},
                         pdf_path=job.current_pdf_path,
+                        filter_result=job.filter_result,
                         attempt_count=len(attempts),
                         created_at=job.created_at,
                         source=job.source,
                         application_url=job.application_url
                         or (job.job_posting or {}).get("url"),
+                        reject_threshold=reject_threshold,
+                        warning_threshold=warning_threshold,
                     )
                 )
             return result

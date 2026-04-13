@@ -78,6 +78,7 @@ Thumbs.db
 # Data directories (contains sensitive user data)
 data/cv/*.json
 data/jobs/
+data/jobs.db
 data/generated_cvs/
 data/linkedin_cookies.json
 !data/cv/master_cv.example.json

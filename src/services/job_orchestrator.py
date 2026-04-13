@@ -104,6 +104,7 @@ class JobOrchestrator:
             "master_cv": master_cv,
             "current_step": BusinessState.QUEUED,
             "retry_count": 0,
+            "filter_result": None,
             "user_feedback": None,
             "error_message": None,
         }
@@ -188,6 +189,7 @@ class JobOrchestrator:
                 "configurable": {
                     "thread_id": thread_id,
                     "repository": self._ctx.repository,
+                    "user_repository": self._ctx.user_repository,
                 }
             }
             result = await self._ctx.prep_workflow.ainvoke(initial_state, config)

@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 
 from pydantic import BaseModel, Field, field_validator
 
+from .job_filter import UserFilterPreferences
+
 
 class UserSearchPreferences(BaseModel):
     """User's LinkedIn search preferences.
@@ -37,6 +39,7 @@ class User(BaseModel):
     display_name: str
     master_cv_json: dict | None = None
     search_preferences: UserSearchPreferences | None = None
+    filter_preferences: UserFilterPreferences | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
 
@@ -87,3 +90,4 @@ class UserUpdateRequest(BaseModel):
     display_name: str | None = Field(default=None, min_length=1)
     master_cv_json: dict | None = None
     search_preferences: UserSearchPreferences | None = None
+    filter_preferences: UserFilterPreferences | None = None

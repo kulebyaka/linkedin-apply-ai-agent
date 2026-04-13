@@ -1,19 +1,25 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { auth } from '$lib/stores/auth.svelte';
-	import { getSearchPreferences } from '$lib/api/settings';
+	import { getSearchPreferences, getFilterPreferences } from '$lib/api/settings';
 	import type { UserSearchPreferences } from '$lib/api/auth';
+	import type { UserFilterPreferences } from '$lib/types/index';
 	import ProfileSection from '$lib/components/settings/ProfileSection.svelte';
 	import CVUploadSection from '$lib/components/settings/CVUploadSection.svelte';
 	import SearchPreferencesSection from '$lib/components/settings/SearchPreferencesSection.svelte';
+	import FilterPreferencesSection from '$lib/components/settings/FilterPreferencesSection.svelte';
 
 	let searchPrefs = $state<UserSearchPreferences | null>(null);
+	let filterPrefs = $state<UserFilterPreferences | null>(null);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 
 	onMount(async () => {
 		try {
-			searchPrefs = await getSearchPreferences();
+			[searchPrefs, filterPrefs] = await Promise.all([
+				getSearchPreferences(),
+				getFilterPreferences(),
+			]);
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to load settings';
 		} finally {
@@ -46,6 +52,9 @@
 				<CVUploadSection user={auth.user} />
 				{#if searchPrefs}
 					<SearchPreferencesSection prefs={searchPrefs} />
+				{/if}
+				{#if filterPrefs}
+					<FilterPreferencesSection prefs={filterPrefs} />
 				{/if}
 			</div>
 		{/if}

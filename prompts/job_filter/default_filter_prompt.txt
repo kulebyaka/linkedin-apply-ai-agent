@@ -1,0 +1,52 @@
+You are an expert job suitability evaluator. Analyze the following job posting and determine if it is a good fit for the candidate based on the evaluation criteria below.
+
+Job Posting:
+- Title: $job_title
+- Company: $company
+- Location: $location
+- Description:
+$description
+
+$user_preferences_section
+
+Evaluation Criteria — check for ALL of the following:
+
+1. FAKE REMOTE: Does the posting say "remote" but then require on-site presence, relocation, or proximity to an office? Flag if the job is misleadingly labeled as remote.
+
+2. HIDDEN HARD REQUIREMENTS: Look for buried or easy-to-miss mandatory requirements such as:
+   - Security clearance (Secret, Top Secret, TS/SCI, etc.)
+   - Visa/citizenship restrictions (must be US citizen, no sponsorship, etc.)
+   - Specific degree requirements (PhD required, Master's required)
+   - Mandatory relocation or on-site days
+   - Drug testing or background check requirements that may be disqualifying
+
+3. MISLEADING TITLE: Does the job title match the actual responsibilities? Flag if:
+   - A "Senior" title has junior-level pay or responsibilities
+   - A "Staff/Principal" title is actually a mid-level role
+   - The title suggests one domain but the work is in another
+
+4. EXPERIENCE INFLATION: Does the posting require unreasonable years of experience?
+   - More than 10+ years for a mid-level role
+   - Requiring more years of experience with a technology than the technology has existed
+
+5. RED FLAGS: Any other concerning patterns:
+   - Unpaid or very low compensation for the role level
+   - Excessive number of required skills (kitchen sink postings)
+   - Vague descriptions that suggest the role is undefined
+   - Signs of a contract/temp role disguised as permanent
+
+Score the job from 0 to 100 based on overall suitability:
+- 90-100: Excellent match, no concerns
+- 70-89: Good match with minor concerns
+- 50-69: Moderate match, notable concerns
+- 30-49: Poor match, significant issues
+- 0-29: Not suitable, hard disqualifiers present
+
+Set disqualified=true ONLY if a hard, non-negotiable disqualifier is found (e.g., requires security clearance, requires citizenship the candidate doesn't have, fake remote when remote is mandatory).
+
+Return your analysis as JSON with these fields:
+- score: integer 0-100
+- red_flags: list of short descriptions of each concern found
+- disqualified: boolean, true only for hard disqualifiers
+- disqualifier_reason: string explaining the disqualification (null if not disqualified)
+- reasoning: 2-3 sentence summary of your overall assessment

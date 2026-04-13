@@ -8,6 +8,7 @@ import json
 import logging
 from datetime import datetime, timezone
 
+from src.models.job_filter import UserFilterPreferences
 from src.models.user import User, UserSearchPreferences
 
 logger = logging.getLogger(__name__)
@@ -47,6 +48,22 @@ class UserRepository:
 
         await UserTable.create_table(if_not_exists=True).run()
         await MagicLinkTable.create_table(if_not_exists=True).run()
+
+        # Migrate: add columns that may be missing from older databases
+        conn = await engine.get_connection()
+        try:
+            cursor = await conn.execute("PRAGMA table_info(user)")
+            rows = await cursor.fetchall()
+            user_columns = {row["name"] for row in rows}
+            if "filter_preferences" not in user_columns:
+                logger.info("Migrating: adding filter_preferences column to user table")
+                await conn.execute(
+                    "ALTER TABLE user ADD COLUMN filter_preferences JSON NULL"
+                )
+            await conn.commit()
+        finally:
+            await conn.close()
+
         logger.info("UserRepository initialized with engine at %s", db_path)
 
     async def create_user(self, email: str, display_name: str = "") -> User:
@@ -122,7 +139,7 @@ class UserRepository:
         Args:
             user_id: User ID.
             updates: Dict of fields to update. Supports: display_name,
-                     master_cv_json, search_preferences.
+                     master_cv_json, search_preferences, filter_preferences.
 
         Returns:
             The updated User.
@@ -148,6 +165,13 @@ class UserRepository:
                 db_updates["search_preferences"] = prefs.model_dump()
             else:
                 db_updates["search_preferences"] = prefs
+
+        if "filter_preferences" in updates:
+            fprefs = updates["filter_preferences"]
+            if isinstance(fprefs, UserFilterPreferences):
+                db_updates["filter_preferences"] = fprefs.model_dump()
+            else:
+                db_updates["filter_preferences"] = fprefs
 
         await UserTable.update(db_updates).where(UserTable.id == user_id).run()
 
@@ -316,6 +340,13 @@ class UserRepository:
             else None
         )
 
+        filter_prefs_raw = self._parse_json_field(row.get("filter_preferences"))
+        filter_prefs = (
+            UserFilterPreferences(**filter_prefs_raw)
+            if filter_prefs_raw
+            else None
+        )
+
         cv_json = self._parse_json_field(row.get("master_cv_json"))
 
         created_at = row.get("created_at")
@@ -336,6 +367,7 @@ class UserRepository:
             display_name=row.get("display_name", ""),
             master_cv_json=cv_json,
             search_preferences=search_prefs,
+            filter_preferences=filter_prefs,
             created_at=created_at or datetime.now(tz=timezone.utc),
             updated_at=updated_at or datetime.now(tz=timezone.utc),
         )

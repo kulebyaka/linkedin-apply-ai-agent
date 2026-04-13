@@ -40,6 +40,7 @@ UPDATABLE_FIELDS = frozenset({
     "current_cv_json",
     "current_pdf_path",
     "application_url",
+    "filter_result",
     "error_message",
     "updated_at",
 })
@@ -701,6 +702,23 @@ class SQLiteJobRepository(JobRepository):
                     "ALTER TABLE job ADD COLUMN user_id VARCHAR(36) NOT NULL DEFAULT ''"
                 )
 
+            if "filter_result" not in job_columns:
+                logger.info("Migrating: adding filter_result column to job table")
+                await conn.execute(
+                    "ALTER TABLE job ADD COLUMN filter_result JSON NULL"
+                )
+
+            # --- User table migrations ---
+            cursor = await conn.execute("PRAGMA table_info(user)")
+            rows = await cursor.fetchall()
+            user_columns = {row["name"] for row in rows}
+
+            if "filter_preferences" not in user_columns:
+                logger.info("Migrating: adding filter_preferences column to user table")
+                await conn.execute(
+                    "ALTER TABLE user ADD COLUMN filter_preferences JSON NULL"
+                )
+
             # --- CV attempt table migrations ---
             cursor = await conn.execute("PRAGMA table_info(cv_attempt)")
             rows = await cursor.fetchall()
@@ -733,6 +751,7 @@ class SQLiteJobRepository(JobRepository):
             "current_cv_json": job.current_cv_json,
             "current_pdf_path": job.current_pdf_path,
             "application_url": job.application_url,
+            "filter_result": job.filter_result,
             "error_message": job.error_message,
             "created_at": job.created_at,
             "updated_at": job.updated_at,
@@ -771,6 +790,7 @@ class SQLiteJobRepository(JobRepository):
             current_cv_json=self._parse_json_field(row.get("current_cv_json")),
             current_pdf_path=row.get("current_pdf_path"),
             application_url=row.get("application_url"),
+            filter_result=self._parse_json_field(row.get("filter_result")),
             error_message=row.get("error_message"),
             created_at=self._normalize_datetime(row.get("created_at")) or datetime.now(tz=timezone.utc),
             updated_at=self._normalize_datetime(row.get("updated_at")) or datetime.now(tz=timezone.utc),

@@ -18,6 +18,7 @@ from fastapi.staticfiles import StaticFiles
 
 from src.config.settings import get_settings
 from src.context import AppContext, create_app_context
+from src.models.job_filter import GeneratePromptRequest, UserFilterPreferences
 from src.models.state_machine import BusinessState, WorkflowStep
 from src.models.unified import (
     ApplicationHistoryItem,
@@ -376,6 +377,62 @@ async def update_search_preferences(
     ctx = _get_ctx(request)
     updated = await ctx.user_repository.update(user.id, {"search_preferences": prefs})
     return updated
+
+
+@app.get("/api/users/me/filter-preferences", response_model=UserFilterPreferences)
+async def get_filter_preferences(
+    request: Request,
+    user: CurrentUser,
+):
+    """Get current user's job filter preferences."""
+    if user.filter_preferences is None:
+        return UserFilterPreferences()
+    return user.filter_preferences
+
+
+@app.put("/api/users/me/filter-preferences", response_model=User)
+async def update_filter_preferences(
+    prefs: UserFilterPreferences,
+    request: Request,
+    user: CurrentUser,
+) -> User:
+    """Update current user's job filter preferences."""
+    ctx = _get_ctx(request)
+    updated = await ctx.user_repository.update(user.id, {"filter_preferences": prefs})
+    return updated
+
+
+@app.post("/api/users/me/filter-preferences/generate-prompt")
+async def generate_filter_prompt(
+    body: GeneratePromptRequest,
+    request: Request,
+    user: CurrentUser,
+):
+    """Generate a structured filter prompt from natural language preferences.
+
+    Calls the LLM with a meta-prompt that converts the user's free-text
+    description of their preferences into a concrete evaluation prompt.
+    Returns the generated prompt string suitable for the filter prompt textarea.
+    """
+    try:
+        from src.agents._shared import create_llm_client
+        from src.services.job_filter import JobFilter, JobFilterError
+
+        llm_client = create_llm_client()
+        job_filter = JobFilter(llm_client)
+
+        prompt = await asyncio.to_thread(
+            job_filter.generate_prompt_from_preferences,
+            body.natural_language_prefs,
+        )
+        return {"prompt": prompt}
+    except JobFilterError as e:
+        raise HTTPException(500, f"Failed to generate prompt: {e}") from None
+    except ValueError as e:
+        raise HTTPException(503, f"LLM not configured: {e}") from None
+    except Exception as e:
+        logger.error(f"Failed to generate filter prompt: {e}", exc_info=True)
+        raise HTTPException(500, "Failed to generate filter prompt") from None
 
 
 # =============================================================================
@@ -774,6 +831,7 @@ async def cleanup_jobs(
         BusinessState.DECLINED,
         BusinessState.FAILED,
         BusinessState.CV_READY,
+        BusinessState.FILTERED_OUT,
     }
     try:
         if statuses is None:
