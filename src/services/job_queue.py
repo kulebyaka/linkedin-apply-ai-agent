@@ -220,7 +220,7 @@ async def process_queue(
                 try:
                     on_job_processed(scoped_job_id, config["configurable"]["thread_id"], user_id or "")
                 except Exception:
-                    logger.debug("on_job_processed callback failed for %s", scoped_job_id)
+                    logger.warning("on_job_processed callback failed for %s", scoped_job_id, exc_info=True)
 
         except Exception:
             logger.exception("Workflow failed for queued job %s", job.job_id)

@@ -116,7 +116,7 @@ class UserRepository:
             return None
         return self._row_to_user(row)
 
-    async def update(self, user_id: str, updates: dict) -> User | None:
+    async def update(self, user_id: str, updates: dict) -> User:
         """Update a user's profile fields.
 
         Args:

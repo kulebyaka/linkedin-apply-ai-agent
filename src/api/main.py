@@ -79,6 +79,8 @@ async def get_current_user(
     ctx = _get_ctx(request)
     if ctx.auth_service is None:
         raise HTTPException(500, "Auth service not initialized")
+    if ctx.user_repository is None:
+        raise HTTPException(500, "User repository not initialized")
 
     try:
         claims = ctx.auth_service.decode_jwt(auth_token)
@@ -106,7 +108,7 @@ async def get_optional_user(
         return None
 
     ctx = _get_ctx(request)
-    if ctx.auth_service is None:
+    if ctx.auth_service is None or ctx.user_repository is None:
         return None
 
     try:
@@ -140,7 +142,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Schedule periodic cleanup of expired magic link tokens (every 24 hours)
     async def _cleanup_magic_links_loop():
         while True:
-            await asyncio.sleep(86400)  # 24 hours
             if ctx.user_repository:
                 try:
                     deleted = await ctx.user_repository.cleanup_expired_magic_links()
@@ -148,6 +149,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                         logger.info("Cleaned up %d expired magic link tokens", deleted)
                 except Exception:
                     logger.warning("Failed to clean up expired magic link tokens", exc_info=True)
+            await asyncio.sleep(86400)  # 24 hours
 
     ctx.create_background_task(_cleanup_magic_links_loop())
 
@@ -304,7 +306,7 @@ async def auth_verify(
         httponly=True,
         max_age=ctx.settings.jwt_expiry_days * 86400,
         samesite="lax",
-        secure=not ctx.settings.debug,
+        secure=ctx.settings.app_url.startswith("https://"),
         path="/",
     )
 
@@ -326,7 +328,7 @@ async def auth_logout(request: Request, response: Response):
         path="/",
         httponly=True,
         samesite="lax",
-        secure=not ctx.settings.debug,
+        secure=ctx.settings.app_url.startswith("https://"),
     )
     return {"message": "Logged out"}
 
@@ -385,7 +387,7 @@ def _get_orchestrator(request: Request) -> JobOrchestrator:
     """Helper to retrieve JobOrchestrator from request."""
     ctx = _get_ctx(request)
     if ctx.orchestrator is None:
-        raise RuntimeError("JobOrchestrator not initialized")
+        raise HTTPException(503, "JobOrchestrator not initialized")
     return ctx.orchestrator
 
 
@@ -393,7 +395,7 @@ def _get_hitl(request: Request) -> HITLProcessor:
     """Helper to retrieve HITLProcessor from request."""
     ctx = _get_ctx(request)
     if ctx.hitl_processor is None:
-        raise RuntimeError("HITLProcessor not initialized")
+        raise HTTPException(503, "HITLProcessor not initialized")
     return ctx.hitl_processor
 
 
