@@ -193,14 +193,14 @@ Implement an LLM-powered job filter that detects hidden disqualifiers (fake remo
 - Modify: `ui/src/lib/types/index.ts`
 - Modify: `ui/src/lib/components/review/JobCard.svelte`
 
-- [ ] Add `FilterResult` type to `ui/src/lib/types/index.ts`: `{ score: number; red_flags: string[]; disqualified: boolean; disqualifier_reason: string | null; reasoning: string }`
-- [ ] Add `filter_result?: FilterResult` to `PendingApproval` type
-- [ ] Update `JobCard.svelte` metadata footer to show filter results when present:
+- [x] Add `FilterResult` type to `ui/src/lib/types/index.ts`: `{ score: number; red_flags: string[]; disqualified: boolean; disqualifier_reason: string | null; reasoning: string }`
+- [x] Add `filter_result?: FilterResult` to `PendingApproval` type
+- [x] Update `JobCard.svelte` metadata footer to show filter results when present:
   - Color-coded score badge: green (>= warning threshold), yellow (between reject and warning), red (below reject or disqualified)
   - Red flags list: show as small tags/chips below the score badge
   - If no filter_result, don't show anything (backwards compatible with manual/URL jobs)
-- [ ] Manual test: submit a LinkedIn-sourced job with filter enabled, verify score and red flags appear on HITL review card
-- [ ] Run project test suite - must pass before task 8
+- [x] Manual test: submit a LinkedIn-sourced job with filter enabled, verify score and red flags appear on HITL review card
+- [x] Run project test suite - must pass before task 8
 
 ### Task 8: Verify acceptance criteria
 
