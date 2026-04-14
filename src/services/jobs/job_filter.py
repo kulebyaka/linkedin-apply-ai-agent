@@ -157,43 +157,20 @@ class JobFilter:
         job_posting: dict[str, Any],
         user_filter_prefs: UserFilterPreferences | None,
     ) -> str:
-        """Build the evaluation prompt from custom or default template.
+        """Build evaluation prompt by injecting user criteria into the default template.
 
-        If the user has a custom_prompt set, use it directly with job data
-        appended. Otherwise, use the default template with substitutions.
+        Uses custom_prompt (generated criteria) if set, otherwise falls back
+        to natural_language_prefs as a simple criteria section.
         """
+        # Build user criteria section
+        user_criteria_section = ""
         if user_filter_prefs and user_filter_prefs.custom_prompt:
-            # User has a custom prompt — prepend it with job data
-            return self._build_custom_prompt(job_posting, user_filter_prefs.custom_prompt)
-
-        # Default template path
-        return self._build_default_prompt(job_posting, user_filter_prefs)
-
-    def _build_custom_prompt(
-        self,
-        job_posting: dict[str, Any],
-        custom_prompt: str,
-    ) -> str:
-        """Build prompt using the user's custom filter prompt."""
-        job_context = (
-            f"Job Posting:\n"
-            f"- Title: {job_posting.get('title', 'N/A')}\n"
-            f"- Company: {job_posting.get('company', 'N/A')}\n"
-            f"- Location: {job_posting.get('location', 'N/A')}\n"
-            f"- Description:\n{job_posting.get('description', 'N/A')}\n"
-        )
-        return f"{job_context}\n{custom_prompt}"
-
-    def _build_default_prompt(
-        self,
-        job_posting: dict[str, Any],
-        user_filter_prefs: UserFilterPreferences | None,
-    ) -> str:
-        """Build prompt using the default template with substitutions."""
-        # Build user preferences section
-        user_preferences_section = ""
-        if user_filter_prefs and user_filter_prefs.natural_language_prefs:
-            user_preferences_section = (
+            user_criteria_section = (
+                f"User-Specific Criteria (apply IN ADDITION to the checks below):\n\n"
+                f"{user_filter_prefs.custom_prompt}"
+            )
+        elif user_filter_prefs and user_filter_prefs.natural_language_prefs:
+            user_criteria_section = (
                 f"User Preferences (use these to adjust scoring):\n"
                 f"{user_filter_prefs.natural_language_prefs}"
             )
@@ -205,5 +182,5 @@ class JobFilter:
             company=job_posting.get("company", "N/A"),
             location=job_posting.get("location", "N/A"),
             description=job_posting.get("description", "N/A"),
-            user_preferences_section=user_preferences_section,
+            user_criteria_section=user_criteria_section,
         )

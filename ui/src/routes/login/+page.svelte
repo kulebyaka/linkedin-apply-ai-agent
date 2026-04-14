@@ -104,7 +104,7 @@
 						placeholder="you@example.com"
 						required
 						disabled={isSubmitting}
-						class="font-body w-full border-2 border-[var(--color-foreground)] bg-white px-4 py-3 text-base text-[var(--color-foreground)] placeholder:text-[var(--color-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] disabled:opacity-50"
+						class="font-body w-full border-2 border-[var(--color-foreground)] bg-white px-4 py-3 text-base text-[var(--color-foreground)] placeholder:text-[var(--color-muted-foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] disabled:opacity-50"
 					/>
 				</div>
 

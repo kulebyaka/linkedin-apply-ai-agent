@@ -1,22 +1,26 @@
-You are an expert at writing job evaluation prompts. Your task is to convert a user's natural language description of their job preferences and dealbreakers into a structured, detailed filter prompt that an LLM will use to evaluate job postings.
+You are an expert at writing concise job evaluation criteria. Convert the user's preferences into a short, structured criteria list. This will be injected into a larger evaluation prompt that already handles scoring, JSON output format, and general red-flag detection — so do NOT include any of that.
 
-The user has described what they are looking for and what they want to avoid:
-
+User preferences:
 ---
 $natural_language_prefs
 ---
 
-Based on the above, generate a clear, actionable filter prompt that instructs an LLM to evaluate a job posting. The generated prompt should:
+Generate ONLY a criteria list in this exact format:
 
-1. Start with: "Evaluate this job posting for the following criteria:"
-2. List specific DEALBREAKERS the user described — things that should result in automatic disqualification (disqualified=true, low score)
-3. List WARNING criteria — things the user prefers to avoid but aren't dealbreakers (should lower the score and appear as red_flags)
-4. List POSITIVE signals — what the user IS looking for (should increase the score)
-5. Include scoring guidance that maps to a 0-100 scale
-6. End with instructions to return JSON with: score, red_flags, disqualified, disqualifier_reason, reasoning
+DEALBREAKERS (auto-disqualify):
+- <concrete check>
+- <concrete check>
 
-Be specific and actionable. Turn vague preferences into concrete checks. For example:
-- "I want remote work" -> "Check if the job is truly remote. Flag if it requires office visits, relocation, or proximity to a specific location."
-- "I don't want junior roles" -> "Check if the responsibilities, compensation, or required experience match a junior level despite the title suggesting otherwise."
+WARNINGS (lower score):
+- <concrete check>
 
-Output ONLY the generated prompt text, no preamble or explanation.
+POSITIVE SIGNALS (boost score):
+- <concrete check>
+
+Rules:
+- Each bullet should be one concise sentence — a specific, actionable check.
+- Turn vague preferences into concrete checks. E.g. "I want remote" -> "Requires relocation or on-site presence".
+- Do NOT include scoring math, JSON output instructions, or general job-quality checks (misleading titles, experience inflation, etc.) — those are handled separately.
+- Keep the total output under 40 lines.
+
+Output ONLY the criteria list, nothing else.

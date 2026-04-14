@@ -76,6 +76,44 @@ export async function downloadPDF(jobId: string): Promise<Blob> {
   return response.blob();
 }
 
+export async function triggerLinkedInSearch(): Promise<{
+  status: string;
+  message: string;
+}> {
+  const response = await fetch(`${API_BASE_URL}/api/jobs/linkedin-search`, {
+    method: "POST",
+    credentials: "include",
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Failed to trigger search: ${response.statusText} - ${errorText}`);
+  }
+
+  return response.json();
+}
+
+export async function getLinkedInSearchStatus(): Promise<{
+  enabled: boolean;
+  running: boolean;
+  last_run_time: string | null;
+  last_run_jobs: number;
+  next_run_time: string | null;
+  queue_size: number;
+}> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/jobs/linkedin-search/status`,
+    { credentials: "include" },
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Failed to get search status: ${response.statusText} - ${errorText}`);
+  }
+
+  return response.json();
+}
+
 // Helper to trigger browser download
 export function triggerDownload(blob: Blob, filename: string): boolean {
   try {

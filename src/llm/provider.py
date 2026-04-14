@@ -108,6 +108,9 @@ class BaseLLMClient(ABC):
 class OpenAIClient(BaseLLMClient):
     """OpenAI provider client"""
 
+    # Reasoning models that only support temperature=1 (default)
+    _REASONING_MODELS = ("o1", "o3", "o4-mini", "gpt-5-mini")
+
     def __init__(self, api_key: str, model: str, **kwargs):
         super().__init__(api_key, model, **kwargs)
         try:
@@ -117,14 +120,19 @@ class OpenAIClient(BaseLLMClient):
         except ImportError as err:
             raise ImportError("OpenAI package not installed. Install with: pip install openai") from err
 
+    def _is_reasoning_model(self) -> bool:
+        return any(self.model.startswith(prefix) for prefix in self._REASONING_MODELS)
+
     def generate(self, prompt: str, temperature: float = 0.7, **kwargs) -> str:
         """Generate text completion using OpenAI"""
         try:
+            api_kwargs = dict(kwargs)
+            if not self._is_reasoning_model():
+                api_kwargs["temperature"] = temperature
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=temperature,
-                **kwargs,
+                **api_kwargs,
             )
             return response.choices[0].message.content
         except Exception as e:
@@ -168,7 +176,9 @@ class OpenAIClient(BaseLLMClient):
                     # Fallback to json_object mode without schema
                     response_format = {"type": "json_object"}
                     user_prompt = f"{prompt}\n\nYou must respond with valid JSON only."
-                    api_kwargs = {"temperature": temperature, **kwargs}
+                    api_kwargs = kwargs.copy()
+                    if not self._is_reasoning_model():
+                        api_kwargs["temperature"] = temperature
 
                 logger.info(
                     f"[TIMING] Starting OpenAI API call (model={self.model}, attempt={attempt + 1})"

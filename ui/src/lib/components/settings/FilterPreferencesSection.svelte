@@ -97,21 +97,32 @@
 			rows={4}
 			disabled={saving || !enabled}
 			placeholder="Describe what you don't want in plain language. e.g. I don't want jobs that require security clearance, on-site presence, or less than 3 years experience. I'm looking for remote senior backend roles with Python or Go."
-			class="font-body w-full border-2 border-[var(--color-foreground)] bg-white px-3 py-2 text-sm text-[var(--color-foreground)] placeholder:text-[var(--color-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] disabled:opacity-50"
+			class="font-body w-full border-2 border-[var(--color-foreground)] bg-white px-3 py-2 text-sm text-[var(--color-foreground)] placeholder:text-[var(--color-muted-foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] disabled:opacity-50"
 		></textarea>
 	</div>
 
-	<div class="mb-4">
+	<div class="mb-4 flex items-center gap-3">
 		<button
 			onclick={handleGeneratePrompt}
 			disabled={generating || saving || !enabled || !naturalLanguagePrefs.trim()}
-			class="border-2 border-[var(--color-foreground)] bg-[var(--color-foreground)] px-4 py-2 font-mono text-xs uppercase tracking-wider text-white shadow-brutal transition-all duration-200 hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
+			class="inline-flex items-center gap-2 border-2 border-[var(--color-foreground)] bg-[var(--color-foreground)] px-4 py-2 font-mono text-xs uppercase tracking-wider text-white shadow-brutal transition-all duration-200 hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
 		>
-			{generating ? 'Generating...' : 'Generate Prompt'}
+			{#if generating}
+				<span class="inline-block h-3.5 w-3.5 animate-spin border-2 border-white"></span>
+				Generating…
+			{:else}
+				Generate Prompt
+			{/if}
 		</button>
-		<span class="font-mono ml-2 text-xs text-[var(--color-muted-foreground)]">
-			Uses LLM to convert your preferences into a structured filter prompt
-		</span>
+		{#if !generating}
+			<span class="font-mono text-xs text-[var(--color-muted-foreground)]">
+				Uses LLM to convert your preferences into a structured filter prompt
+			</span>
+		{:else}
+			<span class="font-mono text-xs text-[var(--color-muted-foreground)]">
+				This may take 15–30 seconds
+			</span>
+		{/if}
 	</div>
 
 	<div class="mb-4">
@@ -127,7 +138,7 @@
 			rows={8}
 			disabled={saving || !enabled}
 			placeholder="The generated filter prompt will appear here. You can edit it freely. Leave blank to use the built-in default prompt."
-			class="font-body w-full border-2 border-[var(--color-foreground)] bg-white px-3 py-2 font-mono text-xs text-[var(--color-foreground)] placeholder:text-[var(--color-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] disabled:opacity-50"
+			class="font-body w-full border-2 border-[var(--color-foreground)] bg-white px-3 py-2 font-mono text-xs text-[var(--color-foreground)] placeholder:text-[var(--color-muted-foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] disabled:opacity-50"
 		></textarea>
 		<p class="font-mono mt-1 text-xs text-[var(--color-muted-foreground)]">
 			This prompt is sent to the LLM for each job. Leave empty to use the default template.

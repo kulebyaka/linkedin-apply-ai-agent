@@ -7,7 +7,7 @@ Job Posting:
 - Description:
 $description
 
-$user_preferences_section
+$user_criteria_section
 
 Evaluation Criteria — check for ALL of the following:
 
