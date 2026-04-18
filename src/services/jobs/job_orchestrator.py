@@ -23,6 +23,7 @@ from src.models.unified import (
     JobSubmitRequest,
     JobSubmitResponse,
 )
+from src.models.user import UserModelPreferences
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,11 @@ class JobOrchestrator:
         self._ctx = ctx
 
     async def submit_job(
-        self, request: JobSubmitRequest, user_id: str, master_cv: dict
+        self,
+        request: JobSubmitRequest,
+        user_id: str,
+        master_cv: dict,
+        model_preferences: UserModelPreferences | None = None,
     ) -> JobSubmitResponse:
         """Validate request, build workflow state, and dispatch preparation workflow.
 
@@ -64,9 +69,23 @@ class JobOrchestrator:
         job_id = str(uuid.uuid4())
         thread_id = str(uuid.uuid4())
 
+        # Resolve CV-generation model preference:
+        # 1. Per-request override (JobDescriptionInput.llm_provider/llm_model)
+        # 2. User's saved model_preferences.cv_generation
+        # 3. Global .env default (None → resolved by create_llm_client())
+        default_provider: str | None = None
+        default_model: str | None = None
+        if model_preferences and model_preferences.cv_generation:
+            default_provider = model_preferences.cv_generation.provider
+            default_model = model_preferences.cv_generation.model
+
         # Build raw_input based on source
         if request.source == "url":
-            raw_input: dict = {"url": request.url}
+            raw_input: dict = {
+                "url": request.url,
+                "llm_provider": default_provider,
+                "llm_model": default_model,
+            }
             if request.job_description:
                 raw_input.update(
                     {
@@ -76,6 +95,10 @@ class JobOrchestrator:
                         "requirements": request.job_description.requirements,
                     }
                 )
+                if request.job_description.llm_provider:
+                    raw_input["llm_provider"] = request.job_description.llm_provider
+                if request.job_description.llm_model:
+                    raw_input["llm_model"] = request.job_description.llm_model
         else:  # manual
             raw_input = {
                 "title": request.job_description.title,
@@ -83,15 +106,15 @@ class JobOrchestrator:
                 "description": request.job_description.description,
                 "requirements": request.job_description.requirements,
                 "template_name": request.job_description.template_name,
-                "llm_provider": request.job_description.llm_provider,
-                "llm_model": request.job_description.llm_model,
+                "llm_provider": request.job_description.llm_provider or default_provider,
+                "llm_model": request.job_description.llm_model or default_model,
             }
             logger.info(
                 "Job %s: template_name=%s, llm_provider=%s, llm_model=%s",
                 job_id,
                 request.job_description.template_name,
-                request.job_description.llm_provider,
-                request.job_description.llm_model,
+                raw_input["llm_provider"],
+                raw_input["llm_model"],
             )
 
         # Build initial state

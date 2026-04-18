@@ -8,6 +8,7 @@
 	import CVUploadSection from '$lib/components/settings/CVUploadSection.svelte';
 	import SearchPreferencesSection from '$lib/components/settings/SearchPreferencesSection.svelte';
 	import FilterPreferencesSection from '$lib/components/settings/FilterPreferencesSection.svelte';
+	import ModelPreferencesSection from '$lib/components/settings/ModelPreferencesSection.svelte';
 	import StartSearchSection from '$lib/components/settings/StartSearchSection.svelte';
 
 	let searchPrefs = $state<UserSearchPreferences | null>(null);
@@ -57,6 +58,7 @@
 				{#if filterPrefs}
 					<FilterPreferencesSection prefs={filterPrefs} />
 				{/if}
+				<ModelPreferencesSection />
 				<StartSearchSection />
 			</div>
 		{/if}

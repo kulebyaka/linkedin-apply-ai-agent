@@ -9,7 +9,7 @@ import logging
 from datetime import datetime, timezone
 
 from src.models.job_filter import UserFilterPreferences
-from src.models.user import User, UserSearchPreferences
+from src.models.user import User, UserModelPreferences, UserSearchPreferences
 
 logger = logging.getLogger(__name__)
 
@@ -33,23 +33,25 @@ class UserRepository:
 
         from src.services.db.tables import MagicLinkTable, UserTable
 
-        # Skip if engine already configured (e.g., by SQLiteJobRepository)
-        if UserTable._meta._db is not None:
-            return
+        # Set up engine if not already configured (SQLiteJobRepository may have
+        # done this already when repo_type=sqlite).
+        if UserTable._meta._db is None:
+            from piccolo.engine.sqlite import SQLiteEngine
 
-        from piccolo.engine.sqlite import SQLiteEngine
+            db_dir = Path(db_path).parent
+            db_dir.mkdir(parents=True, exist_ok=True)
 
-        db_dir = Path(db_path).parent
-        db_dir.mkdir(parents=True, exist_ok=True)
+            engine = SQLiteEngine(path=db_path)
+            UserTable._meta._db = engine
+            MagicLinkTable._meta._db = engine
 
-        engine = SQLiteEngine(path=db_path)
-        UserTable._meta._db = engine
-        MagicLinkTable._meta._db = engine
+            await UserTable.create_table(if_not_exists=True).run()
+            await MagicLinkTable.create_table(if_not_exists=True).run()
 
-        await UserTable.create_table(if_not_exists=True).run()
-        await MagicLinkTable.create_table(if_not_exists=True).run()
-
-        # Migrate: add columns that may be missing from older databases
+        # Run schema migrations every startup regardless of how the engine
+        # was configured — older databases may be missing columns added by
+        # later versions.
+        engine = UserTable._meta._db
         conn = await engine.get_connection()
         try:
             cursor = await conn.execute("PRAGMA table_info(user)")
@@ -59,6 +61,11 @@ class UserRepository:
                 logger.info("Migrating: adding filter_preferences column to user table")
                 await conn.execute(
                     "ALTER TABLE user ADD COLUMN filter_preferences JSON NULL"
+                )
+            if "model_preferences" not in user_columns:
+                logger.info("Migrating: adding model_preferences column to user table")
+                await conn.execute(
+                    "ALTER TABLE user ADD COLUMN model_preferences JSON NULL"
                 )
             await conn.commit()
         finally:
@@ -173,6 +180,13 @@ class UserRepository:
             else:
                 db_updates["filter_preferences"] = fprefs
 
+        if "model_preferences" in updates:
+            mprefs = updates["model_preferences"]
+            if isinstance(mprefs, UserModelPreferences):
+                db_updates["model_preferences"] = mprefs.model_dump()
+            else:
+                db_updates["model_preferences"] = mprefs
+
         await UserTable.update(db_updates).where(UserTable.id == user_id).run()
 
         return await self.get_by_id(user_id)
@@ -227,22 +241,18 @@ class UserRepository:
             )
         ).run()
 
-    async def verify_magic_link(self, token: str) -> str | None:
-        """Verify a magic link token.
+    async def peek_magic_link(self, token: str) -> str | None:
+        """Check that a magic link token is valid without consuming it.
 
-        Checks that the token exists, hasn't been used, and hasn't expired.
-        If valid, marks it as used and returns the email.
-
-        Uses raw SQL with rowcount check to prevent TOCTOU race: two
-        concurrent requests may both SELECT an unused token, but only one
-        UPDATE will match WHERE used=0. We check cursor.rowcount to ensure
-        only the winning request returns the email.
+        Returns the email if the token exists, is unused, and has not
+        expired. Does NOT mark the token as used — call claim_magic_link()
+        after downstream steps succeed.
 
         Args:
-            token: The magic link token to verify.
+            token: The magic link token to check.
 
         Returns:
-            The email address if token is valid, None otherwise.
+            The email address if the token is currently valid, None otherwise.
         """
         from src.services.db.tables import MagicLinkTable
 
@@ -253,10 +263,7 @@ class UserRepository:
             .run()
         )
 
-        if not row:
-            return None
-
-        if row["used"]:
+        if not row or row["used"]:
             return None
 
         expires_at = row["expires_at"]
@@ -268,10 +275,40 @@ class UserRepository:
         if expires_at < datetime.now(tz=timezone.utc):
             return None
 
-        # Atomic claim: UPDATE only if still unused AND not expired.
-        # Including the expiry check in the WHERE clause prevents a race
-        # where a token passes the SELECT expiry check but expires before
-        # the UPDATE executes.
+        return row["email"]
+
+    async def verify_magic_link(self, token: str) -> str | None:
+        """Validate and consume a magic link token in a single step.
+
+        Equivalent to peek_magic_link() followed by claim_magic_link().
+        Kept for callers that have no downstream steps that could fail
+        between the two. Returns the email if the claim succeeded, None
+        otherwise.
+        """
+        email = await self.peek_magic_link(token)
+        if email is None:
+            return None
+        if not await self.claim_magic_link(token):
+            return None
+        return email
+
+    async def claim_magic_link(self, token: str) -> bool:
+        """Atomically mark a magic link token as used.
+
+        Uses an UPDATE with the full validity predicate so the claim only
+        succeeds if the token is still unused AND unexpired. This prevents
+        TOCTOU races where two concurrent verifications both pass
+        peek_magic_link() — only one UPDATE can match WHERE used=0.
+
+        Args:
+            token: The token to claim.
+
+        Returns:
+            True if the caller won the claim, False if it was already
+            consumed or has expired.
+        """
+        from src.services.db.tables import MagicLinkTable
+
         engine = MagicLinkTable._meta._db
         conn = await engine.get_connection()
         try:
@@ -281,14 +318,11 @@ class UserRepository:
                 (token,),
             )
             if cursor.rowcount == 0:
-                # Another concurrent request already consumed this token,
-                # or the token expired between SELECT and UPDATE.
-                return None
+                return False
             await conn.commit()
         finally:
             await conn.close()
-
-        return row["email"]
+        return True
 
     async def cleanup_expired_magic_links(self) -> int:
         """Delete expired magic link tokens.
@@ -347,6 +381,13 @@ class UserRepository:
             else None
         )
 
+        model_prefs_raw = self._parse_json_field(row.get("model_preferences"))
+        model_prefs = (
+            UserModelPreferences(**model_prefs_raw)
+            if model_prefs_raw
+            else None
+        )
+
         cv_json = self._parse_json_field(row.get("master_cv_json"))
 
         created_at = row.get("created_at")
@@ -368,6 +409,7 @@ class UserRepository:
             master_cv_json=cv_json,
             search_preferences=search_prefs,
             filter_preferences=filter_prefs,
+            model_preferences=model_prefs,
             created_at=created_at or datetime.now(tz=timezone.utc),
             updated_at=updated_at or datetime.now(tz=timezone.utc),
         )

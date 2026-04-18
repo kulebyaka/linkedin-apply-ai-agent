@@ -184,24 +184,35 @@ async def process_queue(
                 logger.warning("Dedup check failed for job %s, proceeding with processing", scoped_job_id)
 
         try:
-            # Load master CV: from user's DB record if user_id is present, else fallback
+            # Load master CV and CV-generation model preference from user's DB record.
             master_cv = None
+            cv_provider: str | None = None
+            cv_model: str | None = None
             if user_id and user_repository:
                 try:
                     user = await user_repository.get_by_id(user_id)
                     if user and user.master_cv_json:
                         master_cv = user.master_cv_json
+                    if user and user.model_preferences and user.model_preferences.cv_generation:
+                        cv_provider = user.model_preferences.cv_generation.provider
+                        cv_model = user.model_preferences.cv_generation.model
                 except Exception:
-                    logger.warning("Failed to load master CV for user %s, using fallback", user_id)
+                    logger.warning("Failed to load user record for %s, using fallback", user_id)
 
             if master_cv is None:
                 master_cv = master_cv_loader()
+
+            raw_input = job.model_dump()
+            if cv_provider:
+                raw_input["llm_provider"] = cv_provider
+            if cv_model:
+                raw_input["llm_model"] = cv_model
 
             initial_state = {
                 "job_id": scoped_job_id,
                 "source": "linkedin",
                 "mode": "full",
-                "raw_input": job.model_dump(),
+                "raw_input": raw_input,
                 "job_posting": {},
                 "master_cv": master_cv,
                 "tailored_cv_json": {},

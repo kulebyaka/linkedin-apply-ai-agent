@@ -116,7 +116,10 @@ class AuthService:
         Raises:
             ValueError: If token is invalid or expired.
         """
-        email = await self._user_repo.verify_magic_link(token)
+        # Peek first — validate the token without consuming it so that
+        # downstream failures (e.g. database errors during user lookup) do
+        # not burn the user's only magic link.
+        email = await self._user_repo.peek_magic_link(token)
         if email is None:
             raise ValueError("Invalid or expired magic link token")
 
@@ -135,6 +138,13 @@ class AuthService:
                 user = await self._user_repo.get_by_email(email)
                 if user is None:
                     raise
+
+        # Atomically claim the token only after the user lookup succeeded.
+        # If a concurrent request already consumed it, surface the same
+        # error as an invalid token.
+        claimed = await self._user_repo.claim_magic_link(token)
+        if not claimed:
+            raise ValueError("Invalid or expired magic link token")
 
         return user
 

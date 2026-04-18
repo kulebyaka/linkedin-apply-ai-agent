@@ -9,10 +9,26 @@ This module contains models for:
 
 import re
 from datetime import datetime, timezone
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
 from .job_filter import UserFilterPreferences
+
+
+class ModelChoice(BaseModel):
+    """A user's chosen LLM model for a specific operation."""
+
+    provider: Literal["openai", "deepseek", "grok", "anthropic"]
+    model: str = Field(min_length=1)
+
+
+class UserModelPreferences(BaseModel):
+    """Per-operation LLM model choices for a user."""
+
+    cv_generation: ModelChoice | None = None
+    job_filtering: ModelChoice | None = None
+    filter_prompt_generation: ModelChoice | None = None
 
 
 class UserSearchPreferences(BaseModel):
@@ -40,6 +56,7 @@ class User(BaseModel):
     master_cv_json: dict | None = None
     search_preferences: UserSearchPreferences | None = None
     filter_preferences: UserFilterPreferences | None = None
+    model_preferences: UserModelPreferences | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
 
@@ -91,3 +108,4 @@ class UserUpdateRequest(BaseModel):
     master_cv_json: dict | None = None
     search_preferences: UserSearchPreferences | None = None
     filter_preferences: UserFilterPreferences | None = None
+    model_preferences: UserModelPreferences | None = None

@@ -27,6 +27,7 @@ class UserTable(Table, tablename="user"):
     master_cv_json = JSON(null=True)
     search_preferences = JSON(null=True)  # Serialized LinkedInSearchParams
     filter_preferences = JSON(null=True)  # Serialized UserFilterPreferences
+    model_preferences = JSON(null=True)  # Serialized UserModelPreferences
     created_at = Timestamptz(index=True)
     updated_at = Timestamptz()
 

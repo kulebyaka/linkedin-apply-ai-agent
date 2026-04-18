@@ -247,6 +247,7 @@ async def filter_job_node(
 
     # Load per-user filter preferences
     user_filter_prefs = None
+    user_model_prefs = None
     user_id = state.get("user_id", "")
     if user_id:
         user_repo = get_user_repository_from_config(config or {})
@@ -255,8 +256,9 @@ async def filter_job_node(
                 user = await user_repo.get_by_id(user_id)
                 if user:
                     user_filter_prefs = user.filter_preferences
+                    user_model_prefs = user.model_preferences
             except Exception as e:
-                logger.warning(f"Could not load filter preferences for user {user_id}: {e}")
+                logger.warning(f"Could not load user preferences for user {user_id}: {e}")
 
     # Per-user kill switch
     if user_filter_prefs is not None and not user_filter_prefs.enabled:
@@ -277,7 +279,12 @@ async def filter_job_node(
     )
 
     try:
-        llm_client = create_llm_client()
+        filter_provider = None
+        filter_model = None
+        if user_model_prefs and user_model_prefs.job_filtering:
+            filter_provider = user_model_prefs.job_filtering.provider
+            filter_model = user_model_prefs.job_filtering.model
+        llm_client = create_llm_client(filter_provider, filter_model)
         job_filter = JobFilter(llm_client=llm_client)
 
         job_posting = state.get("job_posting") or {}

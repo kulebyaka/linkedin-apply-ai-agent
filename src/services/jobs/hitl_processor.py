@@ -218,12 +218,17 @@ class HITLProcessor:
         try:
             retry_thread_id = str(uuid.uuid4())
 
-            # Load master CV from user's DB record
+            # Load master CV and CV-generation model preference from user's DB record
             master_cv = None
+            cv_provider: str | None = None
+            cv_model: str | None = None
             if self._ctx.user_repository:
                 user = await self._ctx.user_repository.get_by_id(user_id)
                 if user and user.master_cv_json:
                     master_cv = user.master_cv_json
+                if user and user.model_preferences and user.model_preferences.cv_generation:
+                    cv_provider = user.model_preferences.cv_generation.provider
+                    cv_model = user.model_preferences.cv_generation.model
             if not master_cv:
                 from src.agents._shared import load_master_cv
                 master_cv = load_master_cv()
@@ -239,6 +244,8 @@ class HITLProcessor:
                 "job_posting": job_record.job_posting,
                 "master_cv": master_cv,
                 "retry_count": retry_count,
+                "llm_provider": cv_provider,
+                "llm_model": cv_model,
                 "current_step": BusinessState.QUEUED,
                 "error_message": None,
             }

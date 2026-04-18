@@ -44,6 +44,10 @@ class RetryWorkflowState(TypedDict):
     tailored_cv_json: dict
     tailored_cv_pdf_path: str
 
+    # Optional per-user LLM overrides for CV composition
+    llm_provider: str | None
+    llm_model: str | None
+
     # Status
     current_step: str
     error_message: str | None
@@ -149,6 +153,8 @@ async def compose_cv_node(state: RetryWorkflowState) -> RetryWorkflowState:
     result = await compose_cv(
         state,
         job_id=job_id,
+        llm_provider=state.get("llm_provider"),
+        llm_model=state.get("llm_model"),
         user_feedback=user_feedback,
     )
 

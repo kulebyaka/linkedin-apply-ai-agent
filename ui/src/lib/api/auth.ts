@@ -6,8 +6,36 @@ export interface User {
 	display_name: string;
 	master_cv_json: Record<string, unknown> | null;
 	search_preferences: UserSearchPreferences | null;
+	model_preferences: UserModelPreferences | null;
 	created_at: string;
 	updated_at: string;
+}
+
+export type LLMOperation =
+	| 'cv_generation'
+	| 'job_filtering'
+	| 'filter_prompt_generation';
+
+export interface ModelChoice {
+	provider: 'openai' | 'deepseek' | 'grok' | 'anthropic';
+	model: string;
+}
+
+export interface UserModelPreferences {
+	cv_generation: ModelChoice | null;
+	job_filtering: ModelChoice | null;
+	filter_prompt_generation: ModelChoice | null;
+}
+
+export interface ModelCatalogEntry {
+	provider: 'openai' | 'deepseek' | 'grok' | 'anthropic';
+	model: string;
+	display_name: string;
+	label: string;
+	input_cost_per_1m: number;
+	output_cost_per_1m: number;
+	supports_strict_schema: boolean;
+	supports_json_object: boolean;
 }
 
 export interface UserSearchPreferences {

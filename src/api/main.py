@@ -264,6 +264,71 @@ async def health():
 
 
 # =============================================================================
+# LLM Model Catalog
+# =============================================================================
+
+
+@app.get("/api/llm/models")
+async def list_llm_models(
+    operation: Annotated[str | None, Query()] = None,
+):
+    """Return the LLM model catalog, optionally filtered by operation.
+
+    Public endpoint (no auth) — exposes only model names, display names, and
+    pricing. Never exposes API keys or user data.
+    """
+    from src.llm.provider import LLMProvider
+    from src.llm.model_catalog import (
+        OPERATIONS,
+        build_label,
+        get_catalog_for_operation,
+    )
+
+    if operation is not None and operation not in OPERATIONS:
+        raise HTTPException(
+            422,
+            f"Invalid operation: {operation!r}. "
+            f"Must be one of: {', '.join(OPERATIONS)} (or omit for full catalog)",
+        )
+
+    entries = get_catalog_for_operation(operation)  # type: ignore[arg-type]
+
+    # Resolve the global .env default so the UI can pre-select it when the
+    # user has no stored preference for an operation.
+    try:
+        default_provider = LLMProvider(settings.primary_llm_provider)
+    except ValueError:
+        default_provider = LLMProvider.OPENAI
+    provider_to_model = {
+        LLMProvider.OPENAI: settings.openai_model,
+        LLMProvider.DEEPSEEK: settings.deepseek_model,
+        LLMProvider.GROK: settings.grok_model,
+        LLMProvider.ANTHROPIC: settings.anthropic_model,
+    }
+    default_model = provider_to_model.get(default_provider, "")
+
+    return {
+        "models": [
+            {
+                "provider": e.provider.value,
+                "model": e.model,
+                "display_name": e.display_name,
+                "label": build_label(e),
+                "input_cost_per_1m": e.input_cost_per_1m,
+                "output_cost_per_1m": e.output_cost_per_1m,
+                "supports_strict_schema": e.supports_strict_schema,
+                "supports_json_object": e.supports_json_object,
+            }
+            for e in entries
+        ],
+        "default": {
+            "provider": default_provider.value,
+            "model": default_model,
+        },
+    }
+
+
+# =============================================================================
 # Authentication Endpoints
 # =============================================================================
 
@@ -418,7 +483,14 @@ async def generate_filter_prompt(
         from src.agents._shared import create_llm_client
         from src.services.jobs.job_filter import JobFilter, JobFilterError
 
-        llm_client = create_llm_client()
+        provider_override = None
+        model_override = None
+        if user.model_preferences and user.model_preferences.filter_prompt_generation:
+            choice = user.model_preferences.filter_prompt_generation
+            provider_override = choice.provider
+            model_override = choice.model
+
+        llm_client = create_llm_client(provider_override, model_override)
         job_filter = JobFilter(llm_client)
 
         prompt = await asyncio.to_thread(
@@ -475,7 +547,9 @@ async def submit_job(
             master_cv = load_master_cv()
 
         orchestrator = _get_orchestrator(http_request)
-        return await orchestrator.submit_job(job_request, user.id, master_cv)
+        return await orchestrator.submit_job(
+            job_request, user.id, master_cv, model_preferences=user.model_preferences
+        )
     except ValueError as e:
         raise HTTPException(400, str(e)) from None
     except Exception as e:
