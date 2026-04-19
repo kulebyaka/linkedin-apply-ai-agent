@@ -12,20 +12,43 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from src.config.settings import Settings
 from .job_queue import JobQueue
-from src.services.linkedin.linkedin_search import LinkedInSearchParams
+from src.services.linkedin.linkedin_search import LinkedInSearchParams, LinkedInSearchURLBuilder
 
 if TYPE_CHECKING:
     from src.services.linkedin.linkedin_scraper import LinkedInJobScraper
     from src.services.auth.user_repository import UserRepository
 
 logger = logging.getLogger(__name__)
+
+RunReason = Literal[
+    "ok",
+    "no_results",
+    "no_users",
+    "scrape_failed",
+    "auth_failed",
+]
+
+
+@dataclass
+class UserLastRun:
+    """Outcome of the most recent search run for one user.
+
+    search_url lets the user open the exact LinkedIn query in a browser
+    to verify whether LinkedIn itself actually returns anything.
+    """
+    time: datetime
+    jobs_found: int
+    reason: RunReason
+    search_url: str | None
+    message: str | None = None
 
 
 class LinkedInSearchScheduler:
@@ -46,6 +69,7 @@ class LinkedInSearchScheduler:
         self._search_lock = asyncio.Lock()
         self._last_run_time: datetime | None = None
         self._last_run_jobs: int = 0
+        self._last_run_per_user: dict[str, UserLastRun] = {}
         self._running = False
 
     async def run_search(self, user_id: str | None = None) -> int:
@@ -127,26 +151,54 @@ class LinkedInSearchScheduler:
                     "No users with search preferences found — skipping LinkedIn search. "
                     "Configure search preferences in Settings to enable scheduled searches."
                 )
-                self._last_run_time = datetime.now(tz=timezone.utc)
+                now = datetime.now(tz=timezone.utc)
+                self._last_run_time = now
                 self._last_run_jobs = 0
+                if user_id is not None:
+                    self._last_run_per_user[user_id] = UserLastRun(
+                        time=now,
+                        jobs_found=0,
+                        reason="no_users",
+                        search_url=None,
+                        message="Search preferences not configured.",
+                    )
                 return 0
 
             # Authenticate only when there are actual searches to perform.
-            await self.scraper.browser.ensure_authenticated()
+            try:
+                await self.scraper.browser.ensure_authenticated()
+            except Exception as exc:
+                logger.exception("LinkedIn authentication failed")
+                now = datetime.now(tz=timezone.utc)
+                for plan_user_id, _ in search_plans:
+                    if plan_user_id is None:
+                        continue
+                    self._last_run_per_user[plan_user_id] = UserLastRun(
+                        time=now,
+                        jobs_found=0,
+                        reason="auth_failed",
+                        search_url=None,
+                        message=str(exc),
+                    )
+                self._last_run_time = now
+                self._last_run_jobs = 0
+                return 0
 
             total_enqueued = 0
 
-            for user_id, params in search_plans:
+            for plan_user_id, params in search_plans:
                 # Reset scraper dedup state before each user's search so that
                 # the same LinkedIn posting can be found independently by
                 # different users (the within-user pagination dedup is rebuilt
                 # fresh each time).
                 self.scraper.reset_seen()
 
+                search_url = LinkedInSearchURLBuilder.build_url(params)
+
                 try:
                     jobs = await self.scraper.scrape_and_enrich(params)
                     logger.info(
-                        "Scraped %d jobs for user=%s", len(jobs), user_id or "global"
+                        "Scraped %d jobs for user=%s", len(jobs), plan_user_id or "global"
                     )
 
                     # Auto-record scraped jobs to fixture file
@@ -162,19 +214,35 @@ class LinkedInSearchScheduler:
                             )
 
                     # Enqueue with user_id tag
-                    enqueued = await self.queue.put_batch(jobs, user_id=user_id)
+                    enqueued = await self.queue.put_batch(jobs, user_id=plan_user_id)
                     logger.info(
                         "Enqueued %d jobs for user=%s (queue size: %d)",
                         enqueued,
-                        user_id or "global",
+                        plan_user_id or "global",
                         self.queue.size(),
                     )
                     total_enqueued += enqueued
-                except Exception:
+
+                    if plan_user_id is not None:
+                        self._last_run_per_user[plan_user_id] = UserLastRun(
+                            time=datetime.now(tz=timezone.utc),
+                            jobs_found=len(jobs),
+                            reason="ok" if jobs else "no_results",
+                            search_url=search_url,
+                        )
+                except Exception as exc:
                     logger.exception(
                         "Search failed for user=%s, continuing to next",
-                        user_id or "global",
+                        plan_user_id or "global",
                     )
+                    if plan_user_id is not None:
+                        self._last_run_per_user[plan_user_id] = UserLastRun(
+                            time=datetime.now(tz=timezone.utc),
+                            jobs_found=0,
+                            reason="scrape_failed",
+                            search_url=search_url,
+                            message=str(exc),
+                        )
 
             self._last_run_time = datetime.now(tz=timezone.utc)
             self._last_run_jobs = total_enqueued
@@ -233,3 +301,7 @@ class LinkedInSearchScheduler:
         if job:
             return job.next_run_time
         return None
+
+    def get_last_run_for_user(self, user_id: str) -> UserLastRun | None:
+        """Return the most recent run outcome for a specific user, if any."""
+        return self._last_run_per_user.get(user_id)

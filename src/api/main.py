@@ -634,7 +634,21 @@ async def get_linkedin_search_status(request: Request, user: CurrentUser):
             "last_run_jobs": 0,
             "next_run_time": None,
             "queue_size": queue_size,
+            "user_last_run": None,
         }
+
+    user_run = ctx.scheduler.get_last_run_for_user(user.id)
+    user_last_run = (
+        {
+            "time": user_run.time.isoformat(),
+            "jobs_found": user_run.jobs_found,
+            "reason": user_run.reason,
+            "search_url": user_run.search_url,
+            "message": user_run.message,
+        }
+        if user_run is not None
+        else None
+    )
 
     return {
         "enabled": settings.linkedin_search_schedule_enabled,
@@ -647,6 +661,7 @@ async def get_linkedin_search_status(request: Request, user: CurrentUser):
         if ctx.scheduler.next_run_time
         else None,
         "queue_size": queue_size,
+        "user_last_run": user_last_run,
     }
 
 

@@ -93,6 +93,14 @@ export async function triggerLinkedInSearch(): Promise<{
   return response.json();
 }
 
+export type UserLastRun = {
+  time: string;
+  jobs_found: number;
+  reason: "ok" | "no_results" | "no_users" | "scrape_failed" | "auth_failed";
+  search_url: string | null;
+  message: string | null;
+};
+
 export async function getLinkedInSearchStatus(): Promise<{
   enabled: boolean;
   running: boolean;
@@ -100,6 +108,7 @@ export async function getLinkedInSearchStatus(): Promise<{
   last_run_jobs: number;
   next_run_time: string | null;
   queue_size: number;
+  user_last_run: UserLastRun | null;
 }> {
   const response = await fetch(
     `${API_BASE_URL}/api/jobs/linkedin-search/status`,

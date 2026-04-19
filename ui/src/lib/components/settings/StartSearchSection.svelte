@@ -1,11 +1,17 @@
 <script lang="ts">
 	import { auth } from '$lib/stores/auth.svelte';
-	import { triggerLinkedInSearch } from '$lib/api/client';
+	import {
+		triggerLinkedInSearch,
+		getLinkedInSearchStatus,
+		type UserLastRun,
+	} from '$lib/api/client';
 
 	let triggering = $state(false);
 	let triggered = $state(false);
 	let showConfirmModal = $state(false);
 	let error = $state<string | null>(null);
+	let lastRun = $state<UserLastRun | null>(null);
+	let polling = $state(false);
 
 	const hasCv = $derived(auth.user?.master_cv_json != null);
 	const hasSearchPrefs = $derived(auth.user?.search_preferences != null);
@@ -28,15 +34,56 @@
 	async function handleConfirm() {
 		triggering = true;
 		error = null;
+		lastRun = null;
+
+		const triggerStart = new Date();
 
 		try {
 			await triggerLinkedInSearch();
 			triggered = true;
 			showConfirmModal = false;
+			pollForOutcome(triggerStart);
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to start search';
 		} finally {
 			triggering = false;
+		}
+	}
+
+	async function pollForOutcome(triggerStart: Date) {
+		polling = true;
+		const deadline = Date.now() + 120_000; // 2 min ceiling
+		try {
+			while (Date.now() < deadline) {
+				await new Promise((r) => setTimeout(r, 2000));
+				try {
+					const status = await getLinkedInSearchStatus();
+					const run = status.user_last_run;
+					if (run && new Date(run.time) >= triggerStart) {
+						lastRun = run;
+						return;
+					}
+				} catch {
+					// Ignore transient errors, keep polling
+				}
+			}
+		} finally {
+			polling = false;
+		}
+	}
+
+	function reasonLabel(reason: UserLastRun['reason']): string {
+		switch (reason) {
+			case 'ok':
+				return 'Completed';
+			case 'no_results':
+				return 'LinkedIn returned no results';
+			case 'no_users':
+				return 'Search preferences not configured';
+			case 'scrape_failed':
+				return 'Scrape failed';
+			case 'auth_failed':
+				return 'LinkedIn authentication failed';
 		}
 	}
 
@@ -98,17 +145,55 @@
 	{/if}
 
 	{#if triggered}
-		<div class="border-2 border-[var(--color-success)] bg-emerald-50 px-4 py-3">
-			<p class="mb-2 font-mono text-sm text-[var(--color-foreground)]">
-				LinkedIn search started! Jobs will appear on the Review page as they're processed.
-			</p>
-			<a
-				href="/"
-				class="inline-block border-2 border-[var(--color-foreground)] bg-white px-4 py-2 font-mono text-xs uppercase tracking-wider text-[var(--color-foreground)] shadow-brutal transition-all duration-200 hover:-translate-y-0.5"
-			>
-				Go to Review
-			</a>
-		</div>
+		{#if !lastRun && polling}
+			<div class="border-2 border-[var(--color-foreground)] bg-white px-4 py-3">
+				<p class="font-mono text-sm text-[var(--color-foreground)]">
+					LinkedIn search running… waiting for results.
+				</p>
+			</div>
+		{:else if lastRun && lastRun.reason === 'ok'}
+			<div class="border-2 border-[var(--color-success)] bg-emerald-50 px-4 py-3">
+				<p class="mb-2 font-mono text-sm text-[var(--color-foreground)]">
+					Search complete — <strong>{lastRun.jobs_found}</strong> job{lastRun.jobs_found === 1 ? '' : 's'} found. Jobs will appear on the Review page as they're processed.
+				</p>
+				<a
+					href="/"
+					class="inline-block border-2 border-[var(--color-foreground)] bg-white px-4 py-2 font-mono text-xs uppercase tracking-wider text-[var(--color-foreground)] shadow-brutal transition-all duration-200 hover:-translate-y-0.5"
+				>
+					Go to Review
+				</a>
+			</div>
+		{:else if lastRun}
+			<div class="border-2 border-[var(--color-error)] bg-amber-50 px-4 py-3">
+				<p class="mb-2 font-mono text-sm font-bold text-[var(--color-foreground)]">
+					{reasonLabel(lastRun.reason)} — 0 jobs found.
+				</p>
+				{#if lastRun.reason === 'no_results'}
+					<p class="mb-2 font-mono text-xs text-[var(--color-foreground)]">
+						Open the exact query LinkedIn saw and verify in a browser — if you also see "No matching jobs found" there, tweak your search preferences (e.g. use a valid country like "Germany" instead of "EU").
+					</p>
+				{/if}
+				{#if lastRun.message}
+					<p class="mb-2 font-mono text-xs text-[var(--color-foreground)]">{lastRun.message}</p>
+				{/if}
+				{#if lastRun.search_url}
+					<a
+						href={lastRun.search_url}
+						target="_blank"
+						rel="noopener noreferrer"
+						class="inline-block break-all border-2 border-[var(--color-foreground)] bg-white px-3 py-2 font-mono text-xs text-[var(--color-foreground)] shadow-brutal transition-all duration-200 hover:-translate-y-0.5"
+					>
+						Open LinkedIn search URL ↗
+					</a>
+				{/if}
+			</div>
+		{:else}
+			<div class="border-2 border-[var(--color-foreground)] bg-white px-4 py-3">
+				<p class="font-mono text-sm text-[var(--color-foreground)]">
+					Search triggered. Outcome polling timed out — check back on the Review page.
+				</p>
+			</div>
+		{/if}
 	{:else}
 		<button
 			onclick={handleClick}
