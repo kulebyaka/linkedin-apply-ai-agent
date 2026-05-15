@@ -8,6 +8,7 @@
 		downloadPDF,
 		triggerDownload,
 		MasterCVMissingError,
+		LLMNotConfiguredError,
 	} from '$lib/api/client';
 	import JobDescriptionForm from '$lib/components/JobDescriptionForm.svelte';
 	import ProgressStepper from '$lib/components/ProgressStepper.svelte';
@@ -43,6 +44,12 @@
 				appState.setError(error.message);
 				showInfoToast('Set up your master CV to continue. Redirecting to settings...');
 				setTimeout(() => goto('/settings?onboarding=1'), 1200);
+				return;
+			}
+			if (error instanceof LLMNotConfiguredError) {
+				const adminMsg = 'Service not configured — contact admin.';
+				appState.setError(adminMsg);
+				showErrorToast(adminMsg);
 				return;
 			}
 			const errorMsg = error instanceof Error ? error.message : 'Unknown error occurred';

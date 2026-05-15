@@ -125,12 +125,73 @@ CurrentUser = Annotated[User, Depends(get_current_user)]
 OptionalUser = Annotated[User | None, Depends(get_optional_user)]
 
 
+_PROVIDER_API_KEY_FIELD = {
+    "openai": "openai_api_key",
+    "deepseek": "deepseek_api_key",
+    "grok": "grok_api_key",
+    "anthropic": "anthropic_api_key",
+}
+
+
+def _check_llm_configured(ctx: AppContext) -> None:
+    """Populate ctx.llm_ok / ctx.llm_error based on the primary LLM provider key.
+
+    Does not raise — operators can set the key without a restart.
+    """
+    provider = ctx.settings.primary_llm_provider
+    field_name = _PROVIDER_API_KEY_FIELD.get(provider)
+    if field_name is None:
+        ctx.llm_ok = False
+        ctx.llm_error = (
+            f"PRIMARY_LLM_PROVIDER={provider!r} is not a recognised provider. "
+            f"Must be one of: {', '.join(sorted(_PROVIDER_API_KEY_FIELD))}."
+        )
+        logger.error(ctx.llm_error)
+        return
+
+    key = getattr(ctx.settings, field_name, None)
+    if not key:
+        env_var = field_name.upper()
+        ctx.llm_ok = False
+        ctx.llm_error = (
+            f"PRIMARY_LLM_PROVIDER is {provider!r} but {env_var} is not set. "
+            "Set the API key in .env (or via environment) — the app will accept "
+            "jobs as soon as it's configured (no restart required for retries)."
+        )
+        logger.error(ctx.llm_error)
+        return
+
+    ctx.llm_ok = True
+    ctx.llm_error = None
+
+
+def _warn_on_cors_app_url_mismatch() -> None:
+    """Log a warning when CORS only allows localhost but APP_URL points elsewhere."""
+    app_url = settings.app_url or ""
+    if not app_url:
+        return
+    is_localhost = any(token in app_url for token in ("localhost", "127.0.0.1", "0.0.0.0"))
+    if is_localhost:
+        return
+    origins = settings.cors_origins or []
+    if all(("localhost" in o) or ("127.0.0.1" in o) for o in origins):
+        logger.warning(
+            "APP_URL=%s is non-local but CORS_ORIGINS only allows localhost (%s). "
+            "Set CORS_ORIGINS in .env to include your deployed origin (e.g. "
+            "CORS_ORIGINS=https://your-domain.com).",
+            app_url, origins,
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan: create AppContext, initialize, yield, cleanup."""
     ctx = create_app_context(settings)
     app.state.ctx = ctx
     app.state.consumer_manager = _consumer_manager
+
+    _check_llm_configured(ctx)
+    _warn_on_cors_app_url_mismatch()
 
     logger.info(f"Starting up with repository type: {settings.repo_type}")
     await ctx.repository.initialize()
@@ -540,6 +601,20 @@ async def submit_job(
 ) -> JobSubmitResponse:
     """Submit a job for CV generation."""
     try:
+        ctx = _get_ctx(http_request)
+        if not ctx.llm_ok:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "llm_not_configured",
+                    "message": (
+                        "The CV generator is not configured to talk to an LLM. "
+                        "Please contact the administrator."
+                    ),
+                    "detail": ctx.llm_error,
+                },
+            )
+
         # Require a master CV on the user record — fail fast at submit time
         # rather than deep inside the workflow.
         master_cv = user.master_cv_json

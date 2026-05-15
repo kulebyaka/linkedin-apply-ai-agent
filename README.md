@@ -110,6 +110,25 @@ black src/          # Format code
 mypy src/           # Type check
 ```
 
+## Deploying to a Real Domain
+
+When moving from `localhost` to a public domain, set the following in `.env`:
+
+- `APP_URL=https://apply.example.com` — base URL for magic-link callbacks.
+- `CORS_ORIGINS=https://apply.example.com` — comma-separated origins (or a
+  JSON list). The API will log a startup warning if `APP_URL` is non-local
+  but `CORS_ORIGINS` only allows localhost.
+- `JWT_SECRET` — generate with `openssl rand -hex 32`. Must be at least 32
+  characters; the placeholder `change-me-in-production` will refuse to sign
+  tokens at runtime.
+- `RESEND_API_KEY` and `RESEND_FROM` — magic-link email delivery.
+- One of `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `DEEPSEEK_API_KEY` /
+  `GROK_API_KEY` matching `PRIMARY_LLM_PROVIDER`. On startup the API checks
+  the configured provider's key; if missing, `POST /api/jobs/submit` returns
+  `503 llm_not_configured` until the operator fixes it (no restart needed
+  for the next attempt).
+- `REPO_TYPE=sqlite` and `DB_PATH=./data/jobs.db` for persistence.
+
 ## License
 
 All Rights Reserved. This code is provided for viewing purposes only. No permission is granted to use, copy, modify, or distribute this software.

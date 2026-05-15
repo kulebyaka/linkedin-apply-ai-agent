@@ -6,9 +6,10 @@ Rule applied here:
 """
 
 from functools import lru_cache
+from typing import Annotated
 
 from pydantic import field_validator
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, NoDecode
 
 _JWT_SECRET_MIN_LENGTH = 32
 
@@ -179,12 +180,32 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------------------
     api_host: str = "0.0.0.0"
     api_port: int = 8000
-    cors_origins: list = [
+    # NoDecode prevents pydantic-settings from JSON-parsing the env value
+    # before our validator runs; we accept both JSON lists and CSV strings.
+    cors_origins: Annotated[list[str], NoDecode] = [
         "http://localhost:3000",
         "http://localhost:5173",
         "http://127.0.0.1:8000",
         "http://localhost:8000",
     ]
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, v):
+        """Accept either a JSON list or a comma-separated string for CORS_ORIGINS.
+
+        A real-domain deploy can use `CORS_ORIGINS=https://a.com,https://b.com`
+        without having to write JSON in .env.
+        """
+        if v is None or v == "":
+            return v
+        if isinstance(v, str):
+            stripped = v.strip()
+            if stripped.startswith("["):
+                import json
+                return json.loads(stripped)
+            return [item.strip() for item in stripped.split(",") if item.strip()]
+        return v
 
     class Config:
         env_file = ".env"

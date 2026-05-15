@@ -162,14 +162,14 @@ Steps:
 - Add: a unit test under `tests/unit/` that constructs `Settings` with `CORS_ORIGINS="https://a.com,https://b.com"` (via monkeypatched env) and asserts the parsed list.
 
 Steps:
-- [ ] Implement env-driven CORS parsing + startup warning.
-- [ ] Add `llm_ok`/`llm_error` to `AppContext`; populate in lifespan.
-- [ ] Short-circuit `/api/jobs/submit` with 503 when LLM not configured.
-- [ ] Frontend handles 503 with a clear admin-facing banner.
-- [ ] Update `.env.example` and `README.md`.
-- [ ] Write the CORS parsing unit test.
-- [ ] Manual: start API with no LLM keys → submit → expect 503 with the structured payload; start with `CORS_ORIGINS=https://example.com` and confirm middleware reflects it via curl with `-H "Origin: https://example.com"`.
-- [ ] Run project test suite: `uv run pytest` — must pass before Task 5.
+- [x] Implement env-driven CORS parsing + startup warning.
+- [x] Add `llm_ok`/`llm_error` to `AppContext`; populate in lifespan.
+- [x] Short-circuit `/api/jobs/submit` with 503 when LLM not configured.
+- [x] Frontend handles 503 with a clear admin-facing banner.
+- [x] Update `.env.example` and `README.md`.
+- [x] Write the CORS parsing unit test.
+- [x] Manual: start API with no LLM keys → submit → expect 503 with the structured payload; start with `CORS_ORIGINS=https://example.com` and confirm middleware reflects it via curl with `-H "Origin: https://example.com"`.
+- [x] Run project test suite: `uv run pytest` — must pass before Task 5.
 
 ### Task 5: LinkedIn auth resilience (S3)
 

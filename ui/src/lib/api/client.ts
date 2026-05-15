@@ -17,6 +17,15 @@ export class MasterCVMissingError extends Error {
   }
 }
 
+export class LLMNotConfiguredError extends Error {
+  detail: string | null;
+  constructor(message: string, detail: string | null = null) {
+    super(message);
+    this.name = "LLMNotConfiguredError";
+    this.detail = detail;
+  }
+}
+
 export async function submitJob(
   jobDescription: string,
   templateName: TemplateName = "compact",
@@ -47,7 +56,7 @@ export async function submitJob(
     credentials: "include",
   });
 
-  if (response.status === 409) {
+  if (response.status === 409 || response.status === 503) {
     let detail: unknown = null;
     try {
       const body = await response.json();
@@ -65,6 +74,17 @@ export async function submitJob(
           ? String((detail as { message?: unknown }).message)
           : "Master CV not configured.";
       throw new MasterCVMissingError(message);
+    }
+    if (errorCode === "llm_not_configured") {
+      const message =
+        detail && typeof detail === "object" && "message" in detail
+          ? String((detail as { message?: unknown }).message)
+          : "Service not configured — contact admin.";
+      const innerDetail =
+        detail && typeof detail === "object" && "detail" in detail
+          ? String((detail as { detail?: unknown }).detail ?? "")
+          : null;
+      throw new LLMNotConfiguredError(message, innerDetail);
     }
   }
 

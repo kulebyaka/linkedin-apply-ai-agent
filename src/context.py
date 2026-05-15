@@ -48,6 +48,11 @@ class AppContext:
     orchestrator: JobOrchestrator | None = None
     hitl_processor: HITLProcessor | None = None
 
+    # Startup pre-flight results — populated during lifespan.
+    # Operators may fix without restart, so these are flags rather than crashes.
+    llm_ok: bool = True
+    llm_error: str | None = None
+
     # Thread-safe tracking for in-progress workflows
     _tracking_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     _workflow_threads: dict[str, dict] = field(default_factory=dict)
