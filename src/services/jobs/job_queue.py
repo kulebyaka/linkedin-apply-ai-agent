@@ -107,6 +107,7 @@ async def process_queue(
     delay_between_jobs: float = 2.0,
     stop_event: asyncio.Event | None = None,
     on_job_processed: Any | None = None,
+    workflow_timeout_seconds: float | None = None,
 ) -> int:
     """Consume jobs from *queue* and run the preparation workflow for each.
 
@@ -148,6 +149,13 @@ async def process_queue(
             workflow = create_preparation_workflow()
         if master_cv_loader is None:
             master_cv_loader = load_master_cv
+
+    if workflow_timeout_seconds is None:
+        try:
+            from src.config.settings import get_settings
+            workflow_timeout_seconds = float(get_settings().workflow_timeout_seconds)
+        except Exception:
+            workflow_timeout_seconds = 300.0
 
     processed = 0
 
@@ -226,7 +234,10 @@ async def process_queue(
             }
 
             config = {"configurable": {"thread_id": f"linkedin-{scoped_job_id}", "repository": job_repository, "user_repository": user_repository}}
-            await workflow.ainvoke(initial_state, config=config)
+            await asyncio.wait_for(
+                workflow.ainvoke(initial_state, config=config),
+                timeout=workflow_timeout_seconds,
+            )
             logger.info("Workflow completed for job %s", scoped_job_id)
             processed += 1
 
@@ -236,16 +247,25 @@ async def process_queue(
                 except Exception:
                     logger.warning("on_job_processed callback failed for %s", scoped_job_id, exc_info=True)
 
-        except Exception:
-            logger.exception("Workflow failed for queued job %s", job.job_id)
-            # Persist a failure record so the failure is traceable
+        except BaseException as exc:
+            if isinstance(exc, (asyncio.CancelledError, KeyboardInterrupt, SystemExit)):
+                raise
+            is_timeout = isinstance(exc, asyncio.TimeoutError)
+            if is_timeout:
+                error_message = f"Workflow timed out after {workflow_timeout_seconds:g}s"
+                logger.error("Workflow timed out for queued job %s after %.1fs", job.job_id, workflow_timeout_seconds)
+            else:
+                # Truncate long messages so the column doesn't bloat
+                raw = str(exc) or exc.__class__.__name__
+                error_message = raw[:500]
+                logger.exception("Workflow failed for queued job %s", job.job_id)
             try:
                 existing = await job_repository.get(scoped_job_id)
                 if existing is not None:
                     if BusinessState.FAILED in ALLOWED_TRANSITIONS.get(existing.status, set()):
                         await job_repository.update(
                             scoped_job_id,
-                            {"status": BusinessState.FAILED, "error_message": "Workflow failed unexpectedly"},
+                            {"status": BusinessState.FAILED, "error_message": error_message},
                         )
                 else:
                     now = datetime.now(tz=timezone.utc)
@@ -257,7 +277,7 @@ async def process_queue(
                             mode="full",
                             status=BusinessState.FAILED,
                             raw_input=job.model_dump(),
-                            error_message="Workflow failed unexpectedly",
+                            error_message=error_message,
                             created_at=now,
                             updated_at=now,
                         )

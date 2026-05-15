@@ -115,6 +115,7 @@ class Settings(BaseSettings):
     job_fetch_interval_hours: int = 1
     max_concurrent_applications: int = 3
     browser_headless: bool = True   # env-specific: set false in .env for visual debugging
+    workflow_timeout_seconds: int = 300  # per-job cap; failing fast beats hanging in processing
 
     # -------------------------------------------------------------------------
     # Job Filter  (same for everyone — defaults defined here)

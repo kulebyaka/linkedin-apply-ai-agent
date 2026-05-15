@@ -708,6 +708,12 @@ class SQLiteJobRepository(JobRepository):
                     "ALTER TABLE job ADD COLUMN filter_result JSON NULL"
                 )
 
+            if "error_message" not in job_columns:
+                logger.info("Migrating: adding error_message column to job table")
+                await conn.execute(
+                    "ALTER TABLE job ADD COLUMN error_message TEXT"
+                )
+
             # --- User table migrations ---
             cursor = await conn.execute("PRAGMA table_info(user)")
             rows = await cursor.fetchall()

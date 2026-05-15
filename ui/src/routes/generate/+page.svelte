@@ -52,8 +52,11 @@
 	}
 
 	// Start polling for job status
+	const MAX_POLL_ATTEMPTS = 150; // 5 minutes at 2s intervals — matches workflow_timeout_seconds
 	function startPolling(jobId: string) {
+		let attempts = 0;
 		const intervalId = setInterval(async () => {
+			attempts += 1;
 			try {
 				const status = await getJobStatus(jobId);
 
@@ -69,6 +72,13 @@
 					const errorMsg = status.error_message || 'Job processing failed';
 					appState.setError(errorMsg);
 					showErrorToast(`CV generation failed: ${errorMsg}`);
+				} else if (attempts >= MAX_POLL_ATTEMPTS) {
+					clearInterval(intervalId);
+					const errorMsg =
+						status.error_message ||
+						'Still running after 5 minutes. The job may be stuck — check back later or try again.';
+					appState.setError(errorMsg);
+					showErrorToast(errorMsg);
 				}
 			} catch (error) {
 				clearInterval(intervalId);

@@ -124,14 +124,14 @@ Steps:
 - Create: `tests/unit/test_workflow_timeout.py` — feed `process_queue` a fake workflow that `await asyncio.sleep(10)` with `workflow_timeout_seconds=0.1`; assert job ends as `failed` with `error_message` set.
 
 Steps:
-- [ ] Add `workflow_timeout_seconds` setting.
-- [ ] Add `error_message` to `JobRecord` model + `Job` table + idempotent ALTER in `initialize()`.
-- [ ] Wrap workflow invocation in `asyncio.wait_for`; populate `error_message` on timeout and on caught exceptions.
-- [ ] Expose `error_message` in `/api/jobs/{job_id}/status` payload.
-- [ ] Frontend: cap poll attempts; render `error_message` when present.
-- [ ] Write `tests/unit/test_workflow_timeout.py`.
-- [ ] Manual: submit a job with an invalid LLM key — UI shows the error within timeout, not "Loading…" forever.
-- [ ] Run project test suite: `uv run pytest` — must pass before Task 3.
+- [x] Add `workflow_timeout_seconds` setting.
+- [x] Add `error_message` to `JobRecord` model + `Job` table + idempotent ALTER in `initialize()`.
+- [x] Wrap workflow invocation in `asyncio.wait_for`; populate `error_message` on timeout and on caught exceptions.
+- [x] Expose `error_message` in `/api/jobs/{job_id}/status` payload.
+- [x] Frontend: cap poll attempts; render `error_message` when present.
+- [x] Write `tests/unit/test_workflow_timeout.py`.
+- [x] Manual: submit a job with an invalid LLM key — UI shows the error within timeout, not "Loading…" forever.
+- [x] Run project test suite: `uv run pytest` — must pass before Task 3.
 
 ### Task 3: Honest "Approve" action — "Coming soon" toast (B3)
 
