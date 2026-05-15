@@ -540,16 +540,26 @@ async def submit_job(
 ) -> JobSubmitResponse:
     """Submit a job for CV generation."""
     try:
-        # Load master CV from user's DB record, fall back to filesystem
+        # Require a master CV on the user record — fail fast at submit time
+        # rather than deep inside the workflow.
         master_cv = user.master_cv_json
         if not master_cv:
-            from src.agents._shared import load_master_cv
-            master_cv = load_master_cv()
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "master_cv_missing",
+                    "message": (
+                        "No master CV configured. Open Settings to upload one before submitting jobs."
+                    ),
+                },
+            )
 
         orchestrator = _get_orchestrator(http_request)
         return await orchestrator.submit_job(
             job_request, user.id, master_cv, model_preferences=user.model_preferences
         )
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(400, str(e)) from None
     except Exception as e:

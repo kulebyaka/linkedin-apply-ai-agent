@@ -10,6 +10,13 @@ import type {
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
+export class MasterCVMissingError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "MasterCVMissingError";
+  }
+}
+
 export async function submitJob(
   jobDescription: string,
   templateName: TemplateName = "compact",
@@ -39,6 +46,27 @@ export async function submitJob(
     body: JSON.stringify(requestBody),
     credentials: "include",
   });
+
+  if (response.status === 409) {
+    let detail: unknown = null;
+    try {
+      const body = await response.json();
+      detail = body?.detail ?? body;
+    } catch {
+      // fall through
+    }
+    const errorCode =
+      detail && typeof detail === "object" && "error" in detail
+        ? (detail as { error?: unknown }).error
+        : null;
+    if (errorCode === "master_cv_missing") {
+      const message =
+        detail && typeof detail === "object" && "message" in detail
+          ? String((detail as { message?: unknown }).message)
+          : "Master CV not configured.";
+      throw new MasterCVMissingError(message);
+    }
+  }
 
   if (!response.ok) {
     const errorText = await response.text();

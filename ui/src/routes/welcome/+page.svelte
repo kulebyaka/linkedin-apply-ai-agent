@@ -1,7 +1,11 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { auth } from '$lib/stores/auth.svelte';
+	import { needsOnboarding } from '$lib/guards/onboarding';
 
 	let mounted = $state(false);
+
+	const showCvSetup = $derived(auth.isAuthenticated && needsOnboarding(auth.user));
 
 	onMount(() => {
 		requestAnimationFrame(() => {
@@ -147,6 +151,27 @@
 </svelte:head>
 
 <div class="grain-texture min-h-screen bg-[var(--color-background)]" class:page-loaded={mounted}>
+
+	{#if showCvSetup}
+		<div class="border-b-4 border-[var(--color-foreground)] bg-[var(--color-primary)] px-4 py-4 sm:px-8">
+			<div class="mx-auto flex max-w-4xl flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+				<div>
+					<p class="font-mono text-xs font-bold uppercase tracking-[0.2em] text-[var(--color-foreground)]/70">
+						// FIRST STEP
+					</p>
+					<p class="font-heading mt-1 text-base font-bold text-[var(--color-foreground)] sm:text-lg">
+						Set up your master CV to start generating tailored applications.
+					</p>
+				</div>
+				<a
+					href="/settings?onboarding=1"
+					class="flex-shrink-0 border-4 border-[var(--color-foreground)] bg-[var(--color-foreground)] px-6 py-3 font-mono text-sm font-bold uppercase tracking-wider text-[var(--color-primary)] shadow-brutal transition-all duration-150 hover:-translate-y-0.5"
+				>
+					Set up your CV →
+				</a>
+			</div>
+		</div>
+	{/if}
 
 	<!-- ━━━━━━━━━━━━━━━━ HERO ━━━━━━━━━━━━━━━━ -->
 	<section class="section-hero relative overflow-hidden border-b-4 border-[var(--color-foreground)] px-4 py-16 sm:px-8 lg:py-24">

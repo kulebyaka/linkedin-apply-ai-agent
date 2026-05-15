@@ -5,10 +5,13 @@
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import { auth } from '$lib/stores/auth.svelte';
+	import { needsOnboarding } from '$lib/guards/onboarding';
 
 	let { children } = $props();
 
 	const publicPaths = ['/login', '/auth/verify', '/welcome'];
+	// Routes where onboarding redirect should not fire (user is already where they need to be).
+	const onboardingExemptPaths = ['/settings', '/welcome', '/login', '/auth/verify'];
 
 	let menuOpen = $state(false);
 
@@ -29,6 +32,14 @@
 
 		if (!auth.isAuthenticated && !isPublicPath) {
 			goto('/login');
+			return;
+		}
+
+		if (auth.isAuthenticated && needsOnboarding(auth.user)) {
+			const isOnboardingExempt = onboardingExemptPaths.some((p) => pathname.startsWith(p));
+			if (!isOnboardingExempt) {
+				goto('/settings?onboarding=1');
+			}
 		}
 	});
 

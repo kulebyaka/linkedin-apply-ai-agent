@@ -100,15 +100,15 @@ Close the seven blocker/serious gaps that would prevent 3–5 friends from using
 - Create: `tests/unit/test_cv_template.py` — assert `cv_template.json` validates against the `MasterCV` Pydantic model.
 
 Steps:
-- [ ] Create `cv_template.json` and validate it against `MasterCV` locally before committing.
-- [ ] Implement `needsOnboarding` guard + apply in `+layout.ts`.
-- [ ] Wire "Load template" button + onboarding banner in `CVUploadSection.svelte`.
-- [ ] Add 409 short-circuit to `/api/jobs/submit` (check `master_cv_json` is non-empty before queueing).
-- [ ] Handle 409 in `ui/src/lib/api/jobs.ts` submit caller; redirect from `generate/+page.svelte`.
-- [ ] Add "Set up your CV" CTA on welcome page (visible when authed + no CV).
-- [ ] Write `tests/unit/test_cv_template.py` validating the template parses as `MasterCV`.
-- [ ] Manual: new user → login → welcome → "Set up your CV" → settings opens in onboarding mode → "Load template" populates → save succeeds → submit job works end-to-end.
-- [ ] Run project test suite: `uv run pytest` — must pass before Task 2.
+- [x] Create `cv_template.json` and validate it against `MasterCV` locally before committing.
+- [x] Implement `needsOnboarding` guard + apply in `+layout.ts`.
+- [x] Wire "Load template" button + onboarding banner in `CVUploadSection.svelte`.
+- [x] Add 409 short-circuit to `/api/jobs/submit` (check `master_cv_json` is non-empty before queueing).
+- [x] Handle 409 in `ui/src/lib/api/jobs.ts` submit caller; redirect from `generate/+page.svelte`.
+- [x] Add "Set up your CV" CTA on welcome page (visible when authed + no CV).
+- [x] Write `tests/unit/test_cv_template.py` validating the template parses as `MasterCV`.
+- [x] Manual: new user → login → welcome → "Set up your CV" → settings opens in onboarding mode → "Load template" populates → save succeeds → submit job works end-to-end.
+- [x] Run project test suite: `uv run pytest` — must pass before Task 2.
 
 ### Task 2: Workflow timeout + surfaced error (B2)
 

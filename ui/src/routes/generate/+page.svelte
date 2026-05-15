@@ -1,7 +1,14 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
+	import { goto } from '$app/navigation';
 	import { appState } from '$lib/stores/appState.svelte';
-	import { submitJob, getJobStatus, downloadPDF, triggerDownload } from '$lib/api/client';
+	import {
+		submitJob,
+		getJobStatus,
+		downloadPDF,
+		triggerDownload,
+		MasterCVMissingError,
+	} from '$lib/api/client';
 	import JobDescriptionForm from '$lib/components/JobDescriptionForm.svelte';
 	import ProgressStepper from '$lib/components/ProgressStepper.svelte';
 	import ToastNotification from '$lib/components/ToastNotification.svelte';
@@ -32,6 +39,12 @@
 			appState.startPolling(response.job_id);
 			startPolling(response.job_id);
 		} catch (error) {
+			if (error instanceof MasterCVMissingError) {
+				appState.setError(error.message);
+				showInfoToast('Set up your master CV to continue. Redirecting to settings...');
+				setTimeout(() => goto('/settings?onboarding=1'), 1200);
+				return;
+			}
 			const errorMsg = error instanceof Error ? error.message : 'Unknown error occurred';
 			appState.setError(errorMsg);
 			showErrorToast(`Failed to submit job: ${errorMsg}`);

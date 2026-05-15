@@ -2,8 +2,12 @@
 	import type { User } from '$lib/api/auth';
 	import { updateCV } from '$lib/api/settings';
 	import { auth } from '$lib/stores/auth.svelte';
+	import { page } from '$app/stores';
+	import cvTemplate from '$lib/data/cv_template.json';
 
 	let { user }: { user: User } = $props();
+
+	const isOnboarding = $derived($page.url.searchParams.get('onboarding') === '1');
 
 	let cvText = $state(user.master_cv_json ? JSON.stringify(user.master_cv_json, null, 2) : '');
 	let jsonValid = $state(true);
@@ -50,119 +54,20 @@
 		reader.readAsText(file);
 	}
 
-	const CV_TEMPLATE = {
-		contact: {
-			full_name: 'Jane Smith',
-			email: 'jane.smith@example.com',
-			phone: '+1 555 000 0000',
-			location: 'San Francisco, CA',
-			linkedin_url: 'https://linkedin.com/in/janesmith',
-			github_url: 'https://github.com/janesmith',
-			portfolio_url: null
-		},
-		summary:
-			'Experienced software engineer with 8+ years building scalable distributed systems. Passionate about developer tooling, clean architecture, and mentoring.',
-		experiences: [
-			{
-				company: 'Acme Corp',
-				position: 'Senior Software Engineer',
-				start_date: '2020-03-01',
-				end_date: null,
-				is_current: true,
-				location: 'San Francisco, CA',
-				description:
-					'Lead engineer on the platform team responsible for core infrastructure serving 10M+ users.',
-				achievements: [
-					'Reduced API latency by 40% through caching and query optimization',
-					'Mentored 3 junior engineers, improving team velocity by 20%'
-				],
-				technologies: ['Python', 'FastAPI', 'PostgreSQL', 'Redis', 'Kubernetes'],
-				projects: [
-					{
-						name: 'Data Pipeline Redesign',
-						role: 'Tech Lead',
-						description: 'Redesigned the ETL pipeline processing 10M events/day',
-						achievements: ['Improved throughput by 3x', 'Reduced cost by 50%'],
-						technologies: ['Apache Kafka', 'Spark', 'Python'],
-						duration: '2021-2022'
-					}
-				],
-				company_context: {
-					industry: 'SaaS / FinTech',
-					size: '500-1000',
-					notable_clients: ['Fortune 500 Co', 'Global Bank']
-				}
-			}
-		],
-		education: [
-			{
-				institution: 'University of California, Berkeley',
-				degree: 'Bachelor of Science',
-				field_of_study: 'Computer Science',
-				start_date: '2012-09-01',
-				end_date: '2016-05-31',
-				gpa: '3.8',
-				achievements: ["Dean's List", 'Hackathon Winner 2015']
-			}
-		],
-		skills: [
-			{
-				name: 'Python',
-				category: 'Programming Languages',
-				proficiency: 'Expert',
-				years_of_experience: '8+',
-				use_cases: ['Backend APIs', 'Data pipelines', 'ML scripting']
-			},
-			{
-				name: 'TypeScript',
-				category: 'Programming Languages',
-				proficiency: 'Intermediate',
-				years_of_experience: '4',
-				use_cases: ['Frontend (React/Svelte)', 'Node.js services']
-			}
-		],
-		projects: [
-			{
-				name: 'Open Source CLI Tool',
-				description: 'A CLI tool for automating developer workflows',
-				url: 'https://github.com/janesmith/cli-tool',
-				technologies: ['Python', 'Click', 'Rich'],
-				achievements: ['2000+ GitHub stars', 'Used by 500+ developers'],
-				status: 'active',
-				last_updated: '2024-01-15',
-				role: 'Creator & Maintainer',
-				architecture: ['CLI', 'Plugin system'],
-				visibility: 'public'
-			}
-		],
-		certifications: [
-			{
-				name: 'AWS Solutions Architect – Associate',
-				issuer: 'Amazon',
-				date: '2022-06',
-				description: 'Cloud architecture and AWS service design',
-				topics: ['EC2', 'S3', 'VPC', 'Lambda', 'RDS']
-			}
-		],
-		languages: [
-			{ language: 'English', level: 'Native' },
-			{ language: 'Spanish', level: 'Professional Working Proficiency' }
-		],
-		interests: {
-			technical: ['Distributed systems', 'Open source', 'Developer tooling'],
-			sports: ['Rock climbing', 'Cycling'],
-			other: ['Photography', 'Coffee brewing']
-		}
-	};
-
 	function handleDownloadTemplate() {
-		const blob = new Blob([JSON.stringify(CV_TEMPLATE, null, 2)], { type: 'application/json' });
+		const blob = new Blob([JSON.stringify(cvTemplate, null, 2)], { type: 'application/json' });
 		const url = URL.createObjectURL(blob);
 		const a = document.createElement('a');
 		a.href = url;
 		a.download = 'cv_template.json';
 		a.click();
 		URL.revokeObjectURL(url);
+	}
+
+	function handleLoadTemplate() {
+		cvText = JSON.stringify(cvTemplate, null, 2);
+		jsonValid = true;
+		error = null;
 	}
 
 	async function handleSave() {
@@ -195,6 +100,32 @@
 
 <section class="border-4 border-[var(--color-foreground)] bg-white p-6 shadow-brutal">
 	<h2 class="font-heading mb-4 text-lg tracking-tight">Master CV</h2>
+
+	{#if isOnboarding && !user.master_cv_json}
+		<div class="mb-4 border-2 border-[var(--color-primary)] bg-[var(--color-primary)]/10 px-4 py-3">
+			<p class="font-heading mb-1 text-sm font-bold text-[var(--color-foreground)]">
+				Welcome — let's set up your master CV
+			</p>
+			<p class="font-body text-xs text-[var(--color-muted-foreground)]">
+				Your CV powers every tailored application. Click <strong>Load template</strong> below to
+				start from a working example, edit the fields to match your background, then save.
+			</p>
+		</div>
+	{/if}
+
+	<details class="mb-4 border-2 border-[var(--color-muted)] bg-[var(--color-background)] px-3 py-2">
+		<summary class="font-mono cursor-pointer text-xs uppercase tracking-wider text-[var(--color-foreground)]">
+			Required fields
+		</summary>
+		<ul class="font-mono mt-2 list-disc space-y-1 pl-5 text-xs text-[var(--color-muted-foreground)]">
+			<li><code>contact.full_name</code>, <code>contact.email</code></li>
+			<li><code>summary</code> (1–3 sentences)</li>
+			<li><code>experiences[]</code> — each: <code>company</code>, <code>position</code>, <code>start_date</code> (YYYY-MM-DD), <code>description</code></li>
+			<li><code>education[]</code> — each: <code>institution</code>, <code>degree</code>, <code>field_of_study</code>, <code>start_date</code></li>
+			<li><code>skills[]</code> — each: <code>name</code>, <code>category</code></li>
+			<li>Optional: <code>projects</code>, <code>certifications</code>, <code>languages</code>, <code>interests</code></li>
+		</ul>
+	</details>
 
 	{#if cvSummary}
 		<div class="mb-4 border-2 border-[var(--color-muted)] bg-[var(--color-background)] px-3 py-2">
@@ -243,6 +174,13 @@
 			class="border-2 border-[var(--color-foreground)] bg-white px-3 py-1.5 font-mono text-xs uppercase tracking-wider text-[var(--color-foreground)] transition-all duration-200 hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
 		>
 			Upload .json file
+		</button>
+		<button
+			onclick={handleLoadTemplate}
+			disabled={saving}
+			class="border-2 border-[var(--color-foreground)] bg-[var(--color-primary)] px-3 py-1.5 font-mono text-xs uppercase tracking-wider text-[var(--color-foreground)] transition-all duration-200 hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
+		>
+			Load template
 		</button>
 		<button
 			onclick={handleDownloadTemplate}
