@@ -12,6 +12,8 @@
 	let showToast = $state(false);
 	let toastMessage = $state('');
 	let toastType = $state<'success' | 'error' | 'info'>('info');
+	let toastDuration = $state(5000);
+	let showBetaTooltip = $state(false);
 
 	onMount(() => {
 		reviewQueue.loadPending();
@@ -52,14 +54,21 @@
 	) {
 		const result = await reviewQueue.submitDecision(decision, feedback);
 		if (result) {
-			showToastMessage(
-				decision === 'approved'
-					? 'Application Approved'
-					: decision === 'declined'
-						? 'Application Declined'
-						: 'CV Regeneration Started',
-				'success'
-			);
+			if (decision === 'approved') {
+				// Surface the API message verbatim so the "Coming soon — apply manually"
+				// copy stays in sync with the backend.
+				showToastMessage(
+					result.message ||
+						'Approved. Automatic application is not yet implemented — please apply via LinkedIn manually for now.',
+					'info',
+					10000
+				);
+			} else {
+				showToastMessage(
+					decision === 'declined' ? 'Application Declined' : 'CV Regeneration Started',
+					'success'
+				);
+			}
 		} else if (reviewQueue.error) {
 			showToastMessage(reviewQueue.error, 'error');
 		}
@@ -76,9 +85,14 @@
 		}
 	}
 
-	function showToastMessage(message: string, type: 'success' | 'error' | 'info') {
+	function showToastMessage(
+		message: string,
+		type: 'success' | 'error' | 'info',
+		duration: number = 5000
+	) {
 		toastMessage = message;
 		toastType = type;
+		toastDuration = duration;
 		showToast = true;
 	}
 </script>
@@ -93,7 +107,35 @@
 		<header class="mb-8">
 			<div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 				<div>
-					<h1 class="font-heading text-2xl font-bold sm:text-3xl">Review Applications</h1>
+					<div class="flex items-center gap-2">
+						<h1 class="font-heading text-2xl font-bold sm:text-3xl">Review Applications</h1>
+						<div class="relative">
+							<button
+								type="button"
+								onmouseenter={() => (showBetaTooltip = true)}
+								onmouseleave={() => (showBetaTooltip = false)}
+								onfocus={() => (showBetaTooltip = true)}
+								onblur={() => (showBetaTooltip = false)}
+								onclick={() => (showBetaTooltip = !showBetaTooltip)}
+								aria-label="v1 beta status — what's not yet automated"
+								aria-expanded={showBetaTooltip}
+								class="border-2 border-[var(--color-foreground)] bg-[var(--color-background)] px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider shadow-brutal hover:-translate-y-0.5 transition-transform"
+							>
+								v1 beta
+							</button>
+							{#if showBetaTooltip}
+								<div
+									role="tooltip"
+									class="absolute left-0 top-full z-20 mt-2 w-72 border-2 border-[var(--color-foreground)] bg-[var(--color-background)] p-3 font-mono text-xs shadow-brutal"
+								>
+									<p class="mb-1 font-bold uppercase tracking-wider">Not yet automated</p>
+									<ul class="list-disc pl-4 leading-relaxed text-[var(--color-muted-foreground)]">
+										<li>Auto-apply on Approve — apply manually via LinkedIn for now</li>
+									</ul>
+								</div>
+							{/if}
+						</div>
+					</div>
 					<p class="mt-1 font-body text-[var(--color-muted-foreground)]">
 						Review AI-generated CVs and approve job applications
 					</p>
@@ -161,5 +203,10 @@
 
 <!-- Toast -->
 {#if showToast}
-	<ToastNotification message={toastMessage} type={toastType} onClose={() => (showToast = false)} />
+	<ToastNotification
+		message={toastMessage}
+		type={toastType}
+		duration={toastDuration}
+		onClose={() => (showToast = false)}
+	/>
 {/if}

@@ -195,7 +195,10 @@ class HITLProcessor:
         return HITLDecisionResponse(
             job_id=job_id,
             status=BusinessState.APPROVED,
-            message="Job approved. Application workflow not yet implemented.",
+            message=(
+                "Approved. Automatic application is not yet implemented — "
+                "please apply via LinkedIn manually for now."
+            ),
         )
 
     async def _handle_decline(self, job_id: str) -> HITLDecisionResponse:

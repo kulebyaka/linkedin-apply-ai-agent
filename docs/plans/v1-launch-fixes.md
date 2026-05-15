@@ -142,12 +142,12 @@ Steps:
 - Update/add: a small Svelte component test or Playwright E2E in `tests/e2e/test_hitl_review.py` confirming the toast copy appears after approve.
 
 Steps:
-- [ ] Refine `_handle_approve` message copy.
-- [ ] Implement/locate toast UI and wire approve-success → toast with the new copy.
-- [ ] Add the "v1 beta" badge with tooltip.
-- [ ] Update or add a test asserting the approve flow shows the toast (extend existing `tests/e2e/test_hitl_review.py` if practical; otherwise add a unit-level assertion that the component renders the toast on the success state).
-- [ ] Manual: approve a job → toast appears with the new copy → job appears in History as `approved`.
-- [ ] Run project test suite: `uv run pytest` — must pass before Task 4.
+- [x] Refine `_handle_approve` message copy.
+- [x] Implement/locate toast UI and wire approve-success → toast with the new copy.
+- [x] Add the "v1 beta" badge with tooltip.
+- [x] Update or add a test asserting the approve flow shows the toast (extend existing `tests/e2e/test_hitl_review.py` if practical; otherwise add a unit-level assertion that the component renders the toast on the success state).
+- [x] Manual: approve a job → toast appears with the new copy → job appears in History as `approved`.
+- [x] Run project test suite: `uv run pytest` — must pass before Task 4.
 
 ### Task 4: Production deploy hardening — CORS + LLM key fail-fast (S1, S2)
 

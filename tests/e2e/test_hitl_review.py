@@ -113,8 +113,14 @@ class TestApproveDeclineFlows:
         # Click Approve button
         page.get_by_role("button", name="Approve").click()
 
-        # Verify toast appears with success message
-        expect(page.get_by_text("Application Approved")).to_be_visible(timeout=10_000)
+        # Verify the "Coming soon" toast appears with the honest copy explaining
+        # automatic application is not yet implemented and the user must apply manually.
+        expect(page.get_by_text(re.compile(r"not yet implemented", re.IGNORECASE))).to_be_visible(
+            timeout=10_000
+        )
+        expect(page.get_by_text(re.compile(r"manually", re.IGNORECASE))).to_be_visible(
+            timeout=10_000
+        )
 
         # Verify the approved job is no longer in the pending list
         pending_ids = [

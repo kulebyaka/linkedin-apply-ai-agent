@@ -58,6 +58,10 @@ class TestProcessDecision:
         assert result.status == "approved"
         assert result.job_id == "job-1"
         repo.update.assert_awaited_once_with("job-1", {"status": "approved"})
+        # "Coming soon" copy: must mention manual application and not-implemented status
+        # so the UI surfaces an honest toast (B3 — Task 3 of the v1 launch fixes plan).
+        assert "not yet implemented" in result.message
+        assert "manually" in result.message
 
     async def test_decline(self):
         job = _make_pending_job()
