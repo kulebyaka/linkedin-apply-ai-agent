@@ -182,13 +182,13 @@ Steps:
 - Create: `tests/unit/test_scheduler_auth.py` — simulate a scrape raising `LinkedInAuthExpiredError`, assert scheduler transitions to `paused_auth_required` and skips the next tick.
 
 Steps:
-- [ ] Define `LinkedInAuthExpiredError` and detection logic.
-- [ ] Add `paused_auth_required` state + transition in scheduler.
-- [ ] Expose state via status endpoint; add clear-auth-error endpoint.
-- [ ] Frontend banner + clear button.
-- [ ] Write `tests/unit/test_scheduler_auth.py`.
-- [ ] Manual: delete cookies → trigger search → status reflects paused state → UI shows banner → click clear button after refreshing cookies → next search succeeds.
-- [ ] Run project test suite: `uv run pytest` — must pass before Task 6.
+- [x] Define `LinkedInAuthExpiredError` and detection logic.
+- [x] Add `paused_auth_required` state + transition in scheduler.
+- [x] Expose state via status endpoint; add clear-auth-error endpoint.
+- [x] Frontend banner + clear button.
+- [x] Write `tests/unit/test_scheduler_auth.py`.
+- [x] Manual: delete cookies → trigger search → status reflects paused state → UI shows banner → click clear button after refreshing cookies → next search succeeds.
+- [x] Run project test suite: `uv run pytest` — must pass before Task 6.
 
 ### Task 6: WeasyPrint pre-flight check (S4)
 

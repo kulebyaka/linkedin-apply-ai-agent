@@ -20,6 +20,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from src.config.settings import Settings
 from .job_queue import JobQueue
+from src.services.linkedin.browser_automation import LinkedInAuthExpiredError
 from src.services.linkedin.linkedin_search import LinkedInSearchParams, LinkedInSearchURLBuilder
 
 if TYPE_CHECKING:
@@ -34,7 +35,11 @@ RunReason = Literal[
     "no_users",
     "scrape_failed",
     "auth_failed",
+    "auth_expired",
+    "paused",
 ]
+
+SchedulerState = Literal["active", "paused_auth_required"]
 
 
 @dataclass
@@ -71,6 +76,12 @@ class LinkedInSearchScheduler:
         self._last_run_jobs: int = 0
         self._last_run_per_user: dict[str, UserLastRun] = {}
         self._running = False
+        # Auth-resilience state: when LinkedIn cookies expire we pause the
+        # scheduler so subsequent ticks skip cleanly until the operator
+        # refreshes cookies and calls clear_auth_error().
+        self._state: SchedulerState = "active"
+        self._last_auth_error_at: datetime | None = None
+        self._last_auth_error_message: str | None = None
 
     async def run_search(self, user_id: str | None = None) -> int:
         """Execute one search cycle: authenticate, scrape, enqueue.
@@ -88,6 +99,27 @@ class LinkedInSearchScheduler:
         then one waits on the lock, but the outcome is correct (second search
         runs after the first finishes rather than being skipped).
         """
+        if self._state == "paused_auth_required":
+            logger.warning(
+                "Scheduler is paused (LinkedIn auth required). "
+                "Refresh cookies and call /api/jobs/linkedin-search/clear-auth-error."
+            )
+            now = datetime.now(tz=timezone.utc)
+            self._last_run_time = now
+            self._last_run_jobs = 0
+            if user_id is not None:
+                self._last_run_per_user[user_id] = UserLastRun(
+                    time=now,
+                    jobs_found=0,
+                    reason="paused",
+                    search_url=None,
+                    message=(
+                        "Scheduler paused — LinkedIn session expired. "
+                        "Refresh cookies, then clear the auth error from Settings."
+                    ),
+                )
+            return 0
+
         if self._search_lock.locked():
             logger.warning("Search already in progress, skipping")
             return 0
@@ -167,6 +199,22 @@ class LinkedInSearchScheduler:
             # Authenticate only when there are actual searches to perform.
             try:
                 await self.scraper.browser.ensure_authenticated()
+            except LinkedInAuthExpiredError as exc:
+                self._enter_paused_auth_required(str(exc))
+                now = datetime.now(tz=timezone.utc)
+                for plan_user_id, _ in search_plans:
+                    if plan_user_id is None:
+                        continue
+                    self._last_run_per_user[plan_user_id] = UserLastRun(
+                        time=now,
+                        jobs_found=0,
+                        reason="auth_expired",
+                        search_url=None,
+                        message=str(exc),
+                    )
+                self._last_run_time = now
+                self._last_run_jobs = 0
+                return 0
             except Exception as exc:
                 logger.exception("LinkedIn authentication failed")
                 now = datetime.now(tz=timezone.utc)
@@ -230,6 +278,19 @@ class LinkedInSearchScheduler:
                             reason="ok" if jobs else "no_results",
                             search_url=search_url,
                         )
+                except LinkedInAuthExpiredError as exc:
+                    self._enter_paused_auth_required(str(exc))
+                    if plan_user_id is not None:
+                        self._last_run_per_user[plan_user_id] = UserLastRun(
+                            time=datetime.now(tz=timezone.utc),
+                            jobs_found=0,
+                            reason="auth_expired",
+                            search_url=search_url,
+                            message=str(exc),
+                        )
+                    # Stop the cycle — no point scraping for other users with
+                    # the same stale session.
+                    break
                 except Exception as exc:
                     logger.exception(
                         "Search failed for user=%s, continuing to next",
@@ -305,3 +366,41 @@ class LinkedInSearchScheduler:
     def get_last_run_for_user(self, user_id: str) -> UserLastRun | None:
         """Return the most recent run outcome for a specific user, if any."""
         return self._last_run_per_user.get(user_id)
+
+    # ------------------------------------------------------------------
+    # Auth-expired state management
+    # ------------------------------------------------------------------
+
+    @property
+    def state(self) -> SchedulerState:
+        return self._state
+
+    @property
+    def last_auth_error_at(self) -> datetime | None:
+        return self._last_auth_error_at
+
+    @property
+    def last_auth_error_message(self) -> str | None:
+        return self._last_auth_error_message
+
+    def _enter_paused_auth_required(self, message: str) -> None:
+        """Transition scheduler into paused state after a LinkedIn auth failure.
+
+        Skips subsequent runs until clear_auth_error() is called. Logged at
+        ERROR so it shows up clearly in operator logs.
+        """
+        self._state = "paused_auth_required"
+        self._last_auth_error_at = datetime.now(tz=timezone.utc)
+        self._last_auth_error_message = message
+        logger.error(
+            "LinkedIn session expired: %s — scheduler paused. Refresh cookies and "
+            "POST /api/jobs/linkedin-search/clear-auth-error to resume.",
+            message,
+        )
+
+    def clear_auth_error(self) -> None:
+        """Reset scheduler state to active after operator refreshes cookies."""
+        self._state = "active"
+        self._last_auth_error_at = None
+        self._last_auth_error_message = None
+        logger.info("LinkedIn scheduler auth-error cleared; state=active")

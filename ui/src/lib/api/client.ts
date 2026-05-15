@@ -144,12 +144,21 @@ export async function triggerLinkedInSearch(): Promise<{
 export type UserLastRun = {
   time: string;
   jobs_found: number;
-  reason: "ok" | "no_results" | "no_users" | "scrape_failed" | "auth_failed";
+  reason:
+    | "ok"
+    | "no_results"
+    | "no_users"
+    | "scrape_failed"
+    | "auth_failed"
+    | "auth_expired"
+    | "paused";
   search_url: string | null;
   message: string | null;
 };
 
-export async function getLinkedInSearchStatus(): Promise<{
+export type SchedulerState = "active" | "paused_auth_required";
+
+export type LinkedInSearchStatus = {
   enabled: boolean;
   running: boolean;
   last_run_time: string | null;
@@ -157,7 +166,12 @@ export async function getLinkedInSearchStatus(): Promise<{
   next_run_time: string | null;
   queue_size: number;
   user_last_run: UserLastRun | null;
-}> {
+  state: SchedulerState;
+  last_auth_error_at: string | null;
+  last_auth_error_message: string | null;
+};
+
+export async function getLinkedInSearchStatus(): Promise<LinkedInSearchStatus> {
   const response = await fetch(
     `${API_BASE_URL}/api/jobs/linkedin-search/status`,
     { credentials: "include" },
@@ -166,6 +180,25 @@ export async function getLinkedInSearchStatus(): Promise<{
   if (!response.ok) {
     const errorText = await response.text();
     throw new Error(`Failed to get search status: ${response.statusText} - ${errorText}`);
+  }
+
+  return response.json();
+}
+
+export async function clearLinkedInAuthError(): Promise<{
+  status: string;
+  state: SchedulerState;
+}> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/jobs/linkedin-search/clear-auth-error`,
+    { method: "POST", credentials: "include" },
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Failed to clear auth error: ${response.statusText} - ${errorText}`,
+    );
   }
 
   return response.json();

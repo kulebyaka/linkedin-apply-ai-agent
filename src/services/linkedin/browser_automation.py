@@ -24,6 +24,26 @@ from src.config.settings import Settings
 logger = logging.getLogger(__name__)
 
 
+class LinkedInAuthExpiredError(Exception):
+    """Raised when LinkedIn cookies are stale and re-authentication is needed.
+
+    Distinguishes operator-action-required failures (refresh cookies) from
+    generic auth/network errors so the scheduler can surface a clear signal
+    rather than retrying blindly.
+    """
+
+
+# URL fragments that indicate a redirect to LinkedIn's sign-in / challenge flow.
+_LOGIN_URL_MARKERS = ("/login", "/uas/login", "/checkpoint", "/authwall")
+
+
+def _is_login_redirect(url: str) -> bool:
+    """Return True when ``url`` points at a LinkedIn auth page."""
+    if not url:
+        return False
+    return any(marker in url for marker in _LOGIN_URL_MARKERS)
+
+
 class LinkedInAutomation:
     """Automates LinkedIn browser interactions with stealth anti-detection."""
 
@@ -116,7 +136,8 @@ class LinkedInAutomation:
         try:
             await self.page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded")
             current_url = self.page.url
-            is_valid = "/feed" in current_url and "/login" not in current_url
+            redirected_to_login = _is_login_redirect(current_url)
+            is_valid = "/feed" in current_url and not redirected_to_login
             logger.info("Session validation: %s (url: %s)", "valid" if is_valid else "invalid", current_url)
             return is_valid
         except Exception as exc:
@@ -168,7 +189,13 @@ class LinkedInAutomation:
             raise RuntimeError(f"LinkedIn login failed — current URL: {current_url}")
 
     async def ensure_authenticated(self) -> None:
-        """Authenticate using cookies first, falling back to login."""
+        """Authenticate using cookies first, falling back to login.
+
+        Raises ``LinkedInAuthExpiredError`` when cookies are stale and no
+        credentials are configured to auto-login, or when the login flow itself
+        ends up at the sign-in / checkpoint page. This lets the scheduler
+        distinguish "operator must refresh cookies" from generic failures.
+        """
         cookie_loaded = await self._load_cookies()
         if cookie_loaded:
             session_valid = await self._validate_session()
@@ -176,8 +203,24 @@ class LinkedInAutomation:
                 logger.info("Reusing existing session via cookies")
                 return
 
+        # Cookies missing or expired. Try password-based login when configured;
+        # otherwise the operator must refresh cookies manually.
+        if not self.email or not self.password:
+            raise LinkedInAuthExpiredError(
+                "LinkedIn cookies missing or expired and no credentials are "
+                "configured for auto-login. Refresh data/linkedin_cookies.json."
+            )
+
         logger.info("Cookie session invalid or missing, performing login")
-        await self.login()
+        try:
+            await self.login()
+        except Exception as exc:
+            current_url = self.page.url if self.page else ""
+            if _is_login_redirect(current_url):
+                raise LinkedInAuthExpiredError(
+                    f"LinkedIn login failed and remained at auth page: {current_url}"
+                ) from exc
+            raise
 
     async def random_delay(self, min_s: float | None = None, max_s: float | None = None) -> None:
         """Sleep for a random duration between min and max seconds."""

@@ -10,6 +10,7 @@
 	import FilterPreferencesSection from '$lib/components/settings/FilterPreferencesSection.svelte';
 	import ModelPreferencesSection from '$lib/components/settings/ModelPreferencesSection.svelte';
 	import StartSearchSection from '$lib/components/settings/StartSearchSection.svelte';
+	import LinkedInAuthBanner from '$lib/components/settings/LinkedInAuthBanner.svelte';
 
 	let searchPrefs = $state<UserSearchPreferences | null>(null);
 	let filterPrefs = $state<UserFilterPreferences | null>(null);
@@ -50,6 +51,7 @@
 			</div>
 		{:else if auth.user}
 			<div class="flex flex-col gap-6">
+				<LinkedInAuthBanner />
 				<ProfileSection user={auth.user} />
 				<CVUploadSection user={auth.user} />
 				{#if searchPrefs}

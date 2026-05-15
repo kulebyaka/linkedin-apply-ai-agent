@@ -720,6 +720,9 @@ async def get_linkedin_search_status(request: Request, user: CurrentUser):
             "next_run_time": None,
             "queue_size": queue_size,
             "user_last_run": None,
+            "state": "active",
+            "last_auth_error_at": None,
+            "last_auth_error_message": None,
         }
 
     user_run = ctx.scheduler.get_last_run_for_user(user.id)
@@ -747,7 +750,26 @@ async def get_linkedin_search_status(request: Request, user: CurrentUser):
         else None,
         "queue_size": queue_size,
         "user_last_run": user_last_run,
+        "state": ctx.scheduler.state,
+        "last_auth_error_at": ctx.scheduler.last_auth_error_at.isoformat()
+        if ctx.scheduler.last_auth_error_at
+        else None,
+        "last_auth_error_message": ctx.scheduler.last_auth_error_message,
     }
+
+
+@app.post("/api/jobs/linkedin-search/clear-auth-error")
+async def clear_linkedin_search_auth_error(request: Request, user: CurrentUser):
+    """Reset the scheduler's paused_auth_required state.
+
+    Operator-only action: call after refreshing data/linkedin_cookies.json so
+    that scheduled searches resume.
+    """
+    ctx = _get_ctx(request)
+    if ctx.scheduler is None:
+        raise HTTPException(409, "LinkedIn scheduler is not initialized")
+    ctx.scheduler.clear_auth_error()
+    return {"status": "ok", "state": ctx.scheduler.state}
 
 
 @app.post("/api/jobs/replay-fixtures")
