@@ -52,6 +52,8 @@ class AppContext:
     # Operators may fix without restart, so these are flags rather than crashes.
     llm_ok: bool = True
     llm_error: str | None = None
+    pdf_ok: bool = True
+    pdf_error: str | None = None
 
     # Thread-safe tracking for in-progress workflows
     _tracking_lock: asyncio.Lock = field(default_factory=asyncio.Lock)

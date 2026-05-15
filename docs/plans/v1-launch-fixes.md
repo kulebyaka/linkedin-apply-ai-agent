@@ -201,13 +201,13 @@ Steps:
 - Add: a unit test under `tests/unit/` that calls `verify_pdf_stack()` and asserts it returns `(True, None)` in CI (skip-if-WeasyPrint-broken to avoid failing on stripped environments).
 
 Steps:
-- [ ] Implement `verify_pdf_stack()` and exception-text parsing.
-- [ ] Add `pdf_ok`/`pdf_error` to `AppContext`; call during lifespan.
-- [ ] Expose via `/api/health`.
-- [ ] Update `README.md` system-deps section.
-- [ ] Write the unit test (with appropriate skip marker).
-- [ ] Manual: `/api/health` returns `pdf_ok: true` on the dev machine.
-- [ ] Run project test suite: `uv run pytest` — must pass before Task 7.
+- [x] Implement `verify_pdf_stack()` and exception-text parsing.
+- [x] Add `pdf_ok`/`pdf_error` to `AppContext`; call during lifespan.
+- [x] Expose via `/api/health`.
+- [x] Update `README.md` system-deps section.
+- [x] Write the unit test (with appropriate skip marker).
+- [x] Manual: `/api/health` returns `pdf_ok: true` on the dev machine.
+- [x] Run project test suite: `uv run pytest` — must pass before Task 7.
 
 ### Task 7: Verify acceptance criteria
 

@@ -1,5 +1,6 @@
 """Service for generating PDF from CV JSON using WeasyPrint and Jinja2"""
 
+import io
 import logging
 from datetime import date
 from pathlib import Path
@@ -9,6 +10,65 @@ from weasyprint import CSS, HTML
 from weasyprint.text.fonts import FontConfiguration
 
 logger = logging.getLogger(__name__)
+
+
+def verify_pdf_stack() -> tuple[bool, str | None]:
+    """Pre-flight check: render a minimal HTML to PDF in-memory.
+
+    Returns (True, None) when WeasyPrint and its system libraries
+    (pango / gobject / cairo / gdk) are all working; otherwise returns
+    (False, hint) where hint suggests which system package is missing.
+    """
+    try:
+        buf = io.BytesIO()
+        HTML(string="<html><body>ok</body></html>").write_pdf(target=buf)
+        if buf.tell() == 0:
+            return (
+                False,
+                "WeasyPrint produced an empty PDF — Pango/GLib likely "
+                "unreachable. On macOS try "
+                "DYLD_LIBRARY_PATH=/opt/homebrew/lib; on Linux install "
+                "libpango-1.0-0, libpangoft2-1.0-0, libharfbuzz0b.",
+            )
+        return True, None
+    except Exception as exc:  # noqa: BLE001 — broad on purpose, returns the hint
+        text = f"{type(exc).__name__}: {exc}"
+        low = text.lower()
+        if "pango" in low:
+            hint = (
+                "Pango not found. Install system deps: "
+                "Debian/Ubuntu: 'sudo apt install libpango-1.0-0 "
+                "libpangoft2-1.0-0 libharfbuzz0b'; "
+                "macOS: 'brew install pango' and export "
+                "DYLD_LIBRARY_PATH=/opt/homebrew/lib."
+            )
+        elif "gobject" in low or "glib" in low:
+            hint = (
+                "GLib/GObject not found. Install system deps: "
+                "Debian/Ubuntu: 'sudo apt install libglib2.0-0'; "
+                "macOS: 'brew install glib' and export "
+                "DYLD_LIBRARY_PATH=/opt/homebrew/lib."
+            )
+        elif "cairo" in low:
+            hint = (
+                "Cairo not found. Install system deps: "
+                "Debian/Ubuntu: 'sudo apt install libcairo2'; "
+                "macOS: 'brew install cairo' and export "
+                "DYLD_LIBRARY_PATH=/opt/homebrew/lib."
+            )
+        elif "gdk" in low:
+            hint = (
+                "GDK-PixBuf not found. Install system deps: "
+                "Debian/Ubuntu: 'sudo apt install libgdk-pixbuf2.0-0'; "
+                "macOS: 'brew install gdk-pixbuf'."
+            )
+        else:
+            hint = (
+                f"WeasyPrint pre-flight failed: {text}. "
+                "Verify system libraries (pango, glib, cairo, gdk-pixbuf) "
+                "are installed and on the linker path."
+            )
+        return False, hint
 
 
 class PDFGenerator:

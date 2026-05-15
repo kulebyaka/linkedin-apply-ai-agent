@@ -129,6 +129,27 @@ When moving from `localhost` to a public domain, set the following in `.env`:
   for the next attempt).
 - `REPO_TYPE=sqlite` and `DB_PATH=./data/jobs.db` for persistence.
 
+## System Dependencies
+
+PDF generation uses WeasyPrint, which needs native libraries (Pango, GLib,
+Cairo, gdk-pixbuf). The API runs a startup pre-flight; `GET /api/health`
+returns `pdf_ok: false` with a hint when something is missing.
+
+- Debian/Ubuntu:
+  ```bash
+  sudo apt install libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b \
+      libglib2.0-0 libcairo2 libgdk-pixbuf2.0-0
+  ```
+- macOS (Homebrew):
+  ```bash
+  brew install pango glib cairo gdk-pixbuf
+  export DYLD_LIBRARY_PATH=/opt/homebrew/lib   # Apple Silicon
+  ```
+- Playwright (LinkedIn scraping):
+  ```bash
+  uv run playwright install chromium
+  ```
+
 ## License
 
 All Rights Reserved. This code is provided for viewing purposes only. No permission is granted to use, copy, modify, or distribute this software.

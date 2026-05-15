@@ -165,6 +165,22 @@ def _check_llm_configured(ctx: AppContext) -> None:
     ctx.llm_error = None
 
 
+def _check_pdf_stack(ctx: AppContext) -> None:
+    """Pre-flight WeasyPrint PDF rendering; populate ctx.pdf_ok / ctx.pdf_error.
+
+    Does not raise — operators can fix system deps without restart.
+    """
+    from src.services.cv.pdf_generator import verify_pdf_stack
+
+    ok, hint = verify_pdf_stack()
+    ctx.pdf_ok = ok
+    ctx.pdf_error = hint
+    if not ok:
+        logger.error("PDF stack pre-flight failed: %s", hint)
+    else:
+        logger.info("PDF stack pre-flight OK")
+
+
 def _warn_on_cors_app_url_mismatch() -> None:
     """Log a warning when CORS only allows localhost but APP_URL points elsewhere."""
     app_url = settings.app_url or ""
@@ -192,6 +208,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     _check_llm_configured(ctx)
     _warn_on_cors_app_url_mismatch()
+    _check_pdf_stack(ctx)
 
     logger.info(f"Starting up with repository type: {settings.repo_type}")
     await ctx.repository.initialize()
@@ -315,11 +332,16 @@ async def log_requests(request: Request, call_next):
 
 
 @app.get("/api/health")
-async def health():
+async def health(request: Request):
     """Health check endpoint with consumer health status."""
+    ctx: AppContext | None = getattr(request.app.state, "ctx", None)
+    pdf_ok = ctx.pdf_ok if ctx is not None else True
+    pdf_error = ctx.pdf_error if ctx is not None else None
     return {
         "status": "running",
         "message": "LinkedIn Job Application Agent API",
+        "pdf_ok": pdf_ok,
+        "pdf_error": pdf_error,
         **_consumer_manager.health_check(),
     }
 
