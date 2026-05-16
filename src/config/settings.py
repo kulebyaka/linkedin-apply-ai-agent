@@ -203,8 +203,9 @@ class Settings(BaseSettings):
             stripped = v.strip()
             if stripped == "":
                 # Empty env value → keep field default rather than producing
-                # an invalid list[str] from "".
-                return cls.model_fields["cors_origins"].default
+                # an invalid list[str] from "". Return a copy so callers can't
+                # mutate the field-level default.
+                return list(cls.model_fields["cors_origins"].default)
             if stripped.startswith("["):
                 import json
                 return json.loads(stripped)
