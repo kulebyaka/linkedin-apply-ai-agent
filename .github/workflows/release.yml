@@ -1,0 +1,110 @@
+name: Release
+
+# Fires on:
+#   - a published GitHub Release (normal flow — tag becomes the image version)
+#   - manual workflow_dispatch with an explicit tag input (for first-deploy
+#     bootstrap and ad-hoc redeploys without cutting a Release)
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag to build and deploy (e.g. v0.1.0)"
+        required: true
+        default: "v0.0.0"
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NS: ${{ github.repository_owner }}
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve image tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            echo "value=${{ github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & push API
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NS }}/linkedin-apply-ai-agent-api:${{ steps.tag.outputs.value }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NS }}/linkedin-apply-ai-agent-api:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build & push UI (build-artifact image)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./ui
+          file: ui/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NS }}/linkedin-apply-ai-agent-ui:${{ steps.tag.outputs.value }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NS }}/linkedin-apply-ai-agent-ui:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Render compose with version tag
+        run: sed "s|__VERSION__|${{ steps.tag.outputs.value }}|g" docker-compose.prod.yml > compose.rendered.yml
+
+      - name: Render Caddyfile with domain + email
+        run: |
+          sed -e "s|__DOMAIN__|${{ vars.APP_DOMAIN }}|g" \
+              -e "s|__ACME_EMAIL__|${{ vars.ACME_EMAIL }}|g" \
+              Caddyfile > Caddyfile.rendered
+
+      - name: Copy compose + Caddyfile to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          source: "compose.rendered.yml,Caddyfile.rendered"
+          target: /opt/linkedin-apply/
+          overwrite: true
+
+      - name: Deploy on VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -e
+            cd /opt/linkedin-apply
+            mv compose.rendered.yml docker-compose.yml
+            mv Caddyfile.rendered Caddyfile
+            echo "${{ secrets.GHCR_PULL_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            docker compose pull
+            docker compose up -d --remove-orphans
+            docker compose run --rm ui-publisher
+            docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile || true
+            docker image prune -f
+            docker compose ps

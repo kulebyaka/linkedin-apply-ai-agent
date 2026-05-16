@@ -1,0 +1,29 @@
+# Caddyfile — host-level TLS reverse proxy for linkedin-apply.
+# Templated for CI: __DOMAIN__ and __ACME_EMAIL__ are substituted at deploy time.
+# See docs/plans/vps-deployment.md for the full design.
+
+{
+    email __ACME_EMAIL__
+}
+
+__DOMAIN__ {
+    encode zstd gzip
+
+    # API — same-origin under /api/*, proxied to the api container.
+    handle /api/* {
+        reverse_proxy api:8000
+    }
+
+    # UI — static SPA assets published by ui-publisher into /srv/ui.
+    # try_files falls back to index.html so client-side routes resolve.
+    handle {
+        root * /srv/ui
+        try_files {path} /index.html
+        file_server
+    }
+
+    log {
+        output stdout
+        format console
+    }
+}

@@ -1,0 +1,95 @@
+# Production compose — runs on the VPS at /opt/linkedin-apply/docker-compose.yml.
+# CI substitutes __VERSION__ with the release tag at deploy time.
+# See docs/plans/vps-deployment.md for the full design.
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: linkedin-apply-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+      - ui_static:/srv/ui:ro
+    depends_on:
+      - api
+    networks:
+      - linkedin-apply
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
+
+  api:
+    image: ghcr.io/kulebyaka/linkedin-apply-ai-agent-api:__VERSION__
+    container_name: linkedin-apply-api
+    restart: unless-stopped
+    expose:
+      - "8000"
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    networks:
+      - linkedin-apply
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
+
+  ui-publisher:
+    # One-shot: copies /build into the shared ui_static volume, then exits.
+    # CI runs `docker compose run --rm ui-publisher` on every deploy to
+    # refresh static assets. Excluded from Watchtower on purpose — auto-pulling
+    # a new image without re-running the publisher would NOT update the volume.
+    image: ghcr.io/kulebyaka/linkedin-apply-ai-agent-ui:__VERSION__
+    container_name: linkedin-apply-ui-publisher
+    restart: "no"
+    command:
+      - sh
+      - -c
+      - "rm -rf /srv/ui/* && cp -r /build/. /srv/ui/ && echo 'UI artifacts published'"
+    volumes:
+      - ui_static:/srv/ui
+
+  watchtower:
+    # Label-scoped Watchtower for this stack only — does NOT touch the
+    # host-wide watchtower already running under /home/admin/services/watchtower.
+    # WATCHTOWER_LABEL_ENABLE=true means only containers with
+    # `com.centurylinklabs.watchtower.enable=true` are polled/updated.
+    image: containrrr/watchtower:latest
+    container_name: linkedin-apply-watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /root/.docker/config.json:/config.json:ro
+    environment:
+      WATCHTOWER_LABEL_ENABLE: "true"
+      WATCHTOWER_CLEANUP: "true"
+      WATCHTOWER_POLL_INTERVAL: "300"
+      TZ: UTC
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  linkedin-apply:
+    name: linkedin-apply
+    driver: bridge
+
+volumes:
+  caddy_data:
+  caddy_config:
+  ui_static:

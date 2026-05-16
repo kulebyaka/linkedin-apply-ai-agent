@@ -1,0 +1,52 @@
+# VCS
+.git
+.gitignore
+.gitattributes
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+.venv
+.mypy_cache
+.pytest_cache
+.ruff_cache
+.coverage
+htmlcov
+
+# UI build artifacts (rebuilt inside the UI image)
+ui/node_modules
+ui/build
+ui/.svelte-kit
+
+# Local data / runtime state (must not be baked into image)
+data/
+logs/
+*.log
+*.pid
+
+# Editor / OS
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+*.swp
+
+# Project meta — never needed at runtime
+Obsolete/
+.claude/
+.ralphex/
+docs/
+tests/
+playwright-report/
+test-results/
+
+# Secrets / local env (never bake)
+.env
+.env.*
+!.env.example
+_env
+settings.local.json
+
+# CI / build configs (not needed in runtime image)
+.github
