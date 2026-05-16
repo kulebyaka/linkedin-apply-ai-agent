@@ -9,9 +9,11 @@ const config = {
 		adapter: adapter({
 			pages: 'build',
 			assets: 'build',
-			fallback: undefined,
+			// SPA mode: single index.html fallback; client-side router handles all routes.
+			// Required because +layout.ts disables prerendering app-wide (ssr=false, prerender=false).
+			fallback: 'index.html',
 			precompress: false,
-			strict: true
+			strict: false
 		})
 	}
 };
