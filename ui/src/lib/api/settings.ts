@@ -8,7 +8,7 @@ import type {
 } from '$lib/api/auth';
 import type { UserFilterPreferences } from '$lib/types/index';
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
 
 export async function updateProfile(data: {
 	display_name?: string;
