@@ -574,6 +574,7 @@ class TestDedupLogic:
 
         page = AsyncMock()
         page.goto = AsyncMock()
+        page.url = "https://www.linkedin.com/jobs/search/?keywords=python"
 
         call_count = 0
 
@@ -669,6 +670,7 @@ class TestMaxJobsLimit:
 
         page = AsyncMock()
         page.goto = AsyncMock()
+        page.url = "https://www.linkedin.com/jobs/search/?keywords=python"
 
         def page_locator(selector):
             from src.services.linkedin.linkedin_scraper import SELECTORS
@@ -804,6 +806,7 @@ class TestNoResults:
 
         page = AsyncMock()
         page.goto = AsyncMock()
+        page.url = "https://www.linkedin.com/jobs/search/?keywords=nonexistent"
         page.locator = MagicMock(return_value=no_results_loc)
         browser.page = page
 

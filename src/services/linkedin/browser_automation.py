@@ -10,6 +10,7 @@ import logging
 import os
 import random
 from pathlib import Path
+from urllib.parse import urlparse
 
 from playwright.async_api import (
     Browser,
@@ -33,15 +34,21 @@ class LinkedInAuthExpiredError(Exception):
     """
 
 
-# URL fragments that indicate a redirect to LinkedIn's sign-in / challenge flow.
-_LOGIN_URL_MARKERS = ("/login", "/uas/login", "/checkpoint", "/authwall")
+# Path prefixes that indicate a redirect to LinkedIn's sign-in / challenge flow.
+# Matched against the parsed URL path (not the full URL) to avoid false positives
+# from query strings or fragments that happen to contain these substrings.
+_LOGIN_PATH_PREFIXES = ("/login", "/uas/login", "/checkpoint", "/authwall")
 
 
 def _is_login_redirect(url: str) -> bool:
     """Return True when ``url`` points at a LinkedIn auth page."""
     if not url:
         return False
-    return any(marker in url for marker in _LOGIN_URL_MARKERS)
+    try:
+        path = urlparse(url).path or ""
+    except ValueError:
+        return False
+    return any(path == p or path.startswith(p + "/") for p in _LOGIN_PATH_PREFIXES)
 
 
 class LinkedInAutomation:

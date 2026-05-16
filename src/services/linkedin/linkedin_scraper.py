@@ -11,7 +11,11 @@ from datetime import datetime, timedelta, timezone
 
 from src.config.settings import Settings
 from src.models.job import ScrapedJob
-from .browser_automation import LinkedInAutomation
+from .browser_automation import (
+    LinkedInAuthExpiredError,
+    LinkedInAutomation,
+    _is_login_redirect,
+)
 from .linkedin_search import LinkedInSearchParams, LinkedInSearchURLBuilder
 
 logger = logging.getLogger(__name__)
@@ -106,6 +110,15 @@ class LinkedInJobScraper:
             logger.info("Navigating to search page %d: %s", page_num, url)
 
             await self.browser.page.goto(url, wait_until="domcontentloaded")
+            # Detect session-expiry redirect mid-cycle: cookies validated OK
+            # at authenticate time can still be invalidated by LinkedIn before
+            # the first search hits. Surface as auth-expired so the scheduler
+            # pauses instead of treating it as "no results".
+            current_url = self.browser.page.url
+            if _is_login_redirect(current_url):
+                raise LinkedInAuthExpiredError(
+                    f"LinkedIn redirected to auth page during scrape: {current_url}"
+                )
             await self.browser.random_delay()
             await self.browser.human_scroll(self.browser.page)
 
@@ -188,6 +201,11 @@ class LinkedInJobScraper:
         """
         await self.browser.random_delay()
         await self.browser.page.goto(job_url, wait_until="domcontentloaded", timeout=15000)
+        current_url = self.browser.page.url
+        if _is_login_redirect(current_url):
+            raise LinkedInAuthExpiredError(
+                f"LinkedIn redirected to auth page during detail fetch: {current_url}"
+            )
         await self.browser.random_delay(1.0, 3.0)
 
         return await self._parse_job_detail_page(self.browser.page)
@@ -213,6 +231,10 @@ class LinkedInJobScraper:
                 logger.info(
                     "Enriched job %s: description=%d chars", job.job_id, len(job.description)
                 )
+            except LinkedInAuthExpiredError:
+                # Propagate so the scheduler can pause; no point continuing to
+                # enrich with stale cookies.
+                raise
             except Exception as exc:
                 logger.warning("Failed to enrich job %s: %s", job.job_id, exc)
 
