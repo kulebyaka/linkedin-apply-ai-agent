@@ -119,6 +119,8 @@ class URLJobExtractor(JobSourceAdapter):
         Raises:
             NotImplementedError: Method not yet implemented.
         """
+        # NOTE: URL extraction is intentionally not surfaced in the UI for v1.
+        # See docs/plans/ux-wip-audit.md (U12) before adding a "Paste URL" input.
         raise NotImplementedError(
             "URL job extraction not yet implemented. "
             "Will use HTTP fetch + LLM structured output."
@@ -160,6 +162,8 @@ class ManualJobAdapter(JobSourceAdapter):
         Raises:
             NotImplementedError: Method not yet implemented.
         """
+        # NOTE: The /generate UI uses an inlined manual path in preparation_workflow.py;
+        # this adapter is unused. See docs/plans/ux-wip-audit.md (U12).
         raise NotImplementedError(
             "Manual job input processing not yet implemented. "
             "Will normalize and validate input fields."

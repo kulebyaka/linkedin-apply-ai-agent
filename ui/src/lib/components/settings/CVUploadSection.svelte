@@ -2,6 +2,8 @@
 	import type { User } from '$lib/api/auth';
 	import { updateCV } from '$lib/api/settings';
 	import { auth } from '$lib/stores/auth.svelte';
+	import WIPButton from '$lib/components/wip/WIPButton.svelte';
+	import { WIP } from '$lib/wip/features';
 
 	let { user }: { user: User } = $props();
 
@@ -251,20 +253,8 @@
 		>
 			Download JSON template
 		</button>
-		<div class="group relative inline-block">
-			<button
-				disabled
-				class="border-2 border-[var(--color-muted)] bg-white px-3 py-1.5 font-mono text-xs uppercase tracking-wider text-[var(--color-muted-foreground)] opacity-50 cursor-not-allowed"
-			>
-				Upload PDF CV
-			</button>
-			<div
-				class="pointer-events-none absolute bottom-full left-0 z-10 mb-2 hidden w-64 border-2 border-[var(--color-foreground)] bg-white px-3 py-2 shadow-brutal group-hover:block"
-			>
-				<p class="font-mono text-xs text-[var(--color-foreground)]">
-					Coming soon — upload your PDF CV and we'll extract and convert it to JSON automatically using AI.
-				</p>
-			</div>
+		<div class="inline-block">
+			<WIPButton label="Upload PDF CV" tooltip={WIP.PDF_CV_UPLOAD.tooltip} size="sm" />
 		</div>
 	</div>
 

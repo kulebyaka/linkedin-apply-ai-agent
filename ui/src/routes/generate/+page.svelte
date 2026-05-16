@@ -5,6 +5,8 @@
 	import JobDescriptionForm from '$lib/components/JobDescriptionForm.svelte';
 	import ProgressStepper from '$lib/components/ProgressStepper.svelte';
 	import ToastNotification from '$lib/components/ToastNotification.svelte';
+	import WIPBadge from '$lib/components/wip/WIPBadge.svelte';
+	import { WIP } from '$lib/wip/features';
 
 	// Reactive state references
 	const currentState = appState.value;
@@ -157,11 +159,13 @@
 		<!-- Header -->
 		<div class="mb-16">
 			<div class="mb-8 border-l-4 border-[var(--color-primary)] pl-6">
-				<h1 class="font-heading mb-3 text-5xl tracking-tight text-[var(--color-foreground)]">
+				<h1 class="font-heading mb-3 flex flex-wrap items-center gap-3 text-5xl tracking-tight text-[var(--color-foreground)]">
 					CV Generator
+					<WIPBadge label={WIP.GENERATE_PAGE_SCOPE.label} tooltip={WIP.GENERATE_PAGE_SCOPE.tooltip} size="md" />
 				</h1>
 				<p class="font-body text-lg font-light text-[var(--color-muted-foreground)]">
-					Paste a job description and get a tailored CV PDF instantly
+					Paste a job description and get a tailored CV PDF instantly. This page skips the HITL
+					review queue — for the full pipeline, trigger a LinkedIn search from Settings.
 				</p>
 			</div>
 		</div>

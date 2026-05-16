@@ -5,6 +5,8 @@
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import { auth } from '$lib/stores/auth.svelte';
+	import WIPBadge from '$lib/components/wip/WIPBadge.svelte';
+	import { WIP } from '$lib/wip/features';
 
 	let { children } = $props();
 
@@ -38,9 +40,9 @@
 		goto('/login');
 	}
 
-	const navLinks = [
+	const navLinks: { href: string; label: string; wip?: { label: string; tooltip: string } }[] = [
 		{ href: '/', label: 'Review' },
-		{ href: '/generate', label: 'Generate' },
+		{ href: '/generate', label: 'Generate', wip: WIP.GENERATE_PAGE_SCOPE },
 		{ href: '/settings', label: 'Settings' },
 		{ href: '/welcome', label: 'Guide' },
 	];
@@ -58,7 +60,10 @@
 	{:else}
 		<nav class="border-b-4 border-[var(--color-foreground)] bg-[var(--color-background)]">
 			<div class="container mx-auto flex items-center justify-between px-4 py-3">
-				<span class="font-heading text-lg font-bold">Job Application Agent</span>
+				<span class="flex items-center gap-2 font-heading text-lg font-bold">
+					Job Application Agent
+					<WIPBadge label={WIP.V1_BETA.label} tooltip={WIP.V1_BETA.tooltip} />
+				</span>
 
 				{#if auth.isAuthenticated}
 					<!-- Desktop nav -->
@@ -66,10 +71,13 @@
 						{#each navLinks as link}
 							<a
 								href={link.href}
-								class="font-mono text-sm uppercase hover:underline"
+								class="flex items-center gap-1.5 font-mono text-sm uppercase hover:underline"
 								class:font-bold={$page.url.pathname === link.href}
 							>
 								{link.label}
+								{#if link.wip}
+									<WIPBadge label={link.wip.label} tooltip={link.wip.tooltip} />
+								{/if}
 							</a>
 						{/each}
 						<span class="text-[var(--color-muted)]">|</span>
@@ -117,11 +125,14 @@
 							<a
 								href={link.href}
 								onclick={() => (menuOpen = false)}
-								class="flex items-center border-b border-[var(--color-muted)] py-3 font-mono text-sm uppercase"
+								class="flex items-center gap-2 border-b border-[var(--color-muted)] py-3 font-mono text-sm uppercase"
 								class:font-bold={$page.url.pathname === link.href}
 								class:text-[var(--color-primary)]={$page.url.pathname === link.href}
 							>
 								{link.label}
+								{#if link.wip}
+									<WIPBadge label={link.wip.label} tooltip={link.wip.tooltip} />
+								{/if}
 							</a>
 						{/each}
 						<div class="py-3">

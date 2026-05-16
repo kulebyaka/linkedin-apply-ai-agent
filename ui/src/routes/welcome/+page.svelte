@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import WIPBadge from '$lib/components/wip/WIPBadge.svelte';
+	import { WIP } from '$lib/wip/features';
 
 	let mounted = $state(false);
 
@@ -9,13 +11,21 @@
 		});
 	});
 
-	const pipelineSteps = [
+	type PipelineStep = {
+		num: string;
+		name: string;
+		tag: string;
+		description: string;
+		wip?: { label: string; tooltip: string };
+	};
+
+	const pipelineSteps: PipelineStep[] = [
 		{
 			num: '01',
 			name: 'Job Source',
 			tag: 'INPUT',
 			description:
-				'Jobs arrive via direct URL submission, manual input, or automated hourly LinkedIn scraping when the scheduler is enabled.',
+				'Jobs arrive via automated hourly LinkedIn scraping (when the scheduler is enabled) or one-off manual submission via the Generate page.',
 		},
 		{
 			num: '02',
@@ -43,21 +53,23 @@
 			name: 'HITL Review',
 			tag: 'YOU',
 			description:
-				'Review AI-generated CVs in a Tinder-style interface. Approve, Decline, or ask the AI to Retry with your feedback.',
+				'Review AI-generated CVs in a Tinder-style interface. Decline, ask the AI to Retry with feedback, or Mark Reviewed and open the job in LinkedIn to apply manually.',
 		},
 		{
 			num: '06',
 			name: 'Application',
 			tag: 'AI',
 			description:
-				'Approved jobs are queued for automated LinkedIn Easy Apply or flagged for manual application.',
+				"Auto-application is on the roadmap — for v1 you apply manually via the LinkedIn link surfaced in the review queue. Approved jobs still flow through the state machine so future automation can pick them up.",
+			wip: { label: 'WIP', tooltip: WIP.AUTO_APPLY.tooltip },
 		},
 		{
 			num: '07',
 			name: 'History',
 			tag: 'LOG',
 			description:
-				'All decisions are recorded so you can track your full application pipeline at a glance.',
+				'The API records every decision today (`GET /api/hitl/history`); a dedicated history view in the UI is next.',
+			wip: { label: 'WIP', tooltip: WIP.HISTORY_VIEW.tooltip },
 		},
 	];
 
@@ -121,15 +133,21 @@
 		},
 		{
 			num: '04',
-			action: 'Submit a job manually',
-			detail: 'Or wait for the first scheduled LinkedIn scrape',
-			href: '/generate',
+			action: 'Trigger your first LinkedIn search',
+			detail: 'Settings → Start the Process — pulls fresh matches in seconds',
+			href: '/settings',
 		},
 		{
 			num: '05',
 			action: 'Review your first CV',
-			detail: 'Approve, decline, or retry with feedback',
+			detail: 'Decline, retry with feedback, or mark reviewed + open in LinkedIn',
 			href: '/',
+		},
+		{
+			num: '06',
+			action: 'One-off CV — submit a job manually (MVP)',
+			detail: 'Skips the review queue. Useful for ad-hoc job descriptions.',
+			href: '/generate',
 		},
 	];
 
@@ -193,9 +211,9 @@
 						<br />Agent
 					</h1>
 					<p class="font-body max-w-lg text-lg leading-relaxed text-[var(--color-muted-foreground)] sm:text-xl">
-						Automate your job search end-to-end — from LinkedIn scraping to AI-tailored CV
-						generation to one-click applications. You stay in control; the agent does the heavy
-						lifting.
+						Automate your job search up to the apply step — LinkedIn scraping, AI filtering, and
+						tailored CV generation. You review every match and apply manually via LinkedIn in v1;
+						auto-apply is on the roadmap.
 					</p>
 
 					<div
@@ -240,10 +258,10 @@
 						class="border-4 border-[var(--color-foreground)] bg-[var(--color-foreground)] p-4 text-center shadow-brutal-lg"
 					>
 						<div class="font-heading text-4xl font-bold leading-none text-[var(--color-primary)]">
-							∞
+							v1
 						</div>
 						<div class="mt-1 font-mono text-[10px] uppercase leading-tight tracking-wider text-white">
-							jobs<br />/ hour
+							beta<br />release
 						</div>
 					</div>
 				</div>
@@ -298,6 +316,9 @@
 									>
 										{step.tag}
 									</span>
+									{#if step.wip}
+										<WIPBadge label={step.wip.label} tooltip={step.wip.tooltip} />
+									{/if}
 								</div>
 								<p class="font-body text-sm leading-relaxed text-[var(--color-muted-foreground)]">
 									{step.description}
