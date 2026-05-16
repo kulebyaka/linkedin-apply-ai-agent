@@ -8,6 +8,7 @@ Extracted from api/main.py to keep API handlers thin. Handles:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -16,7 +17,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from src.context import AppContext
 
-from src.models.state_machine import BusinessState
+from src.models.state_machine import ALLOWED_TRANSITIONS, BusinessState
 from src.models.unified import (
     JobRecord,
     JobStatusResponse,
@@ -207,6 +208,7 @@ class JobOrchestrator:
         self, job_id: str, thread_id: str, initial_state: dict
     ) -> None:
         """Execute preparation workflow asynchronously."""
+        timeout_seconds = self._ctx.settings.workflow_timeout_seconds
         try:
             config = {
                 "configurable": {
@@ -215,20 +217,45 @@ class JobOrchestrator:
                     "user_repository": self._ctx.user_repository,
                 }
             }
-            result = await self._ctx.prep_workflow.ainvoke(initial_state, config)
+            result = await asyncio.wait_for(
+                self._ctx.prep_workflow.ainvoke(initial_state, config),
+                timeout=timeout_seconds,
+            )
             logger.info(
                 "Preparation workflow for job %s completed: %s",
                 job_id,
                 result.get("current_step"),
             )
-        except Exception as e:
-            logger.error("Preparation workflow for job %s failed: %s", job_id, e, exc_info=True)
+        except BaseException as e:
+            if isinstance(e, (asyncio.CancelledError, KeyboardInterrupt, SystemExit)):
+                raise
+            if isinstance(e, asyncio.TimeoutError):
+                error_message = f"Workflow timed out after {timeout_seconds:g}s"
+                logger.error(
+                    "Preparation workflow for job %s timed out after %.1fs",
+                    job_id,
+                    timeout_seconds,
+                )
+            else:
+                raw = str(e) or e.__class__.__name__
+                error_message = raw[:500]
+                logger.error(
+                    "Preparation workflow for job %s failed: %s", job_id, e, exc_info=True
+                )
             try:
                 existing = await self._ctx.repository.get(job_id)
                 if existing:
-                    await self._ctx.repository.update(
-                        job_id, {"status": BusinessState.FAILED, "error_message": str(e)}
-                    )
+                    if BusinessState.FAILED in ALLOWED_TRANSITIONS.get(existing.status, set()):
+                        await self._ctx.repository.update(
+                            job_id,
+                            {"status": BusinessState.FAILED, "error_message": error_message},
+                        )
+                    else:
+                        logger.warning(
+                            "Job %s in terminal state %s; cannot mark as FAILED",
+                            job_id,
+                            existing.status,
+                        )
                 else:
                     # Job failed before save_to_db_node created the record
                     source = initial_state.get("source", "url")
@@ -240,7 +267,7 @@ class JobOrchestrator:
                         source=source,
                         mode=mode,
                         status=BusinessState.FAILED,
-                        error_message=str(e),
+                        error_message=error_message,
                     ))
             except Exception:
                 logger.warning("Failed to mark job %s as FAILED in repository", job_id)
