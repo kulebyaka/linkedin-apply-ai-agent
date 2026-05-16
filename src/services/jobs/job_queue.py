@@ -274,6 +274,13 @@ async def process_queue(
                             scoped_job_id,
                             {"status": BusinessState.FAILED, "error_message": error_message},
                         )
+                    else:
+                        logger.warning(
+                            "Job %s in terminal state %s; cannot mark as FAILED (error: %s)",
+                            scoped_job_id,
+                            existing.status,
+                            error_message,
+                        )
                 else:
                     now = datetime.now(tz=timezone.utc)
                     await job_repository.create(

@@ -405,7 +405,7 @@ All settings in `.env`:
   - `WORKFLOW_TIMEOUT_SECONDS=300` — per-job timeout in `JobQueue.process_queue`; on timeout the job transitions to `failed` with `error_message="Workflow timed out after Ns"`
   - `JobRecord.error_message` (nullable text) — surfaces workflow failures to the UI; the `Job` table is migrated idempotently in `SQLiteJobRepository.initialize()` with `ALTER TABLE … ADD COLUMN error_message TEXT`
 - **Deployment / CORS:**
-  - `CORS_ORIGINS` — comma-separated origins (also accepts a JSON list); falls back to a localhost-only default. Startup logs an `ERROR` when `APP_URL` is non-local but `CORS_ORIGINS` only allows localhost
+  - `CORS_ORIGINS` — comma-separated origins (also accepts a JSON list); falls back to a localhost-only default. Startup logs a `WARNING` when `APP_URL` is non-local but `CORS_ORIGINS` only allows localhost
   - `AppContext.llm_ok` / `llm_error` and `AppContext.pdf_ok` / `pdf_error` — populated in the FastAPI lifespan; surfaced via `GET /api/health` and gate `POST /api/jobs/submit` with `503 llm_not_configured` when the primary LLM key is missing
 - **LinkedIn Search Configuration:**
   - `LINKEDIN_SEARCH_KEYWORDS`, `LINKEDIN_SEARCH_LOCATION` - fallback search filters (used when no users have configured preferences)

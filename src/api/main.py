@@ -170,9 +170,13 @@ def _check_pdf_stack(ctx: AppContext) -> None:
 
     Does not raise — operators can fix system deps without restart.
     """
-    from src.services.cv.pdf_generator import verify_pdf_stack
+    try:
+        from src.services.cv.pdf_generator import verify_pdf_stack
 
-    ok, hint = verify_pdf_stack()
+        ok, hint = verify_pdf_stack()
+    except Exception as exc:
+        ok = False
+        hint = f"PDF stack import failed: {type(exc).__name__}: {exc}"
     ctx.pdf_ok = ok
     ctx.pdf_error = hint
     if not ok:
