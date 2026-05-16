@@ -183,6 +183,7 @@ Requirements:
 						{#each llmProviders as provider}
 							<option value={provider.value}>{provider.label}</option>
 						{/each}
+						<option disabled value="">DeepSeek / Grok — server config only</option>
 					</select>
 					<div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-[var(--color-foreground)]">
 						<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

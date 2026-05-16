@@ -41,7 +41,7 @@
 				if (reviewQueue.currentJob) modalType = 'retry';
 				break;
 			case '3':
-				if (reviewQueue.currentJob) handleApprove();
+				if (reviewQueue.currentJob) handleMarkReviewedAndOpen();
 				break;
 		}
 	}
@@ -54,7 +54,7 @@
 		if (result) {
 			showToastMessage(
 				decision === 'approved'
-					? 'Application Approved'
+					? 'Marked Reviewed — apply manually in the LinkedIn tab.'
 					: decision === 'declined'
 						? 'Application Declined'
 						: 'CV Regeneration Started',
@@ -66,7 +66,11 @@
 		modalType = null;
 	}
 
-	function handleApprove() {
+	function handleMarkReviewedAndOpen() {
+		const url = reviewQueue.currentJob?.application_url;
+		if (url) {
+			window.open(url, '_blank', 'noopener,noreferrer');
+		}
 		handleDecision('approved');
 	}
 
@@ -124,10 +128,11 @@
 				<JobCard job={reviewQueue.currentJob} />
 
 				<DecisionButtons
-					onApprove={handleApprove}
+					onApprove={() => handleDecision('approved')}
 					onDecline={() => (modalType = 'decline')}
 					onRetry={() => (modalType = 'retry')}
 					isSubmitting={reviewQueue.isSubmitting}
+					applicationUrl={reviewQueue.currentJob.application_url}
 				/>
 
 				<NavigationControls
@@ -142,7 +147,7 @@
 				<!-- Keyboard shortcuts hint -->
 				<div class="text-center">
 					<p class="font-mono text-xs text-[var(--color-muted-foreground)]">
-						Keyboard: ← → to navigate | 1 decline | 2 retry | 3 approve
+						Keyboard: ← → to navigate | 1 decline | 2 retry | 3 mark reviewed + open in LinkedIn
 					</p>
 				</div>
 			</div>
