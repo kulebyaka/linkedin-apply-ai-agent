@@ -8,11 +8,14 @@ a process_queue consumer function.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
+
+from pydantic import ValidationError
 
 from src.models.job import ScrapedJob
 from src.models.state_machine import ALLOWED_TRANSITIONS, BusinessState
@@ -196,6 +199,8 @@ async def process_queue(
             master_cv = None
             cv_provider: str | None = None
             cv_model: str | None = None
+            user_lookup_failed = False
+            user_data_corrupt_error: str | None = None
             if user_id and user_repository:
                 try:
                     user = await user_repository.get_by_id(user_id)
@@ -204,10 +209,66 @@ async def process_queue(
                     if user and user.model_preferences and user.model_preferences.cv_generation:
                         cv_provider = user.model_preferences.cv_generation.provider
                         cv_model = user.model_preferences.cv_generation.model
+                except (json.JSONDecodeError, ValidationError) as exc:
+                    # Deterministic data corruption — retrying will hit the same
+                    # parse/validation error forever. Persist FAILED so the user
+                    # sees the problem and can fix their profile.
+                    user_data_corrupt_error = (
+                        f"User profile data is corrupted ({type(exc).__name__}): "
+                        f"{str(exc)[:200]}. Re-save your settings to fix."
+                    )
+                    logger.error(
+                        "Deterministic user record parse failure for %s: %s",
+                        user_id, exc, exc_info=True,
+                    )
                 except Exception:
-                    logger.warning("Failed to load user record for %s", user_id)
+                    user_lookup_failed = True
+                    logger.warning(
+                        "Failed to load user record for %s", user_id, exc_info=True
+                    )
+
+            if user_data_corrupt_error is not None:
+                # Persist a FAILED record so the failure is visible in the UI
+                # rather than silently dropped every cycle.
+                now = datetime.now(tz=timezone.utc)
+                try:
+                    await job_repository.create(
+                        JobRecord(
+                            job_id=scoped_job_id,
+                            user_id=user_id or "",
+                            source="linkedin",
+                            mode="full",
+                            status=BusinessState.FAILED,
+                            raw_input=job.model_dump(),
+                            error_message=user_data_corrupt_error,
+                            created_at=now,
+                            updated_at=now,
+                        )
+                    )
+                except Exception:
+                    logger.warning(
+                        "Failed to persist corrupt-user-data failure record for job %s",
+                        scoped_job_id, exc_info=True,
+                    )
+                if delay_between_jobs > 0:
+                    await asyncio.sleep(delay_between_jobs)
+                continue
 
             if master_cv is None:
+                if user_lookup_failed:
+                    # Transient repo error — skip without persisting a FAILED
+                    # record so the scheduler can re-enqueue this job on its
+                    # next cycle. Persisting would trip the dedup check above
+                    # and lock the job in FAILED forever.
+                    logger.error(
+                        "Skipping job %s: transient failure loading user record for %s. "
+                        "Will retry when scheduler re-enqueues.",
+                        scoped_job_id,
+                        user_id,
+                    )
+                    if delay_between_jobs > 0:
+                        await asyncio.sleep(delay_between_jobs)
+                    continue
                 if user_id and user_repository:
                     # Multi-user mode: never silently fall back to the shared
                     # filesystem CV — that would deliver another user's data.

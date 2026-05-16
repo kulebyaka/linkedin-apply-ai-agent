@@ -431,6 +431,95 @@ class TestProcessQueue:
         created = job_repo.create.call_args[0][0]
         assert "master_cv_json" in (created.error_message or "")
 
+    async def test_deterministic_user_data_corruption_persists_failed(self):
+        """When user_repository.get_by_id raises a deterministic data error
+        (JSON decode or Pydantic validation), persist a FAILED record so the
+        user sees what's wrong — retrying would just hit the same parse error
+        every cycle and silently drop the job forever."""
+        import json as _json
+
+        from pydantic import BaseModel, ValidationError
+
+        class _Strict(BaseModel):
+            x: int
+
+        try:
+            _Strict(x="not-an-int")
+        except ValidationError as exc:
+            validation_error = exc
+
+        for parse_error in (
+            _json.JSONDecodeError("bad", "doc", 0),
+            validation_error,
+        ):
+            q = JobQueue()
+            await q.put(_job("cv-corrupt"), user_id="user-bad-data")
+
+            stop = asyncio.Event()
+            stop.set()
+
+            wf = self._make_workflow_mock()
+
+            mock_user_repo = AsyncMock()
+            mock_user_repo.get_by_id = AsyncMock(side_effect=parse_error)
+
+            def cv_loader():
+                return {"contact": {"full_name": "Fallback"}}
+
+            job_repo = AsyncMock(get=AsyncMock(return_value=None))
+            job_repo.create = AsyncMock()
+            job_repo.update = AsyncMock()
+
+            await process_queue(
+                q, workflow=wf, master_cv_loader=cv_loader,
+                user_repository=mock_user_repo,
+                job_repository=job_repo,
+                delay_between_jobs=0, stop_event=stop,
+            )
+
+            # Workflow must not run; a FAILED record must be persisted with
+            # a user-visible error message.
+            wf.ainvoke.assert_not_called()
+            job_repo.create.assert_awaited()
+            created = job_repo.create.call_args[0][0]
+            assert created.status.value == "failed"
+            assert "corrupted" in (created.error_message or "").lower()
+
+    async def test_transient_user_repo_failure_skips_without_persisting(self):
+        """When user_repository.get_by_id raises transiently, do NOT persist
+        a FAILED record — the scheduler will re-enqueue this job on its next
+        cycle. Persisting would trip the dedup check and lock the job in
+        FAILED forever, contradicting the 'will retry' semantics."""
+        q = JobQueue()
+        await q.put(_job("cv-transient"), user_id="user-flaky")
+
+        stop = asyncio.Event()
+        stop.set()
+
+        wf = self._make_workflow_mock()
+
+        mock_user_repo = AsyncMock()
+        mock_user_repo.get_by_id = AsyncMock(side_effect=RuntimeError("db hiccup"))
+
+        def cv_loader():
+            return {"contact": {"full_name": "Fallback"}}
+
+        job_repo = AsyncMock(get=AsyncMock(return_value=None))
+        job_repo.create = AsyncMock()
+        job_repo.update = AsyncMock()
+
+        await process_queue(
+            q, workflow=wf, master_cv_loader=cv_loader,
+            user_repository=mock_user_repo,
+            job_repository=job_repo,
+            delay_between_jobs=0, stop_event=stop,
+        )
+
+        # Workflow must not run, and no FAILED record may be persisted.
+        wf.ainvoke.assert_not_called()
+        job_repo.create.assert_not_awaited()
+        job_repo.update.assert_not_awaited()
+
 
 # ---------------------------------------------------------------------------
 # put_batch dropped-job logging

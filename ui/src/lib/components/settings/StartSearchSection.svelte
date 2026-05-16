@@ -84,6 +84,10 @@
 				return 'Scrape failed';
 			case 'auth_failed':
 				return 'LinkedIn authentication failed';
+			case 'auth_expired':
+				return 'LinkedIn session expired — refresh cookies';
+			case 'paused':
+				return 'Searches paused — clear the auth error to resume';
 		}
 	}
 

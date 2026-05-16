@@ -133,6 +133,14 @@ _PROVIDER_API_KEY_FIELD = {
 }
 
 
+def _provider_key_configured(ctx: AppContext, provider: str) -> bool:
+    """Return True when the API key for the given provider is set in settings."""
+    field_name = _PROVIDER_API_KEY_FIELD.get(provider)
+    if field_name is None:
+        return False
+    return bool(getattr(ctx.settings, field_name, None))
+
+
 def _check_llm_configured(ctx: AppContext) -> None:
     """Populate ctx.llm_ok / ctx.llm_error based on the primary LLM provider key.
 
@@ -632,7 +640,25 @@ async def submit_job(
     """Submit a job for CV generation."""
     try:
         ctx = _get_ctx(http_request)
-        if not ctx.llm_ok:
+
+        # Determine the effective provider for this request — per-request
+        # override beats user pref beats primary default.  Users can pick a
+        # non-primary provider via model_preferences, so the gate must check
+        # the provider that will actually be used, not just the primary.
+        effective_provider = ctx.settings.primary_llm_provider
+        if user.model_preferences and user.model_preferences.cv_generation:
+            effective_provider = user.model_preferences.cv_generation.provider
+        if job_request.job_description and job_request.job_description.llm_provider:
+            effective_provider = job_request.job_description.llm_provider
+
+        if not _provider_key_configured(ctx, effective_provider):
+            field_name = _PROVIDER_API_KEY_FIELD.get(effective_provider)
+            env_var = field_name.upper() if field_name else "API key"
+            detail = (
+                f"Provider {effective_provider!r} is selected but {env_var} is not set."
+                if field_name
+                else f"Provider {effective_provider!r} is not a recognised provider."
+            )
             raise HTTPException(
                 status_code=503,
                 detail={
@@ -641,7 +667,7 @@ async def submit_job(
                         "The CV generator is not configured to talk to an LLM. "
                         "Please contact the administrator."
                     ),
-                    "detail": ctx.llm_error,
+                    "detail": detail,
                 },
             )
 
