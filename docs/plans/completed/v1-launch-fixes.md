@@ -226,10 +226,10 @@ Steps:
 - Modify: `CLAUDE.md` — note the new `workflow_timeout_seconds`, `error_message`, and `paused_auth_required` patterns under the relevant Implementation Status rows.
 
 Steps:
-- [ ] Write `docs/DEPLOY.md`.
-- [ ] Update `README.md` (Quick Start + new sections).
-- [ ] Update `CLAUDE.md` to reflect the new patterns.
-- [ ] Move this plan to `docs/plans/completed/v1-launch-fixes.md` once Task 7 passes.
+- [x] Write `docs/DEPLOY.md`.
+- [x] Update `README.md` (Quick Start + new sections).
+- [x] Update `CLAUDE.md` to reflect the new patterns.
+- [x] Move this plan to `docs/plans/completed/v1-launch-fixes.md` once Task 7 passes.
 
 ---
 

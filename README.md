@@ -102,12 +102,17 @@ This covers the core value proposition: AI-powered CV tailoring with professiona
 | GET | `/api/hitl/pending` | Get pending approvals |
 | POST | `/api/hitl/{job_id}/decide` | Submit approval decision |
 
+## Quick Start
+
+For a fresh VPS deployment walkthrough — system deps, env vars, smoke test,
+and LinkedIn cookie refresh — see [`docs/DEPLOY.md`](docs/DEPLOY.md).
+
 ## Development
 
 ```bash
-pytest              # Run tests
-black src/          # Format code
-mypy src/           # Type check
+uv run pytest              # Run tests
+uv run black src/          # Format code
+uv run mypy src/           # Type check
 ```
 
 ## Deploying to a Real Domain

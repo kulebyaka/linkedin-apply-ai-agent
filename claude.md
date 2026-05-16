@@ -368,7 +368,7 @@ See `src/llm/provider.py` module documentation for detailed implementation.
 | **LinkedIn Job Scraper** | ✅ Complete | `src/services/linkedin_scraper.py` - search results parser with dedup |
 | **LinkedIn Search Builder** | ✅ Complete | `src/services/linkedin_search.py` - URL builder with filter models |
 | **Async Job Queue** | ✅ Complete | `src/services/job_queue.py` - queue with ConsumerManager, user_id tagging |
-| **LinkedIn Search Scheduler** | ✅ Complete | `src/services/scheduler.py` - per-user search with APScheduler |
+| **LinkedIn Search Scheduler** | ✅ Complete | `src/services/scheduler.py` - per-user search with APScheduler; enters `paused_auth_required` on `LinkedInAuthExpiredError` (cookies expired); operator clears via `POST /api/jobs/linkedin-search/clear-auth-error` |
 | **HITL Frontend UI** | ✅ Complete | Svelte 5 SPA with Tinder-like review interface |
 | **Application Workflow** | 🟡 Stubs | `src/agents/application_workflow.py` - stubs only |
 | **Job Filter (LLM)** | ✅ Complete | `src/services/job_filter.py` — two-threshold routing, hidden disqualifier detection, per-user prompt, HITL badge |
@@ -401,6 +401,12 @@ All settings in `.env`:
 - **Repository Configuration:**
   - `REPO_TYPE=memory` (default) or `REPO_TYPE=sqlite` for persistent storage
   - `DB_PATH=./data/jobs.db` (SQLite database path)
+- **Workflow Resilience:**
+  - `WORKFLOW_TIMEOUT_SECONDS=300` — per-job timeout in `JobQueue.process_queue`; on timeout the job transitions to `failed` with `error_message="Workflow timed out after Ns"`
+  - `JobRecord.error_message` (nullable text) — surfaces workflow failures to the UI; the `Job` table is migrated idempotently in `SQLiteJobRepository.initialize()` with `ALTER TABLE … ADD COLUMN error_message TEXT`
+- **Deployment / CORS:**
+  - `CORS_ORIGINS` — comma-separated origins (also accepts a JSON list); falls back to a localhost-only default. Startup logs an `ERROR` when `APP_URL` is non-local but `CORS_ORIGINS` only allows localhost
+  - `AppContext.llm_ok` / `llm_error` and `AppContext.pdf_ok` / `pdf_error` — populated in the FastAPI lifespan; surfaced via `GET /api/health` and gate `POST /api/jobs/submit` with `503 llm_not_configured` when the primary LLM key is missing
 - **LinkedIn Search Configuration:**
   - `LINKEDIN_SEARCH_KEYWORDS`, `LINKEDIN_SEARCH_LOCATION` - fallback search filters (used when no users have configured preferences)
   - `LINKEDIN_SEARCH_REMOTE_FILTER` - "remote", "on-site", "hybrid"
