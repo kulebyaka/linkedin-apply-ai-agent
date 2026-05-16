@@ -1,8 +1,7 @@
 # Deployment Guide — Fresh VPS
 
 This guide walks you through deploying the LinkedIn Job Application Agent to a
-bare-metal VPS (Ubuntu / Debian) for use by a small group (3–5 users). For the
-Dockerised release pipeline see `docs/plans/vps-deployment.md`.
+bare-metal VPS (Ubuntu / Debian) for use by a small group (3–5 users).
 
 ## 1. System Dependencies
 
@@ -152,6 +151,4 @@ paused_auth_required`) instead of looping forever:
 ## 8. Reference
 
 - `CLAUDE.md` — architecture and implementation status.
-- `docs/plans/vps-deployment.md` — Dockerised release pipeline (GHCR +
-  Watchtower) for when you outgrow `uv run uvicorn`.
 - `.env.example` — full list of supported env vars with inline comments.

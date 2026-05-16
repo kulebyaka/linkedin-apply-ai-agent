@@ -197,10 +197,14 @@ class Settings(BaseSettings):
         A real-domain deploy can use `CORS_ORIGINS=https://a.com,https://b.com`
         without having to write JSON in .env.
         """
-        if v is None or v == "":
+        if v is None:
             return v
         if isinstance(v, str):
             stripped = v.strip()
+            if stripped == "":
+                # Empty env value → keep field default rather than producing
+                # an invalid list[str] from "".
+                return cls.model_fields["cors_origins"].default
             if stripped.startswith("["):
                 import json
                 return json.loads(stripped)

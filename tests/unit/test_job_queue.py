@@ -389,8 +389,10 @@ class TestProcessQueue:
         state = wf.ainvoke.call_args[0][0]
         assert state["master_cv"] == user_cv
 
-    async def test_fallback_cv_when_user_has_no_cv(self):
-        """When user exists but has no master_cv_json, fall back to loader."""
+    async def test_fails_job_when_user_has_no_cv(self):
+        """Multi-user mode: skip the shared-filesystem fallback when a user
+        has no master_cv_json — record a failure instead of leaking another
+        user's CV through the legacy loader."""
         q = JobQueue()
         await q.put(_job("cv2"), user_id="user-no-cv")
 
@@ -404,20 +406,30 @@ class TestProcessQueue:
         mock_user_repo = AsyncMock()
         mock_user_repo.get_by_id = AsyncMock(return_value=mock_user)
 
-        fallback_cv = {"contact": {"full_name": "Fallback"}}
+        loader_called = False
 
         def cv_loader():
-            return fallback_cv
+            nonlocal loader_called
+            loader_called = True
+            return {"contact": {"full_name": "Fallback"}}
+
+        job_repo = AsyncMock(get=AsyncMock(return_value=None))
+        job_repo.create = AsyncMock()
 
         await process_queue(
             q, workflow=wf, master_cv_loader=cv_loader,
             user_repository=mock_user_repo,
-            job_repository=AsyncMock(get=AsyncMock(return_value=None)),
+            job_repository=job_repo,
             delay_between_jobs=0, stop_event=stop,
         )
 
-        state = wf.ainvoke.call_args[0][0]
-        assert state["master_cv"] == fallback_cv
+        # Workflow must not have been invoked with a fallback CV
+        wf.ainvoke.assert_not_called()
+        assert not loader_called
+        # A failure record should have been persisted with a clear error_message
+        job_repo.create.assert_awaited()
+        created = job_repo.create.call_args[0][0]
+        assert "master_cv_json" in (created.error_message or "")
 
 
 # ---------------------------------------------------------------------------

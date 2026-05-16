@@ -335,13 +335,17 @@ async def log_requests(request: Request, call_next):
 async def health(request: Request):
     """Health check endpoint with consumer health status."""
     ctx: AppContext | None = getattr(request.app.state, "ctx", None)
-    pdf_ok = ctx.pdf_ok if ctx is not None else True
-    pdf_error = ctx.pdf_error if ctx is not None else None
+    pdf_ok = ctx.pdf_ok if ctx is not None else False
+    pdf_error = ctx.pdf_error if ctx is not None else "context_not_initialized"
+    llm_ok = ctx.llm_ok if ctx is not None else False
+    llm_error = ctx.llm_error if ctx is not None else "context_not_initialized"
     return {
         "status": "running",
         "message": "LinkedIn Job Application Agent API",
         "pdf_ok": pdf_ok,
         "pdf_error": pdf_error,
+        "llm_ok": llm_ok,
+        "llm_error": llm_error,
         **_consumer_manager.health_check(),
     }
 

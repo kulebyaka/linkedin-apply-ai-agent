@@ -205,9 +205,16 @@ async def process_queue(
                         cv_provider = user.model_preferences.cv_generation.provider
                         cv_model = user.model_preferences.cv_generation.model
                 except Exception:
-                    logger.warning("Failed to load user record for %s, using fallback", user_id)
+                    logger.warning("Failed to load user record for %s", user_id)
 
             if master_cv is None:
+                if user_id and user_repository:
+                    # Multi-user mode: never silently fall back to the shared
+                    # filesystem CV — that would deliver another user's data.
+                    raise RuntimeError(
+                        f"User {user_id} has no master_cv_json configured. "
+                        "Upload a CV in Settings before enabling LinkedIn search."
+                    )
                 master_cv = master_cv_loader()
 
             raw_input = job.model_dump()
