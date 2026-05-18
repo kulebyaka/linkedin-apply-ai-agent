@@ -154,6 +154,12 @@ class Settings(BaseSettings):
     jwt_secret: str = "change-me-in-production"
     jwt_expiry_days: int = 30                   # same for everyone
 
+    # Local-development auth bypass. When true, exposes POST /api/auth/dev-login
+    # which mints a JWT for `dev_auth_email` without an email round-trip. Refuses
+    # to start if `app_url` is not a localhost URL — guard against shipping it.
+    dev_auth_bypass: bool = False
+    dev_auth_email: str = "dev@local.test"
+
     @field_validator("jwt_secret")
     @classmethod
     def jwt_secret_must_be_strong(cls, v: str) -> str:

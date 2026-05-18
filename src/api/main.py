@@ -132,6 +132,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.ctx = ctx
     app.state.consumer_manager = _consumer_manager
 
+    if settings.dev_auth_bypass:
+        if not (
+            settings.app_url.startswith("http://localhost")
+            or settings.app_url.startswith("http://127.0.0.1")
+        ):
+            raise RuntimeError(
+                "SECURITY: DEV_AUTH_BYPASS=true but APP_URL is not localhost "
+                f"({settings.app_url!r}). The /api/auth/dev-login endpoint mints "
+                "session JWTs without verification and must never be reachable "
+                "outside local development."
+            )
+        logger.warning(
+            "DEV_AUTH_BYPASS enabled — POST /api/auth/dev-login will mint a JWT "
+            "for %s without email verification. Disable in production.",
+            settings.dev_auth_email,
+        )
+
     logger.info(f"Starting up with repository type: {settings.repo_type}")
     await ctx.repository.initialize()
     # Ensure user tables are initialized (SQLiteJobRepository already does this,
@@ -377,6 +394,38 @@ async def auth_verify(
     )
 
     return AuthResponse(user=user, message="Logged in successfully")
+
+
+@app.post("/api/auth/dev-login", response_model=AuthResponse)
+async def auth_dev_login(request: Request, response: Response) -> AuthResponse:
+    """Local-development auth bypass — mint a JWT for the configured dev user.
+
+    Gated by `DEV_AUTH_BYPASS=true`. Returns 404 when disabled so the route
+    looks identical to a non-existent endpoint in production.
+    """
+    ctx = _get_ctx(request)
+    if not ctx.settings.dev_auth_bypass:
+        raise HTTPException(404, "Not Found")
+    if ctx.auth_service is None or ctx.user_repository is None:
+        raise HTTPException(500, "Auth service not initialized")
+
+    email = ctx.settings.dev_auth_email
+    user = await ctx.user_repository.get_by_email(email)
+    if user is None:
+        user = await ctx.user_repository.create_user(email)
+        logger.info("dev-login: auto-created user %s", email)
+
+    jwt_token = ctx.auth_service.create_jwt(user.id, user.email)
+    response.set_cookie(
+        key="auth_token",
+        value=jwt_token,
+        httponly=True,
+        max_age=ctx.settings.jwt_expiry_days * 86400,
+        samesite="lax",
+        secure=ctx.settings.app_url.startswith("https://"),
+        path="/",
+    )
+    return AuthResponse(user=user, message="dev-login: logged in as " + email)
 
 
 @app.get("/api/auth/me", response_model=User)
