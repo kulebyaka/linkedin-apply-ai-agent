@@ -398,6 +398,7 @@ All settings in `.env`:
   - `MAGIC_LINK_TTL_MINUTES=15` - Magic link token validity period
   - `JWT_EXPIRY_DAYS=30` - JWT session duration
   - `APP_URL=http://localhost:5173` - Base URL for magic link callback
+  - `DEV_AUTH_BYPASS=true` + `DEV_AUTH_EMAIL=dev@local.test` - Local-only auth bypass for browser/UX testing. Exposes `POST /api/auth/dev-login` which mints a JWT cookie for the dev user without an email round-trip. Server refuses to start if true and `APP_URL` is non-localhost; route returns 404 when false. See `.claude/skills/web-browser/SKILL.md` for usage.
 - **Repository Configuration:**
   - `REPO_TYPE=memory` (default) or `REPO_TYPE=sqlite` for persistent storage
   - `DB_PATH=./data/jobs.db` (SQLite database path)
