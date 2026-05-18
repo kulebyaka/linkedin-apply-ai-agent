@@ -91,10 +91,10 @@ class Settings(BaseSettings):
     linkedin_search_easy_apply_only: bool = False
     linkedin_search_max_jobs: int = 50
     linkedin_session_cookie_path: str = "./data/linkedin_cookies.json"
-    linkedin_min_delay: float = 3.0
-    linkedin_max_delay: float = 8.0
-    linkedin_page_delay_min: float = 2.0
-    linkedin_page_delay_max: float = 5.0
+    linkedin_min_delay: float = 1.0
+    linkedin_max_delay: float = 3.0
+    linkedin_page_delay_min: float = 1.5
+    linkedin_page_delay_max: float = 4.0
 
     # -------------------------------------------------------------------------
     # LinkedIn Scheduler  (env-specific — override in .env)

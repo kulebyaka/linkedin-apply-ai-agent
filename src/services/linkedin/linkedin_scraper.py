@@ -43,10 +43,19 @@ SELECTORS = {
     "job_card_posted": (
         "time, span.job-card-container__listed-time, time.job-search-card__listed-time"
     ),
-    "detail_description": "div.jobs-description__content, div#job-details",
-    "detail_criteria": "li.jobs-unified-top-card__job-insight, ul.job-criteria__list li",
+    "detail_description": (
+        "div.jobs-description__content, div#job-details, "
+        "div.show-more-less-html__markup, div.description__text"
+    ),
+    "detail_criteria": (
+        "li.jobs-unified-top-card__job-insight, ul.job-criteria__list li, "
+        "li.description__job-criteria-item"
+    ),
     "detail_salary": "div.salary-main-rail__data-body, span.jobs-unified-top-card__salary",
-    "detail_show_more": "button.jobs-description__footer-button, button[aria-label='Show more'], button:has-text('Show more')",
+    "detail_show_more": (
+        "button.jobs-description__footer-button, button[aria-label='Show more'], "
+        "button:has-text('Show more'), button.show-more-less-html__button"
+    ),
     "no_results": "div.jobs-search-no-results-banner",
 }
 
