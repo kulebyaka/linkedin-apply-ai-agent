@@ -9,6 +9,7 @@ from src.models.job import ScrapedJob
 from src.services.linkedin.linkedin_scraper import (
     LinkedInJobScraper,
     _extract_job_id_from_url,
+    _extract_job_id_from_urn,
     _parse_relative_time,
 )
 
@@ -61,6 +62,25 @@ class TestExtractJobIdFromUrl:
     def test_full_url(self):
         url = "https://www.linkedin.com/jobs/view/3987654321/?trackingId=abc"
         assert _extract_job_id_from_url(url) == "3987654321"
+
+    def test_guest_slugged_url(self):
+        url = "https://cz.linkedin.com/jobs/view/ai-python-automation-engineer-at-vilgain-4413402262?position=1"
+        assert _extract_job_id_from_url(url) == "4413402262"
+
+    def test_guest_slugged_url_no_query(self):
+        url = "https://www.linkedin.com/jobs/view/senior-engineer-at-acme-1234567890"
+        assert _extract_job_id_from_url(url) == "1234567890"
+
+
+class TestExtractJobIdFromUrn:
+    def test_valid_urn(self):
+        assert _extract_job_id_from_urn("urn:li:jobPosting:4413402262") == "4413402262"
+
+    def test_none_input(self):
+        assert _extract_job_id_from_urn(None) is None
+
+    def test_unrelated_string(self):
+        assert _extract_job_id_from_urn("urn:li:person:12345") is None
 
 
 class TestParseRelativeTime:

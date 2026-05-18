@@ -17,15 +17,32 @@ from .linkedin_search import LinkedInSearchParams, LinkedInSearchURLBuilder
 logger = logging.getLogger(__name__)
 
 # CSS selectors for LinkedIn job search results and detail pages.
-# These target the current LinkedIn DOM structure and may need updating
-# if LinkedIn changes their markup.
+# Two layouts coexist: the authenticated SPA ("job-card-container" family) and
+# the public guest JSERP ("job-search-card"/"base-search-card" family). Direct
+# deep-links to /jobs/search/?... often render the guest layout even with a
+# valid session cookie, so each selector covers both.
 SELECTORS = {
-    "job_card": "div.job-card-container",
-    "job_card_title": "a.job-card-container__link, a.job-card-list__title--link",
-    "job_card_company": "div.artdeco-entity-lockup__subtitle span, span.job-card-container__primary-description",
-    "job_card_location": "div.artdeco-entity-lockup__caption li span, li.job-card-container__metadata-item",
-    "job_card_easy_apply": "li-icon[type='linkedin-bug'], span.job-card-container__apply-method",
-    "job_card_posted": "time, span.job-card-container__listed-time",
+    "job_card": "div.job-card-container, div.job-search-card",
+    "job_card_title": (
+        "a.job-card-container__link, a.job-card-list__title--link, "
+        "a.base-card__full-link, h3.base-search-card__title"
+    ),
+    "job_card_company": (
+        "div.artdeco-entity-lockup__subtitle span, "
+        "span.job-card-container__primary-description, "
+        "h4.base-search-card__subtitle a, h4.base-search-card__subtitle"
+    ),
+    "job_card_location": (
+        "div.artdeco-entity-lockup__caption li span, "
+        "li.job-card-container__metadata-item, "
+        "span.job-search-card__location"
+    ),
+    "job_card_easy_apply": (
+        "li-icon[type='linkedin-bug'], span.job-card-container__apply-method"
+    ),
+    "job_card_posted": (
+        "time, span.job-card-container__listed-time, time.job-search-card__listed-time"
+    ),
     "detail_description": "div.jobs-description__content, div#job-details",
     "detail_criteria": "li.jobs-unified-top-card__job-insight, ul.job-criteria__list li",
     "detail_salary": "div.salary-main-rail__data-body, span.jobs-unified-top-card__salary",
@@ -62,7 +79,8 @@ def _parse_relative_time(text: str) -> datetime | None:
 def _extract_job_id_from_url(url: str) -> str | None:
     """Extract LinkedIn job ID from a job URL or href.
 
-    LinkedIn job URLs typically contain /view/<job_id>/ or ?currentJobId=<id>.
+    Authenticated SPA: /jobs/view/<id>/ or ?currentJobId=<id>.
+    Public guest JSERP: /jobs/view/<slug>-<id>?... (trailing digits after slug).
     """
     # Pattern: /jobs/view/1234567890/
     m = re.search(r"/jobs/view/(\d+)", url)
@@ -72,7 +90,19 @@ def _extract_job_id_from_url(url: str) -> str | None:
     m = re.search(r"currentJobId=(\d+)", url)
     if m:
         return m.group(1)
+    # Pattern: /jobs/view/<slug>-<id>(?|/|$) — guest layout
+    m = re.search(r"/jobs/view/[^?/]*?-(\d+)(?=[?/]|$)", url)
+    if m:
+        return m.group(1)
     return None
+
+
+def _extract_job_id_from_urn(urn: str | None) -> str | None:
+    """Extract LinkedIn job ID from `urn:li:jobPosting:<id>` (guest layout)."""
+    if not urn:
+        return None
+    m = re.search(r"urn:li:jobPosting:(\d+)", urn)
+    return m.group(1) if m else None
 
 
 class LinkedInJobScraper:
@@ -226,17 +256,25 @@ class LinkedInJobScraper:
         Returns a ScrapedJob with card-level fields populated, or None on failure.
         """
         try:
-            # Job ID from data attribute (most reliable) or from link href
+            # Job ID: try data-job-id (SPA), then data-entity-urn (guest), then URL.
             job_id = await card_element.get_attribute("data-job-id")
+            if not job_id:
+                job_id = _extract_job_id_from_urn(
+                    await card_element.get_attribute("data-entity-urn")
+                )
 
-            # Title and URL from the link element
+            # Title and URL from the link element. The SPA puts the title in
+            # the anchor's aria-label; the guest layout has no aria-label but
+            # exposes the title via an inner <span class="sr-only">.
             title_el = card_element.locator(SELECTORS["job_card_title"]).first
-            # Use aria-label first (clean single title), fall back to text_content
             title = await title_el.get_attribute("aria-label") or ""
+            if not title:
+                sr_only = title_el.locator("span.sr-only").first
+                if await sr_only.count() > 0:
+                    title = (await sr_only.text_content() or "").strip()
             if not title:
                 title = (await title_el.text_content() or "").strip()
             title = " ".join(title.split())  # collapse whitespace
-            # Strip LinkedIn verification badge text that bleeds into aria-label
             if title.endswith(" with verification"):
                 title = title[: -len(" with verification")]
             href = await title_el.get_attribute("href") or ""
