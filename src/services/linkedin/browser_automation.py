@@ -167,9 +167,22 @@ class LinkedInAutomation:
         else:
             raise RuntimeError(f"LinkedIn login failed — current URL: {current_url}")
 
-    async def ensure_authenticated(self) -> None:
-        """Authenticate using cookies first, falling back to login."""
+    async def ensure_authenticated(self, validate_session: bool = True) -> None:
+        """Authenticate using cookies first, falling back to login.
+
+        Args:
+            validate_session: When True (default), verifies cookies by hitting
+                /feed and falls back to interactive login on failure — needed
+                for any flow that requires the authenticated SPA (e.g. Easy
+                Apply). When False, loads cookies if present and returns
+                without any LinkedIn round-trip — appropriate for scraping
+                public Jobs Search pages, which serve results unauthenticated
+                and where the /feed probe reliably trips LinkedIn anti-bot
+                detection and burns the session.
+        """
         cookie_loaded = await self._load_cookies()
+        if not validate_session:
+            return
         if cookie_loaded:
             session_valid = await self._validate_session()
             if session_valid:

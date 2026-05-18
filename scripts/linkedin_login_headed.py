@@ -9,7 +9,15 @@ When the URL settles on `/feed`, cookies are persisted to
 bind mount). `scp` that file to the VPS afterwards.
 
 Usage:
+    # Plain — login from your local IP.
     uv run python scripts/linkedin_login_headed.py
+
+    # Login while exiting via the VPS — set up an SSH SOCKS5 tunnel
+    # in another terminal first:
+    #   ssh -D 1080 -N -i ~/.ssh/id_ed25519_vps root@37.114.41.69
+    # Then route Chromium through it so LinkedIn sees the VPS IP:
+    VPS_PROXY=socks5://127.0.0.1:1080 \
+        uv run python scripts/linkedin_login_headed.py
 """
 
 from __future__ import annotations
@@ -32,13 +40,19 @@ MAX_WAIT_S = 600  # 10 minutes for manual login + challenge
 
 
 async def main() -> int:
+    proxy = os.environ.get("VPS_PROXY")
     print(f"Cookies will be saved to: {COOKIE_PATH.resolve()}")
+    if proxy:
+        print(f"Routing browser traffic through proxy: {proxy}")
     print("Log in manually in the window that opens (solve any challenge).")
     print(f"Waiting up to {MAX_WAIT_S // 60} minutes for you to reach the feed...\n")
 
     async with async_playwright() as pw:
         clean_env = {k: v for k, v in os.environ.items() if not k.startswith("DYLD_")}
-        browser = await pw.chromium.launch(headless=False, env=clean_env)
+        launch_kwargs: dict = {"headless": False, "env": clean_env}
+        if proxy:
+            launch_kwargs["proxy"] = {"server": proxy}
+        browser = await pw.chromium.launch(**launch_kwargs)
         context = await browser.new_context(
             viewport={
                 "width": random.randint(1280, 1920),
@@ -65,13 +79,42 @@ async def main() -> int:
             await browser.close()
             return 1
 
-        cookies = await context.cookies()
-        COOKIE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        COOKIE_PATH.write_text(json.dumps(cookies, indent=2), encoding="utf-8")
-        COOKIE_PATH.chmod(0o600)
-        print(f"Saved {len(cookies)} cookies to {COOKIE_PATH}")
+        async def snapshot_cookies(reason: str) -> None:
+            try:
+                cookies = await context.cookies()
+            except Exception as exc:
+                print(f"[{reason}] cookie snapshot failed: {exc}")
+                return
+            COOKIE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            COOKIE_PATH.write_text(json.dumps(cookies, indent=2), encoding="utf-8")
+            COOKIE_PATH.chmod(0o600)
+            print(f"[{reason}] Saved {len(cookies)} cookies to {COOKIE_PATH}")
 
-        await browser.close()
+        await snapshot_cookies("initial")
+
+        if os.environ.get("KEEP_OPEN", "1") != "0":
+            print(
+                "\nBrowser will stay open until you close the window.\n"
+                "Cookies are re-snapshotted every 10s while it's open.\n"
+            )
+            disconnected = asyncio.Event()
+            browser.on("disconnected", lambda _b: disconnected.set())
+
+            async def periodic_snapshot() -> None:
+                while not disconnected.is_set():
+                    try:
+                        await asyncio.wait_for(disconnected.wait(), timeout=10)
+                    except asyncio.TimeoutError:
+                        await snapshot_cookies("periodic")
+
+            snapshot_task = asyncio.create_task(periodic_snapshot())
+            await disconnected.wait()
+            snapshot_task.cancel()
+            print("Browser window closed by user.")
+
+        # If browser is still connected (KEEP_OPEN disabled), close cleanly.
+        if browser.is_connected():
+            await browser.close()
     return 0
 
 

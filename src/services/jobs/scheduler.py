@@ -164,9 +164,12 @@ class LinkedInSearchScheduler:
                     )
                 return 0
 
-            # Authenticate only when there are actual searches to perform.
+            # Scraping uses LinkedIn's public Jobs Search page which serves
+            # results without auth — skip /feed validation so we don't trip
+            # anti-bot detection. Cookies are still loaded in case they help
+            # widen results, but they're treated as best-effort.
             try:
-                await self.scraper.browser.ensure_authenticated()
+                await self.scraper.browser.ensure_authenticated(validate_session=False)
             except Exception as exc:
                 logger.exception("LinkedIn authentication failed")
                 now = datetime.now(tz=timezone.utc)

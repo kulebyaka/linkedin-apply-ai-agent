@@ -160,6 +160,27 @@ class TestEnsureAuthenticated:
         automation._validate_session.assert_not_awaited()
         automation.login.assert_awaited_once()
 
+    async def test_skip_validation_loads_cookies_only(self, automation):
+        automation._load_cookies = AsyncMock(return_value=True)
+        automation._validate_session = AsyncMock()
+        automation.login = AsyncMock()
+
+        await automation.ensure_authenticated(validate_session=False)
+
+        automation._load_cookies.assert_awaited_once()
+        automation._validate_session.assert_not_awaited()
+        automation.login.assert_not_awaited()
+
+    async def test_skip_validation_with_no_cookies_does_not_login(self, automation):
+        automation._load_cookies = AsyncMock(return_value=False)
+        automation._validate_session = AsyncMock()
+        automation.login = AsyncMock()
+
+        await automation.ensure_authenticated(validate_session=False)
+
+        automation._validate_session.assert_not_awaited()
+        automation.login.assert_not_awaited()
+
 
 class TestRandomDelay:
     async def test_uses_default_delays(self, automation):
