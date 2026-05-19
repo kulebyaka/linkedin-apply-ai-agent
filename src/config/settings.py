@@ -172,6 +172,13 @@ class Settings(BaseSettings):
     dev_auth_bypass: bool = False
     dev_auth_email: str = "dev@local.test"
 
+    # Operational alerts to the administrator (cookie refresh, etc.). Empty
+    # disables all admin alerts. State file persists per-alert-key cooldown
+    # across restarts so the scheduler doesn't spam after every run.
+    admin_alert_email: str = ""
+    admin_alert_cooldown_hours: int = 12
+    admin_alert_state_path: str = "./data/last_admin_alerts.json"
+
     @field_validator("jwt_secret")
     @classmethod
     def jwt_secret_must_be_strong(cls, v: str) -> str:
