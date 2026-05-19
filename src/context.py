@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
 
+    from src.services.alerts import AdminAlertService
     from src.services.auth.auth import AuthService
     from src.services.auth.user_repository import UserRepository
     from src.services.db.job_repository import JobRepository
@@ -42,6 +43,7 @@ class AppContext:
     retry_workflow: CompiledStateGraph
     user_repository: UserRepository | None = None
     auth_service: AuthService | None = None
+    admin_alert_service: AdminAlertService | None = None
     job_queue: JobQueue | None = None
     scheduler: LinkedInSearchScheduler | None = None
     browser: LinkedInAutomation | None = None
@@ -105,6 +107,7 @@ def create_app_context(
     """
     from src.agents.preparation_workflow import create_preparation_workflow
     from src.agents.retry_workflow import create_retry_workflow
+    from src.services.alerts import AdminAlertService
     from src.services.auth.auth import AuthService
     from src.services.auth.user_repository import UserRepository
     from src.services.db.job_repository import get_repository
@@ -126,6 +129,7 @@ def create_app_context(
 
     user_repository = UserRepository()
     auth_service = AuthService(settings, user_repository)
+    admin_alert_service = AdminAlertService(settings)
 
     ctx = AppContext(
         repository=repository,
@@ -134,6 +138,7 @@ def create_app_context(
         retry_workflow=retry_workflow,
         user_repository=user_repository,
         auth_service=auth_service,
+        admin_alert_service=admin_alert_service,
         job_queue=job_queue,
     )
 

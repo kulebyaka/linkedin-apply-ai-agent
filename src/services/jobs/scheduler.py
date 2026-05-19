@@ -23,6 +23,7 @@ from .job_queue import JobQueue
 from src.services.linkedin.linkedin_search import LinkedInSearchParams, LinkedInSearchURLBuilder
 
 if TYPE_CHECKING:
+    from src.services.alerts import AdminAlertService
     from src.services.linkedin.linkedin_scraper import LinkedInJobScraper
     from src.services.auth.user_repository import UserRepository
 
@@ -60,11 +61,13 @@ class LinkedInSearchScheduler:
         scraper: LinkedInJobScraper,
         queue: JobQueue,
         user_repository: UserRepository | None = None,
+        admin_alert_service: AdminAlertService | None = None,
     ) -> None:
         self.settings = settings
         self.scraper = scraper
         self.queue = queue
         self.user_repository = user_repository
+        self.admin_alert_service = admin_alert_service
         self._scheduler = AsyncIOScheduler()
         self._search_lock = asyncio.Lock()
         self._last_run_time: datetime | None = None
@@ -203,6 +206,20 @@ class LinkedInSearchScheduler:
                     logger.info(
                         "Scraped %d jobs for user=%s", len(jobs), plan_user_id or "global"
                     )
+
+                    if self.admin_alert_service is not None and jobs:
+                        empty = sum(
+                            1 for j in jobs if not (j.description or "").strip()
+                        )
+                        try:
+                            await self.admin_alert_service.maybe_alert_unauthenticated_session(
+                                total_jobs=len(jobs),
+                                empty_descriptions=empty,
+                                user_id=plan_user_id,
+                                search_url=search_url,
+                            )
+                        except Exception:
+                            logger.exception("Admin alert dispatch failed")
 
                     # Auto-record scraped jobs to fixture file
                     fixture_path = getattr(self.settings, "scraped_jobs_path", None)

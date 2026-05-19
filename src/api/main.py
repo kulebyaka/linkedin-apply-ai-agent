@@ -205,6 +205,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             scheduler = LinkedInSearchScheduler(
                 settings, scraper, ctx.job_queue,
                 user_repository=ctx.user_repository,
+                admin_alert_service=ctx.admin_alert_service,
             )
             scheduler.start()
             ctx.scheduler = scheduler
@@ -656,6 +657,7 @@ async def trigger_linkedin_search(request: Request, user: CurrentUser):
                 ctx.scheduler = LinkedInSearchScheduler(
                     settings, scraper, ctx.job_queue,
                     user_repository=ctx.user_repository,
+                    admin_alert_service=ctx.admin_alert_service,
                 )
             except Exception:
                 logger.exception("Failed to initialize LinkedIn search components")
