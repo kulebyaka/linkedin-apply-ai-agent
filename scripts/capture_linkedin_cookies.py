@@ -65,7 +65,25 @@ async def main() -> None:
                 break
             await asyncio.sleep(2)
 
-        # Give LinkedIn a moment to set ancillary cookies (lang, JSESSIONID, etc.)
+        # `li_at` can be set before login completes. Verify the session is
+        # actually authenticated by hitting /feed and waiting for the
+        # logged-in layout — otherwise we'd ship a useless cookie jar.
+        print(">>> `li_at` set. Verifying session by loading /feed...")
+        while True:
+            try:
+                await page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded")
+            except Exception as exc:
+                print(f">>> /feed navigation hiccup: {exc} — retrying in 3s")
+                await asyncio.sleep(3)
+                continue
+            current_url = page.url
+            if "/feed" in current_url and "login" not in current_url and "checkpoint" not in current_url:
+                print(f">>> Authenticated session confirmed (url: {current_url})")
+                break
+            print(f">>> Not authenticated yet (url: {current_url}). Complete any remaining steps in the browser — retrying in 5s.")
+            await asyncio.sleep(5)
+
+        # Let LinkedIn settle and issue ancillary cookies (liap, lms_*, etc.)
         await asyncio.sleep(3)
         cookies = await context.cookies()
 
