@@ -202,12 +202,27 @@ class LinkedInAutomation:
         await asyncio.sleep(delay)
 
     async def human_scroll(self, page: Page | None = None) -> None:
-        """Scroll the page with random increments and pauses to simulate human behavior."""
+        """Scroll the page with random increments and pauses to simulate human behavior.
+
+        The scroll is anti-bot ambience, not load-bearing — if LinkedIn's SPA
+        navigates mid-scroll (common on the authenticated /jobs/search route,
+        which soft-redirects to /jobs/collections/recommended after recognising
+        the session), Playwright raises "Execution context was destroyed".
+        We swallow that and bail; the caller's card-extraction step handles
+        whatever DOM ends up on screen.
+        """
         target = page or self.page
         num_scrolls = random.randint(2, 5)
         for _ in range(num_scrolls):
             scroll_amount = random.randint(200, 600)
-            await target.evaluate(f"window.scrollBy(0, {scroll_amount})")
+            try:
+                await target.evaluate(f"window.scrollBy(0, {scroll_amount})")
+            except Exception as exc:
+                logger.warning(
+                    "human_scroll aborted (page likely navigated): %s",
+                    exc,
+                )
+                return
             await asyncio.sleep(random.uniform(0.3, 1.0))
 
     async def apply_to_job(self, job_url: str, cv_path: str) -> dict:
