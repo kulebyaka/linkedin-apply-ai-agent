@@ -628,6 +628,18 @@ async def trigger_linkedin_search(request: Request, user: CurrentUser):
         )
 
     async with _linkedin_init_lock:
+        # Drop a dead browser before reusing it — the scheduler's scraper
+        # captures the browser handle at construction, so we also reset the
+        # scheduler to force a rebuild with the fresh browser.
+        if ctx.browser is not None and not ctx.browser.is_alive():
+            logger.warning("Cached LinkedIn browser context is dead, reinitializing")
+            try:
+                await ctx.browser.close()
+            except Exception:
+                logger.debug("Error closing dead browser", exc_info=True)
+            ctx.browser = None
+            ctx.scheduler = None
+
         if ctx.scheduler is None:
             # Create a temporary scheduler for one-off search
             try:

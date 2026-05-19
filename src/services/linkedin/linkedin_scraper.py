@@ -9,6 +9,8 @@ import logging
 import re
 from datetime import datetime, timedelta, timezone
 
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+
 from src.config.settings import Settings
 from src.models.job import ScrapedJob
 from .browser_automation import LinkedInAutomation
@@ -152,6 +154,22 @@ class LinkedInJobScraper:
             logger.info("Navigating to search page %d: %s", page_num, url)
 
             await self.browser.page.goto(url, wait_until="domcontentloaded")
+
+            # JSERP guest layout finishes rendering after domcontentloaded fires,
+            # so wait for either a job card or the no-results banner before
+            # counting. Without this the scraper races the render and silently
+            # reports 0 jobs on cold loads.
+            try:
+                await self.browser.page.wait_for_selector(
+                    f"{SELECTORS['job_card']}, {SELECTORS['no_results']}",
+                    timeout=8000,
+                )
+            except PlaywrightTimeoutError:
+                logger.warning(
+                    "wait_for_selector timed out on page %d — page may be throttled or layout changed",
+                    page_num,
+                )
+
             await self.browser.random_delay()
             await self.browser.human_scroll(self.browser.page)
 
@@ -166,7 +184,17 @@ class LinkedInJobScraper:
             card_count = await cards.count()
 
             if card_count == 0:
-                logger.info("No job cards found on page %d, stopping pagination", page_num)
+                title = await self.browser.page.title()
+                final_url = self.browser.page.url
+                content_snippet = (await self.browser.page.content())[:600]
+                logger.info(
+                    "No job cards found on page %d, stopping pagination "
+                    "(title=%r, url=%s, head=%s)",
+                    page_num,
+                    title,
+                    final_url,
+                    content_snippet.replace("\n", " "),
+                )
                 break
 
             logger.info("Found %d job cards on page %d", card_count, page_num)
