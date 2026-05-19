@@ -74,6 +74,15 @@
 		handleDecision('approved');
 	}
 
+	async function handleDelete() {
+		const ok = await reviewQueue.deleteCurrent();
+		if (ok) {
+			showToastMessage('Job deleted.', 'success');
+		} else if (reviewQueue.error) {
+			showToastMessage(reviewQueue.error, 'error');
+		}
+	}
+
 	function handleModalSubmit(feedback: string) {
 		if (modalType) {
 			handleDecision(modalType === 'decline' ? 'declined' : 'retry', feedback);
@@ -131,6 +140,7 @@
 					onApprove={() => handleDecision('approved')}
 					onDecline={() => (modalType = 'decline')}
 					onRetry={() => (modalType = 'retry')}
+					onDelete={handleDelete}
 					isSubmitting={reviewQueue.isSubmitting}
 					applicationUrl={reviewQueue.currentJob.application_url}
 				/>

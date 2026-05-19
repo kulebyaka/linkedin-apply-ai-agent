@@ -148,6 +148,11 @@ class JobRecord(BaseModel):
     # Error tracking
     error_message: str | None = None
 
+    # Scrape failure tracking (for retry-eligible records in SCRAPE_FAILED state)
+    scrape_attempts: int = 0
+    last_scrape_error: str | None = None
+    last_scrape_attempt_at: datetime | None = None
+
     # Timestamps
     created_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))

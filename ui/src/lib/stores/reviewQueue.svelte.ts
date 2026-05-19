@@ -1,5 +1,9 @@
 import type { PendingApproval, Decision, DecisionResponse } from '$lib/types';
-import { fetchPendingApprovals, submitDecision as apiSubmitDecision } from '$lib/api/hitl';
+import {
+	fetchPendingApprovals,
+	submitDecision as apiSubmitDecision,
+	deleteJob as apiDeleteJob,
+} from '$lib/api/hitl';
 
 // Reactive state
 let pendingJobs = $state<PendingApproval[]>([]);
@@ -70,6 +74,29 @@ async function submitDecision(
 	}
 }
 
+async function deleteCurrent(): Promise<boolean> {
+	const job = pendingJobs[currentIndex];
+	if (!job) return false;
+
+	isSubmitting = true;
+	error = null;
+	try {
+		await apiDeleteJob(job.job_id);
+
+		const jobId = job.job_id;
+		pendingJobs = pendingJobs.filter((j) => j.job_id !== jobId);
+		if (currentIndex >= pendingJobs.length && currentIndex > 0) {
+			currentIndex--;
+		}
+		return true;
+	} catch (e) {
+		error = e instanceof Error ? e.message : 'Failed to delete job';
+		return false;
+	} finally {
+		isSubmitting = false;
+	}
+}
+
 function clearError(): void {
 	error = null;
 }
@@ -105,5 +132,6 @@ export const reviewQueue = {
 	goToPrevious,
 	loadPending,
 	submitDecision,
+	deleteCurrent,
 	clearError,
 };

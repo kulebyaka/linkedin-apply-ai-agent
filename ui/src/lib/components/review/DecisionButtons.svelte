@@ -6,11 +6,24 @@
 		onApprove: () => void;
 		onDecline: () => void;
 		onRetry: () => void;
+		onDelete: () => void;
 		isSubmitting: boolean;
 		applicationUrl?: string;
 	}
 
-	let { onApprove, onDecline, onRetry, isSubmitting, applicationUrl }: Props = $props();
+	let { onApprove, onDecline, onRetry, onDelete, isSubmitting, applicationUrl }: Props = $props();
+
+	const DELETE_TOOLTIP =
+		'Delete this job. It may reappear on the next LinkedIn search if it’s still in your results.';
+
+	function handleDelete() {
+		const confirmed = window.confirm(
+			'Delete this job? It may reappear on the next LinkedIn search if it’s still in your results.'
+		);
+		if (confirmed) {
+			onDelete();
+		}
+	}
 
 	function handleMarkReviewedAndOpen() {
 		if (applicationUrl) {
@@ -76,6 +89,28 @@
 			variant="success"
 			fullWidth
 		/>
+	</div>
+
+	<!-- Secondary actions row -->
+	<div class="flex justify-end">
+		<button
+			type="button"
+			onclick={handleDelete}
+			disabled={isSubmitting}
+			title={DELETE_TOOLTIP}
+			aria-label="Delete job"
+			class="flex items-center gap-1.5 border-2 border-[var(--color-muted-foreground)] bg-[var(--color-background)] px-3 py-1.5 font-mono text-xs uppercase tracking-wider text-[var(--color-muted-foreground)] transition-all hover:-translate-y-0.5 hover:border-[var(--color-destructive)] hover:text-[var(--color-destructive)] disabled:pointer-events-none disabled:opacity-50"
+		>
+			<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+				<path
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					stroke-width="2"
+					d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3"
+				/>
+			</svg>
+			Delete
+		</button>
 	</div>
 
 	<!-- Manual apply CTA — replaces the inert Approve action for v1 -->

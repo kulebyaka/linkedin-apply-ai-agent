@@ -31,6 +31,20 @@ from src.models.unified import JobRecord
 logger = logging.getLogger(__name__)
 
 
+def _unlink_pdfs(paths: list[str], job_id: str) -> None:
+    """Best-effort PDF file removal. Logs and swallows FileNotFoundError;
+    logs but does not raise on other OSError so DB cascade isn't reverted."""
+    for raw in paths:
+        if not raw:
+            continue
+        try:
+            p = Path(raw)
+            p.unlink(missing_ok=True)
+            logger.debug("Unlinked PDF %s for job %s", raw, job_id)
+        except OSError as exc:
+            logger.warning("Failed to unlink PDF %s for job %s: %s", raw, job_id, exc)
+
+
 # Valid fields that can be updated via update() method
 UPDATABLE_FIELDS = frozenset({
     "status",
@@ -42,6 +56,9 @@ UPDATABLE_FIELDS = frozenset({
     "application_url",
     "filter_result",
     "error_message",
+    "scrape_attempts",
+    "last_scrape_error",
+    "last_scrape_attempt_at",
     "updated_at",
 })
 
@@ -143,6 +160,24 @@ class JobRepository(ABC):
 
         Returns:
             True if deleted, False if not found.
+        """
+        pass
+
+    @abstractmethod
+    async def delete_for_user(self, job_id: str, user_id: str) -> bool:
+        """Cascade-delete a job record owned by the given user.
+
+        Deletes the job row, all associated CV composition attempts, and unlinks
+        any PDF files referenced (current_pdf_path + each attempt's pdf_path).
+        Verifies ownership: returns False if the job does not exist or is owned
+        by a different user.
+
+        Args:
+            job_id: Unique job identifier.
+            user_id: Owner's user ID — must match the stored user_id.
+
+        Returns:
+            True if deleted, False if not found or not owned.
         """
         pass
 
@@ -443,6 +478,26 @@ class InMemoryJobRepository(JobRepository):
                 return True
             return False
 
+    async def delete_for_user(self, job_id: str, user_id: str) -> bool:
+        """Cascade-delete a job owned by the given user (in-memory)."""
+        pdf_paths: list[str] = []
+        async with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None or job.user_id != user_id:
+                return False
+
+            if job.current_pdf_path:
+                pdf_paths.append(job.current_pdf_path)
+            for attempt in self._cv_attempts.get(job_id, []):
+                if attempt.pdf_path:
+                    pdf_paths.append(attempt.pdf_path)
+
+            del self._jobs[job_id]
+            self._cv_attempts.pop(job_id, None)
+
+        _unlink_pdfs(pdf_paths, job_id)
+        return True
+
     # =========================================================================
     # Query Methods
     # =========================================================================
@@ -708,6 +763,24 @@ class SQLiteJobRepository(JobRepository):
                     "ALTER TABLE job ADD COLUMN filter_result JSON NULL"
                 )
 
+            if "scrape_attempts" not in job_columns:
+                logger.info("Migrating: adding scrape_attempts column to job table")
+                await conn.execute(
+                    "ALTER TABLE job ADD COLUMN scrape_attempts INTEGER NOT NULL DEFAULT 0"
+                )
+
+            if "last_scrape_error" not in job_columns:
+                logger.info("Migrating: adding last_scrape_error column to job table")
+                await conn.execute(
+                    "ALTER TABLE job ADD COLUMN last_scrape_error TEXT NULL"
+                )
+
+            if "last_scrape_attempt_at" not in job_columns:
+                logger.info("Migrating: adding last_scrape_attempt_at column to job table")
+                await conn.execute(
+                    "ALTER TABLE job ADD COLUMN last_scrape_attempt_at TIMESTAMP NULL"
+                )
+
             # --- User table migrations ---
             cursor = await conn.execute("PRAGMA table_info(user)")
             rows = await cursor.fetchall()
@@ -753,6 +826,9 @@ class SQLiteJobRepository(JobRepository):
             "application_url": job.application_url,
             "filter_result": job.filter_result,
             "error_message": job.error_message,
+            "scrape_attempts": job.scrape_attempts,
+            "last_scrape_error": job.last_scrape_error,
+            "last_scrape_attempt_at": job.last_scrape_attempt_at,
             "created_at": job.created_at,
             "updated_at": job.updated_at,
         }
@@ -792,6 +868,9 @@ class SQLiteJobRepository(JobRepository):
             application_url=row.get("application_url"),
             filter_result=self._parse_json_field(row.get("filter_result")),
             error_message=row.get("error_message"),
+            scrape_attempts=row.get("scrape_attempts") or 0,
+            last_scrape_error=row.get("last_scrape_error"),
+            last_scrape_attempt_at=self._normalize_datetime(row.get("last_scrape_attempt_at")),
             created_at=self._normalize_datetime(row.get("created_at")) or datetime.now(tz=timezone.utc),
             updated_at=self._normalize_datetime(row.get("updated_at")) or datetime.now(tz=timezone.utc),
         )
@@ -932,6 +1011,45 @@ class SQLiteJobRepository(JobRepository):
 
         await Job.delete().where(Job.job_id == job_id).run()
         logger.debug(f"Deleted job {job_id}")
+        return True
+
+    async def delete_for_user(self, job_id: str, user_id: str) -> bool:
+        """Cascade-delete a job owned by the given user (SQLite).
+
+        Verifies ownership, removes CV attempt rows, the job row, and unlinks
+        PDF files. PDF unlinking is best-effort and runs after the DB commit.
+        """
+        self._ensure_initialized()
+        from .tables import CVAttemptTable, Job
+
+        existing = (
+            await Job.select()
+            .where(Job.job_id == job_id)
+            .where(Job.user_id == user_id)
+            .first()
+            .run()
+        )
+        if not existing:
+            return False
+
+        attempt_rows = (
+            await CVAttemptTable.select(CVAttemptTable.pdf_path)
+            .where(CVAttemptTable.job_id == job_id)
+            .run()
+        )
+
+        pdf_paths: list[str] = []
+        if existing.get("current_pdf_path"):
+            pdf_paths.append(existing["current_pdf_path"])
+        for row in attempt_rows:
+            if row.get("pdf_path"):
+                pdf_paths.append(row["pdf_path"])
+
+        await CVAttemptTable.delete().where(CVAttemptTable.job_id == job_id).run()
+        await Job.delete().where(Job.job_id == job_id).run()
+        logger.info("Cascade-deleted job %s (user=%s, %d pdfs)", job_id, user_id, len(pdf_paths))
+
+        _unlink_pdfs(pdf_paths, job_id)
         return True
 
     # =========================================================================
