@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount, onDestroy } from 'svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 	import {
 		triggerLinkedInSearch,
@@ -7,11 +8,18 @@
 	} from '$lib/api/client';
 
 	let triggering = $state(false);
-	let triggered = $state(false);
 	let showConfirmModal = $state(false);
 	let error = $state<string | null>(null);
 	let lastRun = $state<UserLastRun | null>(null);
 	let polling = $state(false);
+	let searchRunning = $state(false);
+	let nextRunTime = $state<Date | null>(null);
+	let scheduleEnabled = $state(false);
+	let initialLoad = $state(true);
+	let now = $state(Date.now());
+
+	let pollAbort: AbortController | null = null;
+	let clockInterval: ReturnType<typeof setInterval> | null = null;
 
 	const hasCv = $derived(auth.user?.master_cv_json != null);
 	const hasSearchPrefs = $derived(auth.user?.search_preferences != null);
@@ -26,6 +34,54 @@
 		};
 	});
 
+	const lastRunRelative = $derived.by(() => {
+		now; // re-render on tick
+		return lastRun ? relativeTime(new Date(lastRun.time)) : null;
+	});
+	const nextRunRelative = $derived.by(() => {
+		now;
+		return nextRunTime ? relativeTime(nextRunTime) : null;
+	});
+
+	function relativeTime(date: Date): string {
+		const diffMs = date.getTime() - Date.now();
+		const past = diffMs < 0;
+		const absMin = Math.round(Math.abs(diffMs) / 60_000);
+		if (absMin < 1) return past ? 'just now' : 'in less than a minute';
+		if (absMin < 60) return past ? `${absMin} min ago` : `in ${absMin} min`;
+		const absHr = Math.round(absMin / 60);
+		if (absHr < 24) return past ? `${absHr} h ago` : `in ${absHr} h`;
+		const absDay = Math.round(absHr / 24);
+		return past ? `${absDay} d ago` : `in ${absDay} d`;
+	}
+
+	onMount(async () => {
+		try {
+			const status = await getLinkedInSearchStatus();
+			scheduleEnabled = status.enabled;
+			nextRunTime = status.next_run_time ? new Date(status.next_run_time) : null;
+			lastRun = status.user_last_run;
+			searchRunning = status.running;
+			if (searchRunning) {
+				// A search is already in flight (scheduled or another tab) — attach polling.
+				const since = status.last_run_time
+					? new Date(status.last_run_time)
+					: new Date(Date.now() - 60_000);
+				pollForOutcome(since);
+			}
+		} catch {
+			// Best-effort hydrate; ignore failures.
+		} finally {
+			initialLoad = false;
+		}
+		clockInterval = setInterval(() => (now = Date.now()), 30_000);
+	});
+
+	onDestroy(() => {
+		if (clockInterval) clearInterval(clockInterval);
+		pollAbort?.abort();
+	});
+
 	function handleClick() {
 		error = null;
 		showConfirmModal = true;
@@ -34,13 +90,10 @@
 	async function handleConfirm() {
 		triggering = true;
 		error = null;
-		lastRun = null;
-
 		const triggerStart = new Date();
-
 		try {
 			await triggerLinkedInSearch();
-			triggered = true;
+			searchRunning = true;
 			showConfirmModal = false;
 			pollForOutcome(triggerStart);
 		} catch (err) {
@@ -51,20 +104,27 @@
 	}
 
 	async function pollForOutcome(triggerStart: Date) {
+		pollAbort?.abort();
+		const abort = new AbortController();
+		pollAbort = abort;
 		polling = true;
-		const deadline = Date.now() + 120_000; // 2 min ceiling
+		const deadline = Date.now() + 180_000; // 3 min ceiling
 		try {
-			while (Date.now() < deadline) {
+			while (Date.now() < deadline && !abort.signal.aborted) {
 				await new Promise((r) => setTimeout(r, 2000));
+				if (abort.signal.aborted) return;
 				try {
 					const status = await getLinkedInSearchStatus();
+					searchRunning = status.running;
+					nextRunTime = status.next_run_time ? new Date(status.next_run_time) : null;
 					const run = status.user_last_run;
 					if (run && new Date(run.time) >= triggerStart) {
 						lastRun = run;
+						searchRunning = false;
 						return;
 					}
 				} catch {
-					// Ignore transient errors, keep polling
+					// transient — keep polling
 				}
 			}
 		} finally {
@@ -144,29 +204,26 @@
 		</div>
 	{/if}
 
-	{#if triggered}
-		{#if !lastRun && polling}
-			<div class="border-2 border-[var(--color-foreground)] bg-white px-4 py-3">
-				<p class="font-mono text-sm text-[var(--color-foreground)]">
-					LinkedIn search running… waiting for results.
-				</p>
-			</div>
-		{:else if lastRun && lastRun.reason === 'ok'}
-			<div class="border-2 border-[var(--color-success)] bg-emerald-50 px-4 py-3">
-				<p class="mb-2 font-mono text-sm text-[var(--color-foreground)]">
-					Search complete — <strong>{lastRun.jobs_found}</strong> job{lastRun.jobs_found === 1 ? '' : 's'} found. Jobs will appear on the Review page as they're processed.
+	<!-- Last run result (persists across refresh) -->
+	{#if lastRun && !searchRunning}
+		{#if lastRun.reason === 'ok'}
+			<div class="mb-4 border-2 border-[var(--color-success)] bg-emerald-50 px-4 py-3">
+				<p class="mb-1 font-mono text-sm text-[var(--color-foreground)]">
+					Last search: <strong>{lastRun.jobs_found}</strong> job{lastRun.jobs_found === 1 ? '' : 's'} found
+					{#if lastRunRelative}<span class="text-[var(--color-muted-foreground)]"> · {lastRunRelative}</span>{/if}
 				</p>
 				<a
 					href="/"
-					class="inline-block border-2 border-[var(--color-foreground)] bg-white px-4 py-2 font-mono text-xs uppercase tracking-wider text-[var(--color-foreground)] shadow-brutal transition-all duration-200 hover:-translate-y-0.5"
+					class="mt-2 inline-block border-2 border-[var(--color-foreground)] bg-white px-4 py-2 font-mono text-xs uppercase tracking-wider text-[var(--color-foreground)] shadow-brutal transition-all duration-200 hover:-translate-y-0.5"
 				>
 					Go to Review
 				</a>
 			</div>
-		{:else if lastRun}
-			<div class="border-2 border-[var(--color-error)] bg-amber-50 px-4 py-3">
+		{:else}
+			<div class="mb-4 border-2 border-[var(--color-error)] bg-amber-50 px-4 py-3">
 				<p class="mb-2 font-mono text-sm font-bold text-[var(--color-foreground)]">
-					{reasonLabel(lastRun.reason)} — 0 jobs found.
+					Last search: {reasonLabel(lastRun.reason)} — 0 jobs found
+					{#if lastRunRelative}<span class="font-normal text-[var(--color-muted-foreground)]"> · {lastRunRelative}</span>{/if}
 				</p>
 				{#if lastRun.reason === 'no_results'}
 					<p class="mb-2 font-mono text-xs text-[var(--color-foreground)]">
@@ -187,26 +244,55 @@
 					</a>
 				{/if}
 			</div>
-		{:else}
-			<div class="border-2 border-[var(--color-foreground)] bg-white px-4 py-3">
-				<p class="font-mono text-sm text-[var(--color-foreground)]">
-					Search triggered. Outcome polling timed out — check back on the Review page.
-				</p>
-			</div>
 		{/if}
-	{:else}
-		<button
-			onclick={handleClick}
-			disabled={!isReady || triggering}
-			class="border-2 border-[var(--color-foreground)] bg-[var(--color-primary)] px-6 py-3 font-mono text-sm uppercase tracking-wider text-[var(--color-primary-foreground)] shadow-brutal transition-all duration-200 hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
-		>
-			Start LinkedIn Search
-		</button>
-		{#if !isReady}
-			<p class="mt-2 font-mono text-xs text-[var(--color-muted-foreground)]">
-				Complete the steps above to enable searching.
+	{/if}
+
+	<!-- In-progress state (covers manual + scheduled runs) -->
+	{#if searchRunning}
+		<div class="mb-4 flex items-center gap-3 border-2 border-[var(--color-foreground)] bg-white px-4 py-3">
+			<svg class="h-5 w-5 shrink-0 animate-spin text-[var(--color-foreground)]" fill="none" viewBox="0 0 24 24">
+				<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+				<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+			</svg>
+			<p class="font-mono text-sm text-[var(--color-foreground)]">
+				LinkedIn search in progress… results will appear on the Review page.
 			</p>
+		</div>
+	{:else if polling}
+		<div class="mb-4 border-2 border-[var(--color-foreground)] bg-white px-4 py-3">
+			<p class="font-mono text-sm text-[var(--color-foreground)]">
+				Stopped watching after a few minutes. The search may still be running on the server — check the Review page or refresh this section.
+			</p>
+		</div>
+	{/if}
+
+	<!-- Action button + schedule footnote -->
+	<button
+		onclick={handleClick}
+		disabled={!isReady || triggering || searchRunning || initialLoad}
+		class="border-2 border-[var(--color-foreground)] bg-[var(--color-primary)] px-6 py-3 font-mono text-sm uppercase tracking-wider text-[var(--color-primary-foreground)] shadow-brutal transition-all duration-200 hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
+	>
+		{#if searchRunning}
+			Search running…
+		{:else if lastRun}
+			Run another search
+		{:else}
+			Start LinkedIn Search
 		{/if}
+	</button>
+
+	{#if !isReady}
+		<p class="mt-2 font-mono text-xs text-[var(--color-muted-foreground)]">
+			Complete the steps above to enable searching.
+		</p>
+	{:else if scheduleEnabled && nextRunRelative && !searchRunning}
+		<p class="mt-2 font-mono text-xs text-[var(--color-muted-foreground)]">
+			Searches also run automatically — next: {nextRunRelative}.
+		</p>
+	{:else if scheduleEnabled && !searchRunning}
+		<p class="mt-2 font-mono text-xs text-[var(--color-muted-foreground)]">
+			Searches also run automatically on a schedule.
+		</p>
 	{/if}
 </section>
 
