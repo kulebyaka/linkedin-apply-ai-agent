@@ -120,6 +120,32 @@ export async function fetchPendingApprovals(): Promise<PendingApproval[]> {
 	return response.json();
 }
 
+export type JobStatusCounts = Record<string, number>;
+
+export async function fetchJobStats(): Promise<JobStatusCounts> {
+	if (USE_MOCK) {
+		await delay(100);
+		return {
+			pending: mockPendingJobs.length,
+			processing: 2,
+			queued: 1,
+			applied: 5,
+			declined: 3,
+			filtered_out: 8,
+			failed: 1,
+		};
+	}
+
+	const response = await fetch(`${API_BASE}/api/jobs/stats`, {
+		credentials: 'include',
+	});
+	if (!response.ok) {
+		const errorText = await response.text();
+		throw new Error(`Failed to fetch job stats: ${response.statusText} - ${errorText}`);
+	}
+	return response.json();
+}
+
 export async function submitDecision(
 	jobId: string,
 	decision: Decision,

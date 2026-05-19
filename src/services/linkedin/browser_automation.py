@@ -222,6 +222,28 @@ class LinkedInAutomation:
         """
         raise NotImplementedError("Job application automation not yet implemented")
 
+    def is_alive(self) -> bool:
+        """True iff the browser, context, and page are all usable.
+
+        After a cascade of detail-page failures Playwright can leave the
+        browser handle non-None but with a closed page/context. Reusing
+        such an instance breaks the very next goto with TargetClosedError,
+        so callers should check this before each search cycle.
+        """
+        if self.browser is None or self.context is None or self.page is None:
+            return False
+        try:
+            if not self.browser.is_connected():
+                return False
+        except Exception:
+            return False
+        try:
+            if self.page.is_closed():
+                return False
+        except Exception:
+            return False
+        return True
+
     async def close(self) -> None:
         """Save cookies and close the browser."""
         if self.context:

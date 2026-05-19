@@ -271,6 +271,18 @@ class JobRepository(ABC):
         """
         pass
 
+    @abstractmethod
+    async def get_status_counts(self, user_id: str) -> dict[str, int]:
+        """Count jobs per status for a user.
+
+        Args:
+            user_id: Owner's user ID.
+
+        Returns:
+            Mapping of status string -> count. Statuses with zero jobs are omitted.
+        """
+        pass
+
     # =========================================================================
     # CV Attempt Methods
     # =========================================================================
@@ -560,6 +572,16 @@ class InMemoryJobRepository(JobRepository):
             jobs = [j for j in jobs if j.status in statuses]
         jobs.sort(key=lambda j: j.updated_at, reverse=True)
         return jobs[:limit]
+
+    async def get_status_counts(self, user_id: str) -> dict[str, int]:
+        """Count jobs per status for a user."""
+        counts: dict[str, int] = {}
+        for j in self._jobs.values():
+            if j.user_id != user_id:
+                continue
+            key = str(j.status)
+            counts[key] = counts.get(key, 0) + 1
+        return counts
 
     # =========================================================================
     # CV Attempt Methods
@@ -1152,6 +1174,22 @@ class SQLiteJobRepository(JobRepository):
 
         rows = await query.run()
         return [self._row_to_job_record(row) for row in rows]
+
+    async def get_status_counts(self, user_id: str) -> dict[str, int]:
+        """Count jobs per status for a user using a single GROUP BY query."""
+        self._ensure_initialized()
+
+        conn = await self._engine.get_connection()
+        try:
+            cursor = await conn.execute(
+                "SELECT status, COUNT(*) AS n FROM job WHERE user_id = ? GROUP BY status",
+                (user_id,),
+            )
+            rows = await cursor.fetchall()
+        finally:
+            await conn.close()
+
+        return {row["status"]: row["n"] for row in rows if row["status"]}
 
     # =========================================================================
     # CV Attempt Methods

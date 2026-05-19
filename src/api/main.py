@@ -628,6 +628,18 @@ async def trigger_linkedin_search(request: Request, user: CurrentUser):
         )
 
     async with _linkedin_init_lock:
+        # Drop a dead browser before reusing it — the scheduler's scraper
+        # captures the browser handle at construction, so we also reset the
+        # scheduler to force a rebuild with the fresh browser.
+        if ctx.browser is not None and not ctx.browser.is_alive():
+            logger.warning("Cached LinkedIn browser context is dead, reinitializing")
+            try:
+                await ctx.browser.close()
+            except Exception:
+                logger.debug("Error closing dead browser", exc_info=True)
+            ctx.browser = None
+            ctx.scheduler = None
+
         if ctx.scheduler is None:
             # Create a temporary scheduler for one-off search
             try:
@@ -904,6 +916,22 @@ async def get_hitl_pending(request: Request, user: CurrentUser) -> list[PendingA
     except Exception as e:
         logger.error(f"Failed to get pending jobs: {e}", exc_info=True)
         raise HTTPException(500, "Failed to get pending jobs") from None
+
+
+@app.get("/api/jobs/stats")
+async def get_job_stats(request: Request, user: CurrentUser) -> dict[str, int]:
+    """Return per-status job counts for the authenticated user.
+
+    Returns a dict mapping BusinessState values (e.g. "pending", "processing",
+    "queued", "applied", "failed", ...) to counts. Statuses with zero jobs
+    are omitted.
+    """
+    try:
+        ctx = _get_ctx(request)
+        return await ctx.repository.get_status_counts(user.id)
+    except Exception as e:
+        logger.error(f"Failed to get job stats: {e}", exc_info=True)
+        raise HTTPException(500, "Failed to get job stats") from None
 
 
 @app.post("/api/hitl/{job_id}/decide", response_model=HITLDecisionResponse)
