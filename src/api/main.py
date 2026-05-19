@@ -918,6 +918,22 @@ async def get_hitl_pending(request: Request, user: CurrentUser) -> list[PendingA
         raise HTTPException(500, "Failed to get pending jobs") from None
 
 
+@app.get("/api/jobs/stats")
+async def get_job_stats(request: Request, user: CurrentUser) -> dict[str, int]:
+    """Return per-status job counts for the authenticated user.
+
+    Returns a dict mapping BusinessState values (e.g. "pending", "processing",
+    "queued", "applied", "failed", ...) to counts. Statuses with zero jobs
+    are omitted.
+    """
+    try:
+        ctx = _get_ctx(request)
+        return await ctx.repository.get_status_counts(user.id)
+    except Exception as e:
+        logger.error(f"Failed to get job stats: {e}", exc_info=True)
+        raise HTTPException(500, "Failed to get job stats") from None
+
+
 @app.post("/api/hitl/{job_id}/decide", response_model=HITLDecisionResponse)
 async def submit_hitl_decision(
     job_id: str, decision: HITLDecision, request: Request, user: CurrentUser

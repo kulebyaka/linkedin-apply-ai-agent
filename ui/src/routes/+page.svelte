@@ -94,6 +94,24 @@
 		toastType = type;
 		showToast = true;
 	}
+
+	// Status counters shown next to "pending" — order matters (most useful first).
+	// Each entry: [status key from BusinessState, display label, bg color var]
+	const STAT_BADGES: Array<{ key: string; label: string; bg: string; fg?: string }> = [
+		{ key: 'queued', label: 'queued', bg: 'var(--color-muted)' },
+		{ key: 'processing', label: 'processing', bg: 'var(--color-accent)' },
+		{ key: 'retrying', label: 'retrying', bg: 'var(--color-accent)' },
+		{ key: 'scrape_failed', label: 'scrape retry', bg: 'var(--color-muted)' },
+		{ key: 'applied', label: 'applied', bg: 'var(--color-secondary)' },
+		{ key: 'approved', label: 'approved', bg: 'var(--color-secondary)' },
+		{ key: 'declined', label: 'declined', bg: 'var(--color-muted)' },
+		{ key: 'filtered_out', label: 'filtered out', bg: 'var(--color-muted)' },
+		{ key: 'failed', label: 'failed', bg: 'var(--color-destructive)' },
+	];
+
+	const visibleStatBadges = $derived(
+		STAT_BADGES.filter((b) => (reviewQueue.statusCounts[b.key] ?? 0) > 0)
+	);
 </script>
 
 <svelte:head>
@@ -111,13 +129,30 @@
 						Review AI-generated CVs and approve job applications
 					</p>
 				</div>
-				{#if reviewQueue.totalCount > 0}
-					<div
-						class="border-2 border-[var(--color-foreground)] bg-[var(--color-primary)] px-4 py-2 shadow-brutal"
-					>
-						<span class="font-mono text-sm font-semibold">{reviewQueue.totalCount} pending</span>
-					</div>
-				{/if}
+				<div class="flex flex-wrap items-center gap-2">
+					{#if reviewQueue.totalCount > 0}
+						<div
+							class="border-2 border-[var(--color-foreground)] bg-[var(--color-primary)] px-4 py-2 shadow-brutal"
+							title="Jobs awaiting your review"
+						>
+							<span class="font-mono text-sm font-semibold"
+								>{reviewQueue.totalCount} pending</span
+							>
+						</div>
+					{/if}
+					{#each visibleStatBadges as badge (badge.key)}
+						<div
+							class="border-2 border-[var(--color-foreground)] px-3 py-1.5"
+							style:background-color={badge.bg}
+							title="Jobs in '{badge.key}' state"
+						>
+							<span class="font-mono text-xs font-semibold">
+								{reviewQueue.statusCounts[badge.key]}
+								{badge.label}
+							</span>
+						</div>
+					{/each}
+				</div>
 			</div>
 		</header>
 

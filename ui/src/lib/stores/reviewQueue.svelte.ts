@@ -1,8 +1,10 @@
 import type { PendingApproval, Decision, DecisionResponse } from '$lib/types';
 import {
 	fetchPendingApprovals,
+	fetchJobStats,
 	submitDecision as apiSubmitDecision,
 	deleteJob as apiDeleteJob,
+	type JobStatusCounts,
 } from '$lib/api/hitl';
 
 // Reactive state
@@ -11,6 +13,7 @@ let currentIndex = $state(0);
 let isLoading = $state(false);
 let isSubmitting = $state(false);
 let error = $state<string | null>(null);
+let statusCounts = $state<JobStatusCounts>({});
 
 // Derived values
 const currentJob = $derived(pendingJobs[currentIndex] ?? null);
@@ -35,12 +38,25 @@ async function loadPending(): Promise<void> {
 	isLoading = true;
 	error = null;
 	try {
-		pendingJobs = await fetchPendingApprovals();
+		const [pending, counts] = await Promise.all([
+			fetchPendingApprovals(),
+			fetchJobStats().catch(() => ({}) as JobStatusCounts),
+		]);
+		pendingJobs = pending;
+		statusCounts = counts;
 		currentIndex = 0;
 	} catch (e) {
 		error = e instanceof Error ? e.message : 'Failed to load pending approvals';
 	} finally {
 		isLoading = false;
+	}
+}
+
+async function refreshStats(): Promise<void> {
+	try {
+		statusCounts = await fetchJobStats();
+	} catch {
+		// Stats are auxiliary — don't surface errors
 	}
 }
 
@@ -65,6 +81,7 @@ async function submitDecision(
 			currentIndex--;
 		}
 
+		void refreshStats();
 		return result;
 	} catch (e) {
 		error = e instanceof Error ? e.message : 'Failed to submit decision';
@@ -88,6 +105,7 @@ async function deleteCurrent(): Promise<boolean> {
 		if (currentIndex >= pendingJobs.length && currentIndex > 0) {
 			currentIndex--;
 		}
+		void refreshStats();
 		return true;
 	} catch (e) {
 		error = e instanceof Error ? e.message : 'Failed to delete job';
@@ -127,10 +145,14 @@ export const reviewQueue = {
 	get error() {
 		return error;
 	},
+	get statusCounts() {
+		return statusCounts;
+	},
 
 	goToNext,
 	goToPrevious,
 	loadPending,
+	refreshStats,
 	submitDecision,
 	deleteCurrent,
 	clearError,
