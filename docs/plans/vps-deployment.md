@@ -2,7 +2,7 @@
 
 ## Overview
 - **Feature**: VPS deployment pipeline (Docker Compose + GHCR + GitHub Actions + Watchtower + Caddy)
-- **Status**: Draft (revised 2026-05-16 — switched UI serving from in-container nginx to host-level Caddy with TLS)
+- **Status**: Live (first end-to-end deploy completed 2026-05-16 at `https://app.kuule.cc`)
 - **Created**: 2026-04-19
 - **Author**: User + Claude Code
 
@@ -394,30 +394,33 @@ CMD ["true"]
 - New files: `.github/workflows/release.yml`, `ui/Dockerfile`, `Caddyfile`, `docker-compose.prod.yml`, `.dockerignore` (if missing).
 - Verify UI source calls the API via **relative URLs** (`fetch('/api/...')`). Any hardcoded `http://localhost:8000` or absolute API URL must be replaced — that's a code change scoped to this feature.
 
-### Setup Status (as of 2026-05-16)
+### Setup Status (as of 2026-05-17)
 
-GitHub-side prerequisites for the Release workflow are now in place — once `.github/workflows/release.yml`, `Caddyfile`, `docker-compose.prod.yml`, and `ui/Dockerfile` land in the repo, the first GitHub Release can fire end-to-end without manual credential plumbing.
+First end-to-end deploy succeeded via `workflow_dispatch` on master with image tag `v0.1.0`. Stack is running at `https://app.kuule.cc` with a valid Let's Encrypt cert.
 
 | Item | Status | Notes |
 |---|---|---|
-| DNS: `app.kuule.cc` A → `37.114.41.69` | ✅ Done | Confirmed in DNS panel. TTL 300. |
+| DNS: `app.kuule.cc` A → `37.114.41.69` | ✅ Done | Confirmed; cert issued by Caddy on first start. |
 | DNS: `api.kuule.cc` A record | ⚠️ Pending cleanup | Vestigial from subdomain-split design. Safe to delete. Not blocking. |
 | GH variable `APP_DOMAIN` | ✅ Set | Value: `app.kuule.cc` |
-| GH variable `ACME_EMAIL` | ✅ Set | Value: `kiril.elizarov@gmail.com` (Let's Encrypt expiry warnings land here) |
+| GH variable `ACME_EMAIL` | ✅ Set | Value: `kiril.elizarov@gmail.com` |
 | GH secret `VPS_HOST` | ✅ Set | Value: `37.114.41.69` |
 | GH secret `VPS_USER` | ✅ Set | Value: `root` — see note below on hardening |
-| GH secret `VPS_SSH_KEY` | ✅ Set | Loaded from local `~/.ssh/id_ed25519_vps`. SSH-as-root validated against the VPS (`ssh -i ~/.ssh/id_ed25519_vps root@37.114.41.69 'echo ok'` returns `ok`). |
-| GH secret `GHCR_PULL_TOKEN` | ✅ Set (assumed) | Not at repo level — assumed inherited from org-level or environment secret. Must be confirmed reachable from this repo's workflow before first deploy. |
-| VPS: Docker + compose installed | ❓ Unknown | Verify on VPS: `docker --version && docker compose version`. |
-| VPS: firewall ports 80/443 open, 8000 closed | ❓ Unknown | Verify with `ufw status` or equivalent. |
-| VPS: `/opt/linkedin-apply/` + `.env` + initial `Caddyfile` present | ❌ Pending | Bootstrap step from "Bootstrap flow" above — must happen before the first Release. |
-| Repo: `.github/workflows/release.yml` | ❌ Pending | Workflow per the skeleton above. |
-| Repo: `Caddyfile` template | ❌ Pending | Per skeleton above (with `__DOMAIN__` / `__ACME_EMAIL__` substitution markers). |
-| Repo: `docker-compose.prod.yml` | ❌ Pending | Per skeleton above. |
-| Repo: `ui/Dockerfile` (build-artifact-only) | ❌ Pending | Per skeleton above. Replaces any prior nginx-serve version. |
-| UI source uses relative `/api/*` URLs | ❓ Unverified | Audit pending — see Open Questions. |
+| GH secret `VPS_SSH_KEY` | ✅ Set | Verified end-to-end via `appleboy/ssh-action` in CI. |
+| GH secret `GHCR_PULL_TOKEN` | ✅ Set | Classic PAT for `kulebyaka`, scope `read:packages`. Used by the deploy step to refresh `/root/.docker/config.json` before `compose pull`. |
+| VPS: Docker + compose installed | ✅ Verified | Docker 26.1.5, compose plugin 2.26.1 (Debian 13). |
+| VPS: ports 80/443 reachable, 8000 not exposed | ✅ Verified | Caddy binds 80/443; API container uses `expose:` only (no host mapping). |
+| VPS: `/opt/linkedin-apply/` + `.env` present | ✅ Done | `.env` chmod 600, hand-managed (never written by CI). |
+| VPS: `/root/.docker/config.json` GHCR auth | ✅ Done | Created via `docker login` on first deploy; persists across deploys. |
+| Repo: `.github/workflows/release.yml` | ✅ Merged | `release.types=[published]` + `workflow_dispatch` for ad-hoc redeploys. |
+| Repo: `Caddyfile` template | ✅ Merged | `__DOMAIN__` / `__ACME_EMAIL__` substituted by CI. |
+| Repo: `docker-compose.prod.yml` | ✅ Merged | `__VERSION__` substituted by CI. |
+| Repo: `ui/Dockerfile` (build-artifact-only) | ✅ Merged | `busybox:stable` artifact image; build runs with `VITE_API_BASE_URL=""` for same-origin relative `/api/*` URLs. |
+| UI source uses relative `/api/*` URLs | ✅ Done | `||` swapped for `??` in `ui/src/lib/api/*.ts` so an explicit empty `VITE_API_BASE_URL` disables the dev localhost fallback. SvelteKit `adapter-static` set to `fallback: 'index.html'`, `strict: false` — SPA mode (matches `+layout.ts` having `prerender = false`). |
 
-**Security note on `VPS_USER=root`** — original plan called for a non-root deploy user with docker-group membership. Using `root` works and unblocks the first deploy, but every CI step runs as root on the box. Mitigation for later: create a non-root user (`deploy` or `linkedin-apply`), add its pubkey to its `authorized_keys`, add it to the `docker` group, then `gh secret set VPS_USER --body deploy`. Not blocking; tracked as a follow-up hardening task.
+**Security note on `VPS_USER=root`** — original plan called for a non-root deploy user with docker-group membership. Using `root` works and unblocks the first deploy, but every CI step runs as root on the box. Mitigation for later: create a non-root user (`deploy` or `linkedin-apply`), add its pubkey to its `authorized_keys`, add it to the `docker` group, copy `/root/.docker/config.json` to `~deploy/.docker/`, then `gh secret set VPS_USER --body deploy`. Tracked as a follow-up hardening task.
+
+**Deploy-step resilience** — the workflow's `docker login` is now best-effort: if `GHCR_PULL_TOKEN` is missing or rejected, the script falls through and relies on the cached `/root/.docker/config.json`. The credential is also passed via `env:` + `envs:` instead of inline `${{ }}` interpolation, which avoids shell-quoting surprises with secret values containing special characters.
 
 ### Testing Strategy
 - **CI**: after workflow implementation, cut a throwaway pre-release (e.g., `v0.0.1-rc1`) on a scratch branch. Verify images appear on GHCR with both tags.

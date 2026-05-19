@@ -105,7 +105,8 @@ export interface ModelCatalogResponse {
 export async function getModelCatalog(
 	operation?: LLMOperation,
 ): Promise<ModelCatalogResponse> {
-	const url = new URL(`${API_BASE}/api/llm/models`);
+	const base = API_BASE || (typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
+	const url = new URL(`${API_BASE}/api/llm/models`, base);
 	if (operation) url.searchParams.set('operation', operation);
 
 	const response = await fetch(url.toString(), { credentials: 'include' });

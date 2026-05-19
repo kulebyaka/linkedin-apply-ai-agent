@@ -92,16 +92,26 @@ jobs:
 
       - name: Deploy on VPS
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
+          GH_ACTOR: ${{ github.actor }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
+          envs: GHCR_PULL_TOKEN,GH_ACTOR
           script: |
             set -e
             cd /opt/linkedin-apply
             mv compose.rendered.yml docker-compose.yml
             mv Caddyfile.rendered Caddyfile
-            echo "${{ secrets.GHCR_PULL_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            # Persistent GHCR auth lives in /root/.docker/config.json after the
+            # first successful login. Refresh it best-effort; if the secret is
+            # absent/invalid the deploy still continues against the cached creds.
+            if [ -n "$GHCR_PULL_TOKEN" ]; then
+              echo "$GHCR_PULL_TOKEN" | docker login ghcr.io -u "$GH_ACTOR" --password-stdin \
+                || echo "GHCR login failed; relying on cached /root/.docker/config.json"
+            fi
             docker compose pull
             docker compose up -d --remove-orphans
             docker compose run --rm ui-publisher

@@ -107,9 +107,74 @@ All four should resolve to `37.114.41.69` (the `www` CNAME resolves transitively
 
 ### TLS / reverse proxy
 
-Not yet configured — the VPS currently serves plain HTTP on `:80` (UI) and `:8000` (API). TLS via Caddy + Let's Encrypt is a planned follow-up; see [`docs/plans/vps-deployment.md`](plans/vps-deployment.md) "Out of scope".
+Live as of 2026-05-16. Caddy 2 (alpine) terminates TLS on `:443` and reverse-proxies same-origin: UI at `/`, API at `/api/*`. Let's Encrypt cert is auto-issued and renewed via HTTP-01 on `:80` (which Caddy also serves as a 308 redirect to HTTPS). Certs persist in the `caddy_data` named docker volume — back it up alongside `/opt/linkedin-apply/data/` or expect a re-issue on volume loss.
 
-When TLS lands, update:
+Active config:
 
-- GitHub repo variable `VITE_API_URL` → `https://api.kuule.cc`
-- VPS `.env` `APP_URL` → `https://app.kuule.cc` (so magic links use the correct callback)
+- VPS `.env` → `APP_URL=https://app.kuule.cc`, `CORS_ORIGINS=["https://app.kuule.cc"]`
+- UI build → `VITE_API_BASE_URL=""` (baked into the image), so the client uses relative `/api/*` URLs
+- Caddy config rendered from `Caddyfile` at deploy time using GH repo variables `APP_DOMAIN` and `ACME_EMAIL`
+
+## Stack layout on the VPS
+
+```
+/opt/linkedin-apply/
+├── docker-compose.yml   # rendered from docker-compose.prod.yml at each deploy
+├── Caddyfile            # rendered from repo template at each deploy
+├── .env                 # hand-managed, chmod 600 — never written by CI
+├── data/                # SQLite + generated PDFs (bind mount → /app/data)
+└── logs/                # API logs (bind mount → /app/logs)
+                         # caddy_data, caddy_config, ui_static live as named docker volumes
+```
+
+Services (all on the `linkedin-apply` docker network):
+
+| Container | Image | Role |
+|---|---|---|
+| `linkedin-apply-caddy` | `caddy:2-alpine` | TLS + reverse proxy; only container exposed on host (`:80`, `:443`) |
+| `linkedin-apply-api` | `ghcr.io/kulebyaka/linkedin-apply-ai-agent-api:<tag>` | FastAPI, internal port `8000` only |
+| `linkedin-apply-ui-publisher` | `ghcr.io/kulebyaka/linkedin-apply-ai-agent-ui:<tag>` | One-shot: copies `/build` into the `ui_static` volume on each deploy |
+| `linkedin-apply-watchtower` | `containrrr/watchtower` | Label-scoped polling for `:latest` updates on api+caddy |
+
+A separate host-wide watchtower already runs from `/home/admin/services/watchtower/` — our stack ships its own label-scoped watchtower (`WATCHTOWER_LABEL_ENABLE=true`) so the two do not conflict.
+
+## Deploys
+
+Trigger from anywhere with the `gh` CLI:
+
+```bash
+# Cut a release (normal flow)
+gh release create v0.1.1 --generate-notes
+
+# Or redeploy a specific tag on demand (ad-hoc / rollback)
+gh workflow run release.yml --ref master -f tag=v0.1.0
+```
+
+The workflow builds linux/amd64 images for both api and ui, pushes them to GHCR with `:<tag>` and `:latest`, scps the rendered `docker-compose.yml` + `Caddyfile`, then SSHes to the VPS and runs `compose pull && up -d --remove-orphans && run --rm ui-publisher`. Watchtower is a safety net only — UI artifact refresh requires the publisher step, which only the workflow runs.
+
+## Manual operations on the VPS
+
+```bash
+ssh vps   # or: ssh -i ~/.ssh/id_ed25519_vps root@37.114.41.69
+
+cd /opt/linkedin-apply
+docker compose ps                          # service status
+docker compose logs -f api                 # tail API logs
+docker compose logs -f caddy               # cert renewal + access logs
+docker exec linkedin-apply-caddy caddy list-certificates   # cert expiry
+
+# Rollback to a previous image tag (edit the two `__VERSION__`-pinned image lines)
+sed -i 's|api:v0.1.1|api:v0.1.0|; s|ui:v0.1.1|ui:v0.1.0|' docker-compose.yml
+docker compose pull && docker compose up -d && docker compose run --rm ui-publisher
+```
+
+## Required GitHub secrets and variables
+
+| Kind | Name | Purpose |
+|---|---|---|
+| secret | `VPS_HOST` | VPS IP (`37.114.41.69`) |
+| secret | `VPS_USER` | SSH user (`root` for now — see hardening note in the plan) |
+| secret | `VPS_SSH_KEY` | Contents of `~/.ssh/id_ed25519_vps` |
+| secret | `GHCR_PULL_TOKEN` | Classic PAT with `read:packages` for `kulebyaka` — VPS `docker login` to GHCR |
+| variable | `APP_DOMAIN` | `app.kuule.cc` |
+| variable | `ACME_EMAIL` | Maintainer email for Let's Encrypt registration |

@@ -17,19 +17,52 @@ from .linkedin_search import LinkedInSearchParams, LinkedInSearchURLBuilder
 logger = logging.getLogger(__name__)
 
 # CSS selectors for LinkedIn job search results and detail pages.
-# These target the current LinkedIn DOM structure and may need updating
-# if LinkedIn changes their markup.
+# Two layouts coexist: the authenticated SPA ("job-card-container" family) and
+# the public guest JSERP ("job-search-card"/"base-search-card" family). Direct
+# deep-links to /jobs/search/?... often render the guest layout even with a
+# valid session cookie, so each selector covers both.
 SELECTORS = {
-    "job_card": "div.job-card-container",
-    "job_card_title": "a.job-card-container__link, a.job-card-list__title--link",
-    "job_card_company": "div.artdeco-entity-lockup__subtitle span, span.job-card-container__primary-description",
-    "job_card_location": "div.artdeco-entity-lockup__caption li span, li.job-card-container__metadata-item",
-    "job_card_easy_apply": "li-icon[type='linkedin-bug'], span.job-card-container__apply-method",
-    "job_card_posted": "time, span.job-card-container__listed-time",
-    "detail_description": "div.jobs-description__content, div#job-details",
-    "detail_criteria": "li.jobs-unified-top-card__job-insight, ul.job-criteria__list li",
+    "job_card": "div.job-card-container, div.job-search-card",
+    "job_card_title": (
+        "a.job-card-container__link, a.job-card-list__title--link, "
+        "a.base-card__full-link, h3.base-search-card__title"
+    ),
+    "job_card_company": (
+        "div.artdeco-entity-lockup__subtitle span, "
+        "span.job-card-container__primary-description, "
+        "h4.base-search-card__subtitle a, h4.base-search-card__subtitle"
+    ),
+    "job_card_location": (
+        "div.artdeco-entity-lockup__caption li span, "
+        "li.job-card-container__metadata-item, "
+        "span.job-search-card__location"
+    ),
+    "job_card_easy_apply": (
+        "li-icon[type='linkedin-bug'], span.job-card-container__apply-method"
+    ),
+    "job_card_posted": (
+        "time, span.job-card-container__listed-time, time.job-search-card__listed-time"
+    ),
+    # Authenticated SDUI layout (current as of 2026-05): hashed CSS classes are
+    # rotated, so we anchor on the stable `data-sdui-component` attribute.
+    # Note: we target the section container, not the inner `[data-testid=
+    # "expandable-text-box"]` — that span ends up empty in the parsed DOM
+    # because LinkedIn's markup nests `<p>` inside `<span>` inside `<p>`, which
+    # browsers auto-correct by hoisting the inner content out. The container's
+    # innerText includes the "About the job" heading; strip it in code.
+    "detail_description": (
+        "[data-sdui-component$='aboutTheJob'], "
+        "div.jobs-description__content, div#job-details"
+    ),
+    "detail_criteria": (
+        "li.jobs-unified-top-card__job-insight, ul.job-criteria__list li"
+    ),
     "detail_salary": "div.salary-main-rail__data-body, span.jobs-unified-top-card__salary",
-    "detail_show_more": "button.jobs-description__footer-button, button[aria-label='Show more'], button:has-text('Show more')",
+    "detail_show_more": (
+        "[data-sdui-component$='aboutTheJob'] [data-testid='expandable-text-button'], "
+        "button.jobs-description__footer-button, button[aria-label='Show more'], "
+        "button:has-text('Show more')"
+    ),
     "no_results": "div.jobs-search-no-results-banner",
 }
 
@@ -62,7 +95,8 @@ def _parse_relative_time(text: str) -> datetime | None:
 def _extract_job_id_from_url(url: str) -> str | None:
     """Extract LinkedIn job ID from a job URL or href.
 
-    LinkedIn job URLs typically contain /view/<job_id>/ or ?currentJobId=<id>.
+    Authenticated SPA: /jobs/view/<id>/ or ?currentJobId=<id>.
+    Public guest JSERP: /jobs/view/<slug>-<id>?... (trailing digits after slug).
     """
     # Pattern: /jobs/view/1234567890/
     m = re.search(r"/jobs/view/(\d+)", url)
@@ -72,7 +106,19 @@ def _extract_job_id_from_url(url: str) -> str | None:
     m = re.search(r"currentJobId=(\d+)", url)
     if m:
         return m.group(1)
+    # Pattern: /jobs/view/<slug>-<id>(?|/|$) — guest layout
+    m = re.search(r"/jobs/view/[^?/]*?-(\d+)(?=[?/]|$)", url)
+    if m:
+        return m.group(1)
     return None
+
+
+def _extract_job_id_from_urn(urn: str | None) -> str | None:
+    """Extract LinkedIn job ID from `urn:li:jobPosting:<id>` (guest layout)."""
+    if not urn:
+        return None
+    m = re.search(r"urn:li:jobPosting:(\d+)", urn)
+    return m.group(1) if m else None
 
 
 class LinkedInJobScraper:
@@ -226,17 +272,25 @@ class LinkedInJobScraper:
         Returns a ScrapedJob with card-level fields populated, or None on failure.
         """
         try:
-            # Job ID from data attribute (most reliable) or from link href
+            # Job ID: try data-job-id (SPA), then data-entity-urn (guest), then URL.
             job_id = await card_element.get_attribute("data-job-id")
+            if not job_id:
+                job_id = _extract_job_id_from_urn(
+                    await card_element.get_attribute("data-entity-urn")
+                )
 
-            # Title and URL from the link element
+            # Title and URL from the link element. The SPA puts the title in
+            # the anchor's aria-label; the guest layout has no aria-label but
+            # exposes the title via an inner <span class="sr-only">.
             title_el = card_element.locator(SELECTORS["job_card_title"]).first
-            # Use aria-label first (clean single title), fall back to text_content
             title = await title_el.get_attribute("aria-label") or ""
+            if not title:
+                sr_only = title_el.locator("span.sr-only").first
+                if await sr_only.count() > 0:
+                    title = (await sr_only.text_content() or "").strip()
             if not title:
                 title = (await title_el.text_content() or "").strip()
             title = " ".join(title.split())  # collapse whitespace
-            # Strip LinkedIn verification badge text that bleeds into aria-label
             if title.endswith(" with verification"):
                 title = title[: -len(" with verification")]
             href = await title_el.get_attribute("href") or ""
@@ -315,35 +369,50 @@ class LinkedInJobScraper:
         try:
             # Click "Show more" button to expand truncated job descriptions.
             # LinkedIn hides long descriptions behind this button by default.
+            # Bound the click to avoid hanging on modal overlays (default click
+            # timeout is 30s and modals routinely intercept pointer events).
             show_more = page.locator(SELECTORS["detail_show_more"]).first
             try:
                 if await show_more.is_visible(timeout=2000):
-                    await show_more.click()
-                    await self.browser.random_delay(0.5, 1.0)
+                    try:
+                        await show_more.click(timeout=3000)
+                        await self.browser.random_delay(0.5, 1.0)
+                    except Exception as exc:
+                        logger.debug("Show more click failed: %s", exc)
             except Exception:
-                pass  # Button not present or not clickable — continue with whatever is visible
+                pass  # Button not present — continue with whatever is visible
 
-            # Primary: find h2 "About the job" and get its grandparent's text
-            # (LinkedIn now uses hashed CSS classes, so text-based lookup is more stable)
-            about_h2 = page.locator("h2:has-text('About the job')")
-            if await about_h2.count() > 0:
-                # Grandparent contains: separator div + heading div + <p> with description
-                container = about_h2.first.locator("../..")
-                raw = (await container.text_content() or "").strip()
-                # Strip the "About the job" heading prefix
-                desc = raw.removeprefix("About the job").strip()
-                if desc:
-                    result["description"] = desc
-            else:
-                # Fallback: legacy selectors for older LinkedIn DOM
-                desc_count = await page.locator(SELECTORS["detail_description"]).count()
-                if desc_count > 0:
-                    result["description"] = (
-                        await page.locator(SELECTORS["detail_description"]).first.text_content()
-                        or ""
-                    ).strip()
+            # Primary: scoped SDUI selector (authenticated 2026 layout). The
+            # container's innerText starts with the "About the job" heading;
+            # strip it. For legacy SPA fallbacks (jobs-description__content /
+            # job-details) the heading isn't present, so the strip is a no-op.
+            desc_loc = page.locator(SELECTORS["detail_description"]).first
+            desc_count = await page.locator(SELECTORS["detail_description"]).count()
+            if desc_count > 0:
+                text = (await desc_loc.text_content() or "").strip()
+                text = text.removeprefix("About the job").strip()
+                if text:
+                    result["description"] = text
+
+            # Fallback: text-anchored h2 lookup (covers SDUI variants where
+            # the component name attribute may have rotated)
+            if not result["description"]:
+                about_h2 = page.locator("h2:has-text('About the job')")
+                if await about_h2.count() > 0:
+                    container = about_h2.first.locator("../..")
+                    raw = (await container.text_content() or "").strip()
+                    desc = raw.removeprefix("About the job").strip()
+                    if desc:
+                        result["description"] = desc
         except Exception as exc:
             logger.debug("Failed to extract description: %s", exc)
+
+        if not result["description"]:
+            logger.warning(
+                "Empty description on detail page: %s (selectors did not match — "
+                "session may be unauthenticated or layout changed)",
+                page.url,
+            )
 
         # Extract job criteria (experience level, job type, etc.)
         try:

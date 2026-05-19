@@ -91,10 +91,15 @@ class Settings(BaseSettings):
     linkedin_search_easy_apply_only: bool = False
     linkedin_search_max_jobs: int = 50
     linkedin_session_cookie_path: str = "./data/linkedin_cookies.json"
-    linkedin_min_delay: float = 3.0
-    linkedin_max_delay: float = 8.0
-    linkedin_page_delay_min: float = 2.0
-    linkedin_page_delay_max: float = 5.0
+    # Optional outbound proxy for the LinkedIn browser. Accepts the same
+    # `proxy.server` string Playwright takes (e.g. `socks5://127.0.0.1:1080`,
+    # `http://user:pass@proxy:3128`). Useful for routing local test runs
+    # through the VPS so LinkedIn sees a stable origin IP for the session.
+    linkedin_proxy_server: str | None = None
+    linkedin_min_delay: float = 1.0
+    linkedin_max_delay: float = 3.0
+    linkedin_page_delay_min: float = 1.5
+    linkedin_page_delay_max: float = 4.0
 
     # -------------------------------------------------------------------------
     # LinkedIn Scheduler  (env-specific — override in .env)
@@ -153,6 +158,12 @@ class Settings(BaseSettings):
     magic_link_ttl_minutes: int = 15            # same for everyone
     jwt_secret: str = "change-me-in-production"
     jwt_expiry_days: int = 30                   # same for everyone
+
+    # Local-development auth bypass. When true, exposes POST /api/auth/dev-login
+    # which mints a JWT for `dev_auth_email` without an email round-trip. Refuses
+    # to start if `app_url` is not a localhost URL — guard against shipping it.
+    dev_auth_bypass: bool = False
+    dev_auth_email: str = "dev@local.test"
 
     @field_validator("jwt_secret")
     @classmethod

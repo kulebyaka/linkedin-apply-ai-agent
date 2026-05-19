@@ -81,6 +81,9 @@ data/jobs/
 data/jobs.db
 data/generated_cvs/
 data/linkedin_cookies.json
+data/linkedin_debug/
+data/vps_snapshot/
+data/*.html
 !data/cv/master_cv.example.json
 scripts/test_job.json
 

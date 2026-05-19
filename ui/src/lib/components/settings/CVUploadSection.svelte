@@ -19,7 +19,7 @@
 		const cv = user.master_cv_json as Record<string, unknown>;
 		const contact = cv.contact as Record<string, unknown> | undefined;
 		const name = (contact?.full_name ?? contact?.name ?? 'Unknown') as string;
-		const experiences = Array.isArray(cv.experience) ? cv.experience.length : 0;
+		const experiences = Array.isArray(cv.experiences) ? cv.experiences.length : 0;
 		const skills = Array.isArray(cv.skills) ? cv.skills.length : 0;
 		return { name, experiences, skills };
 	});

@@ -9,6 +9,7 @@ from src.models.job import ScrapedJob
 from src.services.linkedin.linkedin_scraper import (
     LinkedInJobScraper,
     _extract_job_id_from_url,
+    _extract_job_id_from_urn,
     _parse_relative_time,
 )
 
@@ -61,6 +62,25 @@ class TestExtractJobIdFromUrl:
     def test_full_url(self):
         url = "https://www.linkedin.com/jobs/view/3987654321/?trackingId=abc"
         assert _extract_job_id_from_url(url) == "3987654321"
+
+    def test_guest_slugged_url(self):
+        url = "https://cz.linkedin.com/jobs/view/ai-python-automation-engineer-at-vilgain-4413402262?position=1"
+        assert _extract_job_id_from_url(url) == "4413402262"
+
+    def test_guest_slugged_url_no_query(self):
+        url = "https://www.linkedin.com/jobs/view/senior-engineer-at-acme-1234567890"
+        assert _extract_job_id_from_url(url) == "1234567890"
+
+
+class TestExtractJobIdFromUrn:
+    def test_valid_urn(self):
+        assert _extract_job_id_from_urn("urn:li:jobPosting:4413402262") == "4413402262"
+
+    def test_none_input(self):
+        assert _extract_job_id_from_urn(None) is None
+
+    def test_unrelated_string(self):
+        assert _extract_job_id_from_urn("urn:li:person:12345") is None
 
 
 class TestParseRelativeTime:
@@ -439,8 +459,47 @@ class TestParseJobDetailPage:
         result = await scraper._parse_job_detail_page(page)
         assert result["salary_range"] == "$120,000 - $160,000"
 
-    async def test_parses_about_the_job_h2_primary_path(self, scraper):
-        """Verify description is extracted via h2 'About the job' grandparent."""
+    async def test_strips_about_the_job_prefix_from_sdui_container(self, scraper):
+        """SDUI container selector includes the 'About the job' h2 in its
+        innerText. The scraper must strip that heading prefix before saving."""
+        page = MagicMock()
+
+        show_more_loc = _make_show_more_loc(visible=False)
+
+        desc_loc = MagicMock()
+        desc_loc.count = AsyncMock(return_value=1)
+        desc_loc.first = MagicMock()
+        # Mirrors the live SDUI layout: container innerText starts with the h2
+        desc_loc.first.text_content = AsyncMock(
+            return_value="About the job\nWe build distributed systems in Rust."
+        )
+
+        criteria_loc = MagicMock()
+        criteria_loc.count = AsyncMock(return_value=0)
+        salary_loc = MagicMock()
+        salary_loc.count = AsyncMock(return_value=0)
+
+        def locator_side_effect(selector):
+            from src.services.linkedin.linkedin_scraper import SELECTORS
+
+            if selector == SELECTORS["detail_show_more"]:
+                return show_more_loc
+            if selector == SELECTORS["detail_description"]:
+                return desc_loc
+            if selector == SELECTORS["detail_criteria"]:
+                return criteria_loc
+            if selector == SELECTORS["detail_salary"]:
+                return salary_loc
+            return MagicMock(count=AsyncMock(return_value=0))
+
+        page.locator = MagicMock(side_effect=locator_side_effect)
+
+        result = await scraper._parse_job_detail_page(page)
+        assert result["description"] == "We build distributed systems in Rust."
+
+    async def test_parses_about_the_job_h2_fallback_path(self, scraper):
+        """Verify description is extracted via h2 'About the job' grandparent
+        when the primary SDUI selector doesn't match."""
         page = MagicMock()
 
         show_more_loc = _make_show_more_loc(visible=False)
