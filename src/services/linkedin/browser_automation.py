@@ -33,6 +33,7 @@ class LinkedInAutomation:
         self.password = settings.linkedin_password
         self.headless = settings.browser_headless
         self.cookie_path = Path(settings.linkedin_session_cookie_path)
+        self.proxy_server = settings.linkedin_proxy_server
         self.min_delay = settings.linkedin_min_delay
         self.max_delay = settings.linkedin_max_delay
         self.page_delay_min = settings.linkedin_page_delay_min
@@ -57,10 +58,11 @@ class LinkedInAutomation:
             # gets inherited by Chromium, forcing it to load incompatible libs and crash.
             # Strip DYLD_* vars from the child process env. No-op on Linux.
             clean_env = {k: v for k, v in os.environ.items() if not k.startswith("DYLD_")}
-            self.browser = await self._playwright.chromium.launch(
-                headless=self.headless,
-                env=clean_env,
-            )
+            launch_kwargs: dict = {"headless": self.headless, "env": clean_env}
+            if self.proxy_server:
+                launch_kwargs["proxy"] = {"server": self.proxy_server}
+                logger.info("Routing browser through proxy: %s", self.proxy_server)
+            self.browser = await self._playwright.chromium.launch(**launch_kwargs)
             self.context = await self.browser.new_context(
                 viewport={"width": viewport_width, "height": viewport_height},
                 locale="en-US",

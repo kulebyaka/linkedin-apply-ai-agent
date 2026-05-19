@@ -43,18 +43,25 @@ SELECTORS = {
     "job_card_posted": (
         "time, span.job-card-container__listed-time, time.job-search-card__listed-time"
     ),
+    # Authenticated SDUI layout (current as of 2026-05): hashed CSS classes are
+    # rotated, so we anchor on the stable `data-sdui-component` attribute.
+    # Note: we target the section container, not the inner `[data-testid=
+    # "expandable-text-box"]` — that span ends up empty in the parsed DOM
+    # because LinkedIn's markup nests `<p>` inside `<span>` inside `<p>`, which
+    # browsers auto-correct by hoisting the inner content out. The container's
+    # innerText includes the "About the job" heading; strip it in code.
     "detail_description": (
-        "div.jobs-description__content, div#job-details, "
-        "div.show-more-less-html__markup, div.description__text"
+        "[data-sdui-component$='aboutTheJob'], "
+        "div.jobs-description__content, div#job-details"
     ),
     "detail_criteria": (
-        "li.jobs-unified-top-card__job-insight, ul.job-criteria__list li, "
-        "li.description__job-criteria-item"
+        "li.jobs-unified-top-card__job-insight, ul.job-criteria__list li"
     ),
     "detail_salary": "div.salary-main-rail__data-body, span.jobs-unified-top-card__salary",
     "detail_show_more": (
+        "[data-sdui-component$='aboutTheJob'] [data-testid='expandable-text-button'], "
         "button.jobs-description__footer-button, button[aria-label='Show more'], "
-        "button:has-text('Show more'), button.show-more-less-html__button"
+        "button:has-text('Show more')"
     ),
     "no_results": "div.jobs-search-no-results-banner",
 }
@@ -362,35 +369,50 @@ class LinkedInJobScraper:
         try:
             # Click "Show more" button to expand truncated job descriptions.
             # LinkedIn hides long descriptions behind this button by default.
+            # Bound the click to avoid hanging on modal overlays (default click
+            # timeout is 30s and modals routinely intercept pointer events).
             show_more = page.locator(SELECTORS["detail_show_more"]).first
             try:
                 if await show_more.is_visible(timeout=2000):
-                    await show_more.click()
-                    await self.browser.random_delay(0.5, 1.0)
+                    try:
+                        await show_more.click(timeout=3000)
+                        await self.browser.random_delay(0.5, 1.0)
+                    except Exception as exc:
+                        logger.debug("Show more click failed: %s", exc)
             except Exception:
-                pass  # Button not present or not clickable — continue with whatever is visible
+                pass  # Button not present — continue with whatever is visible
 
-            # Primary: find h2 "About the job" and get its grandparent's text
-            # (LinkedIn now uses hashed CSS classes, so text-based lookup is more stable)
-            about_h2 = page.locator("h2:has-text('About the job')")
-            if await about_h2.count() > 0:
-                # Grandparent contains: separator div + heading div + <p> with description
-                container = about_h2.first.locator("../..")
-                raw = (await container.text_content() or "").strip()
-                # Strip the "About the job" heading prefix
-                desc = raw.removeprefix("About the job").strip()
-                if desc:
-                    result["description"] = desc
-            else:
-                # Fallback: legacy selectors for older LinkedIn DOM
-                desc_count = await page.locator(SELECTORS["detail_description"]).count()
-                if desc_count > 0:
-                    result["description"] = (
-                        await page.locator(SELECTORS["detail_description"]).first.text_content()
-                        or ""
-                    ).strip()
+            # Primary: scoped SDUI selector (authenticated 2026 layout). The
+            # container's innerText starts with the "About the job" heading;
+            # strip it. For legacy SPA fallbacks (jobs-description__content /
+            # job-details) the heading isn't present, so the strip is a no-op.
+            desc_loc = page.locator(SELECTORS["detail_description"]).first
+            desc_count = await page.locator(SELECTORS["detail_description"]).count()
+            if desc_count > 0:
+                text = (await desc_loc.text_content() or "").strip()
+                text = text.removeprefix("About the job").strip()
+                if text:
+                    result["description"] = text
+
+            # Fallback: text-anchored h2 lookup (covers SDUI variants where
+            # the component name attribute may have rotated)
+            if not result["description"]:
+                about_h2 = page.locator("h2:has-text('About the job')")
+                if await about_h2.count() > 0:
+                    container = about_h2.first.locator("../..")
+                    raw = (await container.text_content() or "").strip()
+                    desc = raw.removeprefix("About the job").strip()
+                    if desc:
+                        result["description"] = desc
         except Exception as exc:
             logger.debug("Failed to extract description: %s", exc)
+
+        if not result["description"]:
+            logger.warning(
+                "Empty description on detail page: %s (selectors did not match — "
+                "session may be unauthenticated or layout changed)",
+                page.url,
+            )
 
         # Extract job criteria (experience level, job type, etc.)
         try:
