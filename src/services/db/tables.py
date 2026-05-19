@@ -79,6 +79,11 @@ class Job(Table):
     # Error tracking
     error_message = Text(null=True)
 
+    # Scrape failure tracking
+    scrape_attempts = Integer(default=0)
+    last_scrape_error = Text(null=True)
+    last_scrape_attempt_at = Timestamptz(null=True)
+
     # Timestamps
     created_at = Timestamptz(index=True)  # Index for sorting
     updated_at = Timestamptz()

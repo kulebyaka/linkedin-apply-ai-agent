@@ -48,6 +48,7 @@ class BusinessState(StrEnum):
     APPLIED = "applied"
     FAILED = "failed"
     FILTERED_OUT = "filtered_out"
+    SCRAPE_FAILED = "scrape_failed"  # Description missing/empty — retry-eligible
 
 
 class InvalidStateTransitionError(Exception):
@@ -75,12 +76,14 @@ ALLOWED_TRANSITIONS: dict[BusinessState, set[BusinessState]] = {
         BusinessState.PENDING_REVIEW,
         BusinessState.FAILED,
         BusinessState.FILTERED_OUT,
+        BusinessState.SCRAPE_FAILED,
     },
     BusinessState.PROCESSING: {
         BusinessState.CV_READY,
         BusinessState.PENDING_REVIEW,
         BusinessState.FAILED,
         BusinessState.FILTERED_OUT,
+        BusinessState.SCRAPE_FAILED,
     },
     BusinessState.CV_READY: set(),  # Terminal (MVP mode)
     BusinessState.PENDING_REVIEW: {
@@ -107,6 +110,15 @@ ALLOWED_TRANSITIONS: dict[BusinessState, set[BusinessState]] = {
         BusinessState.RETRYING,
     },
     BusinessState.FILTERED_OUT: set(),  # Terminal
+    BusinessState.SCRAPE_FAILED: {
+        BusinessState.QUEUED,
+        BusinessState.PROCESSING,
+        BusinessState.SCRAPE_FAILED,  # Idempotent re-attempts increment counter
+        BusinessState.CV_READY,
+        BusinessState.PENDING_REVIEW,
+        BusinessState.FAILED,  # Cap exhausted
+        BusinessState.FILTERED_OUT,
+    },
 }
 
 

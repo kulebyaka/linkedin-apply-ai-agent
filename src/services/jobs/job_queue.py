@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
+from src.config.settings import get_settings
 from src.models.job import ScrapedJob
 from src.models.state_machine import ALLOWED_TRANSITIONS, BusinessState
 from src.models.unified import JobRecord
@@ -22,6 +23,30 @@ if TYPE_CHECKING:
     from src.context import AppContext
 
 logger = logging.getLogger(__name__)
+
+
+def _should_retry_scrape(existing: JobRecord) -> bool:
+    """Decide whether a previously-stored job should re-enter the workflow.
+
+    Only SCRAPE_FAILED rows are retry-eligible. The retry is gated by both
+    an attempt cap and a backoff window so a permanently-broken posting
+    doesn't keep looping on every scheduler tick.
+    """
+    if existing.status != BusinessState.SCRAPE_FAILED:
+        return False
+
+    settings = get_settings()
+    if (existing.scrape_attempts or 0) >= settings.scraper_max_attempts:
+        return False
+
+    last_at = existing.last_scrape_attempt_at
+    if last_at is not None:
+        backoff_seconds = settings.scraper_retry_backoff_minutes * 60
+        elapsed = (datetime.now(tz=timezone.utc) - last_at).total_seconds()
+        if elapsed < backoff_seconds:
+            return False
+
+    return True
 
 
 def _scoped_job_id(raw_job_id: str, user_id: str | None) -> str:
@@ -173,13 +198,27 @@ async def process_queue(
 
         logger.info("Processing queued job %s (user=%s)", scoped_job_id, user_id or "global")
 
-        # Cross-cycle dedup: skip jobs already in the repository
+        # Cross-cycle dedup: skip jobs already in the repository, with one
+        # exception — SCRAPE_FAILED rows are retry-eligible up to a cap with
+        # a backoff window so a permanently-broken posting doesn't loop.
         if job_repository is not None:
             try:
                 existing = await job_repository.get(scoped_job_id)
                 if existing is not None:
-                    logger.info("Skipping already-processed job %s (status: %s)", scoped_job_id, existing.status)
-                    continue
+                    if _should_retry_scrape(existing):
+                        logger.info(
+                            "Re-attempting previously failed scrape for %s (attempt %d/%d)",
+                            scoped_job_id,
+                            (existing.scrape_attempts or 0) + 1,
+                            get_settings().scraper_max_attempts,
+                        )
+                        # Fall through to process the job again.
+                    else:
+                        logger.info(
+                            "Skipping already-processed job %s (status: %s)",
+                            scoped_job_id, existing.status,
+                        )
+                        continue
             except Exception:
                 logger.warning("Dedup check failed for job %s, proceeding with processing", scoped_job_id)
 

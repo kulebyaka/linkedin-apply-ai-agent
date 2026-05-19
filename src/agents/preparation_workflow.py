@@ -84,6 +84,7 @@ def create_preparation_workflow() -> StateGraph:
     workflow.add_node("extract_job", extract_job_node)
     workflow.add_node("filter_job", filter_job_node)
     workflow.add_node("save_filtered_out", save_filtered_out_node)
+    workflow.add_node("save_scrape_failed", save_scrape_failed_node)
     workflow.add_node("compose_cv", compose_cv_node)
     workflow.add_node("generate_pdf", generate_pdf_node)
     workflow.add_node("save_to_db", save_to_db_node)
@@ -95,7 +96,12 @@ def create_preparation_workflow() -> StateGraph:
     workflow.add_conditional_edges(
         "extract_job",
         route_after_extract,
-        {"filter": "filter_job", "compose": "compose_cv", "error": END},
+        {
+            "filter": "filter_job",
+            "compose": "compose_cv",
+            "scrape_failed": "save_scrape_failed",
+            "error": END,
+        },
     )
 
     # Conditional routing after filtering: rejected → save_filtered_out; else → compose_cv
@@ -106,6 +112,7 @@ def create_preparation_workflow() -> StateGraph:
     )
 
     workflow.add_edge("save_filtered_out", END)
+    workflow.add_edge("save_scrape_failed", END)
     workflow.add_edge("compose_cv", "generate_pdf")
     workflow.add_edge("generate_pdf", "save_to_db")
     workflow.add_edge("save_to_db", END)
@@ -118,10 +125,13 @@ def create_preparation_workflow() -> StateGraph:
 def route_after_extract(state: PreparationWorkflowState) -> str:
     """Route after job extraction.
 
-    - If error occurred, go to END
+    - If scrape quality gate failed, persist as SCRAPE_FAILED
+    - If a different error occurred, go to END
     - If LinkedIn source, go to filter_job
     - Otherwise, go directly to compose_cv
     """
+    if state.get("current_step") == BusinessState.SCRAPE_FAILED:
+        return "scrape_failed"
     if state.get("error_message"):
         return "error"
     if state.get("source") == "linkedin":
@@ -196,6 +206,24 @@ async def extract_job_node(state: PreparationWorkflowState) -> PreparationWorkfl
             job_posting = await adapter.extract(raw_input)
             state["job_posting"] = job_posting
             state["current_step"] = WorkflowStep.JOB_EXTRACTED
+
+        # Description quality gate (LinkedIn/URL only — manual input is user-supplied).
+        # An empty/short description usually means the LinkedIn HTML layout changed
+        # and selectors didn't match. We persist as SCRAPE_FAILED so the row is
+        # eligible for retry once the scraper is fixed.
+        if source != "manual":
+            description = (state["job_posting"].get("description") or "").strip()
+            min_chars = settings.scraper_min_description_chars
+            if len(description) < min_chars:
+                logger.warning(
+                    "Scrape produced short/empty description for %s (%d chars < %d) — marking SCRAPE_FAILED",
+                    job_id, len(description), min_chars,
+                )
+                state["error_message"] = (
+                    f"Description too short ({len(description)} chars, "
+                    f"required {min_chars})"
+                )
+                state["current_step"] = BusinessState.SCRAPE_FAILED
 
     except JobExtractionError as e:
         logger.error(f"Job extraction failed for {job_id}: {e}")
@@ -345,25 +373,107 @@ async def save_filtered_out_node(
     logger.info(f"Saving filtered-out job {job_id} to repository")
 
     try:
-        job_record = JobRecord(
-            job_id=job_id,
-            user_id=state.get("user_id", ""),
-            source=state.get("source", "linkedin"),
-            mode=state.get("mode", "full"),
-            status=BusinessState.FILTERED_OUT,
-            job_posting=state.get("job_posting"),
-            raw_input=state.get("raw_input"),
-            filter_result=state.get("filter_result"),
-            created_at=datetime.now(tz=timezone.utc),
-            updated_at=datetime.now(tz=timezone.utc),
-        )
-
         repo = get_repository_from_config(config or {})
-        await repo.create(job_record)
+        existing = await repo.get(job_id)
+
+        if existing is None:
+            job_record = JobRecord(
+                job_id=job_id,
+                user_id=state.get("user_id", ""),
+                source=state.get("source", "linkedin"),
+                mode=state.get("mode", "full"),
+                status=BusinessState.FILTERED_OUT,
+                job_posting=state.get("job_posting"),
+                raw_input=state.get("raw_input"),
+                filter_result=state.get("filter_result"),
+                created_at=datetime.now(tz=timezone.utc),
+                updated_at=datetime.now(tz=timezone.utc),
+            )
+            await repo.create(job_record)
+        else:
+            await repo.update(
+                job_id,
+                {
+                    "status": BusinessState.FILTERED_OUT,
+                    "job_posting": state.get("job_posting"),
+                    "raw_input": state.get("raw_input"),
+                    "filter_result": state.get("filter_result"),
+                },
+            )
         logger.info(f"Filtered-out job {job_id} saved successfully")
 
     except Exception as e:
         logger.error(f"Failed to save filtered-out job {job_id}: {e}", exc_info=True)
+        raise
+
+    return state
+
+
+async def save_scrape_failed_node(
+    state: PreparationWorkflowState, config: RunnableConfig | None = None
+) -> PreparationWorkflowState:
+    """Persist a job that failed the scrape quality gate.
+
+    Upserts a JobRecord with status=SCRAPE_FAILED and an incremented
+    scrape_attempts counter. When the counter reaches scraper_max_attempts,
+    the record is instead written as FAILED so cross-cycle dedup locks it
+    out for good.
+    """
+    job_id = state.get("job_id", "unknown")
+    user_id = state.get("user_id", "")
+    error_message = state.get("error_message") or "Description quality gate failed"
+    now = datetime.now(tz=timezone.utc)
+
+    try:
+        repo = get_repository_from_config(config or {})
+        existing = await repo.get(job_id)
+        new_attempts = (existing.scrape_attempts if existing else 0) + 1
+        max_attempts = settings.scraper_max_attempts
+
+        if new_attempts >= max_attempts:
+            target_status = BusinessState.FAILED
+            logger.warning(
+                "Scrape attempts exhausted for %s (%d/%d) — marking FAILED",
+                job_id, new_attempts, max_attempts,
+            )
+        else:
+            target_status = BusinessState.SCRAPE_FAILED
+            logger.info(
+                "Persisting SCRAPE_FAILED for %s (attempt %d/%d)",
+                job_id, new_attempts, max_attempts,
+            )
+
+        if existing is None:
+            record = JobRecord(
+                job_id=job_id,
+                user_id=user_id,
+                source=state.get("source", "linkedin"),
+                mode=state.get("mode", "full"),
+                status=target_status,
+                job_posting=state.get("job_posting"),
+                raw_input=state.get("raw_input"),
+                error_message=error_message,
+                scrape_attempts=new_attempts,
+                last_scrape_error=error_message,
+                last_scrape_attempt_at=now,
+                created_at=now,
+                updated_at=now,
+            )
+            await repo.create(record)
+        else:
+            await repo.update(
+                job_id,
+                {
+                    "status": target_status,
+                    "error_message": error_message,
+                    "scrape_attempts": new_attempts,
+                    "last_scrape_error": error_message,
+                    "last_scrape_attempt_at": now,
+                },
+            )
+
+    except Exception as e:
+        logger.error("Failed to persist scrape-failed record for %s: %s", job_id, e, exc_info=True)
         raise
 
     return state
@@ -496,27 +606,43 @@ async def save_to_db_node(state: PreparationWorkflowState, config: RunnableConfi
         cv_json = state.get("tailored_cv_json")
         pdf_path = state.get("tailored_cv_pdf_path")
 
-        # Build job record
-        job_record = JobRecord(
-            job_id=job_id,
-            user_id=state.get("user_id", ""),
-            source=state.get("source", "manual"),
-            mode=mode,
-            status=final_status,
-            job_posting=state.get("job_posting"),
-            raw_input=state.get("raw_input"),
-            current_cv_json=cv_json,
-            current_pdf_path=pdf_path,
-            filter_result=state.get("filter_result"),
-            application_url=state.get("job_posting", {}).get("url"),
-            error_message=state.get("error_message"),
-            created_at=datetime.now(tz=timezone.utc),
-            updated_at=datetime.now(tz=timezone.utc),
-        )
-
-        # Save to repository
         repo = get_repository_from_config(config or {})
-        await repo.create(job_record)
+        existing = await repo.get(job_id)
+
+        if existing is None:
+            # Build job record
+            job_record = JobRecord(
+                job_id=job_id,
+                user_id=state.get("user_id", ""),
+                source=state.get("source", "manual"),
+                mode=mode,
+                status=final_status,
+                job_posting=state.get("job_posting"),
+                raw_input=state.get("raw_input"),
+                current_cv_json=cv_json,
+                current_pdf_path=pdf_path,
+                filter_result=state.get("filter_result"),
+                application_url=state.get("job_posting", {}).get("url"),
+                error_message=state.get("error_message"),
+                created_at=datetime.now(tz=timezone.utc),
+                updated_at=datetime.now(tz=timezone.utc),
+            )
+            await repo.create(job_record)
+        else:
+            # Retry happy-path: existing SCRAPE_FAILED row gets upgraded.
+            await repo.update(
+                job_id,
+                {
+                    "status": final_status,
+                    "job_posting": state.get("job_posting"),
+                    "raw_input": state.get("raw_input"),
+                    "current_cv_json": cv_json,
+                    "current_pdf_path": pdf_path,
+                    "filter_result": state.get("filter_result"),
+                    "application_url": state.get("job_posting", {}).get("url"),
+                    "error_message": state.get("error_message"),
+                },
+            )
         logger.info(f"Job {job_id} saved to repository with status: {final_status}")
 
         # Create CV composition attempt record if we have CV data

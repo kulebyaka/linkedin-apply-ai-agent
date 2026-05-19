@@ -196,6 +196,22 @@ export function getPdfUrl(jobId: string): string {
 	return `${API_BASE}/api/jobs/${jobId}/pdf`;
 }
 
+export async function deleteJob(jobId: string): Promise<void> {
+	if (USE_MOCK) {
+		await delay(200);
+		return;
+	}
+
+	const response = await fetch(`${API_BASE}/api/jobs/${jobId}`, {
+		method: 'DELETE',
+		credentials: 'include',
+	});
+	if (!response.ok) {
+		const errorText = await response.text();
+		throw new Error(`Failed to delete job: ${response.statusText} - ${errorText}`);
+	}
+}
+
 export function downloadPdf(jobId: string): void {
 	window.open(getPdfUrl(jobId), '_blank');
 }

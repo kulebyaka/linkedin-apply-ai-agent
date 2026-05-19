@@ -999,6 +999,28 @@ async def cleanup_jobs(
         raise HTTPException(500, "Failed to cleanup jobs") from None
 
 
+@app.delete("/api/jobs/{job_id}")
+async def delete_job(
+    job_id: str, request: Request, user: CurrentUser
+) -> dict:
+    """Cascade-delete a job owned by the current user.
+
+    Removes the job row, all CV composition attempts, and unlinks PDF files.
+    Returns 404 if the job does not exist or is owned by another user.
+    """
+    try:
+        ctx = _get_ctx(request)
+        deleted = await ctx.repository.delete_for_user(job_id, user.id)
+        if not deleted:
+            raise HTTPException(404, f"Job {job_id} not found")
+        return {"deleted": True, "job_id": job_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete job {job_id}: {e}", exc_info=True)
+        raise HTTPException(500, "Failed to delete job") from None
+
+
 # =============================================================================
 # Static File Serving for UI
 # =============================================================================

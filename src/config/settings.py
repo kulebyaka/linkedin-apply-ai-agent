@@ -97,6 +97,13 @@ class Settings(BaseSettings):
     linkedin_page_delay_max: float = 5.0
 
     # -------------------------------------------------------------------------
+    # Scrape failure recovery
+    # -------------------------------------------------------------------------
+    scraper_min_description_chars: int = 200    # Below this → SCRAPE_FAILED
+    scraper_max_attempts: int = 3               # Retry cap before permanent FAILED
+    scraper_retry_backoff_minutes: int = 60     # Skip re-attempt within this window
+
+    # -------------------------------------------------------------------------
     # LinkedIn Scheduler  (env-specific — override in .env)
     # -------------------------------------------------------------------------
     linkedin_search_schedule_enabled: bool = False
