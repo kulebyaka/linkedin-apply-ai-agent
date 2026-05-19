@@ -245,12 +245,16 @@ class LinkedInAutomation:
         return True
 
     async def close(self) -> None:
-        """Save cookies and close the browser."""
-        if self.context:
-            try:
-                await self._save_cookies()
-            except Exception as exc:
-                logger.warning("Failed to save cookies during close: %s", exc)
+        """Close the browser.
+
+        Intentionally does NOT save cookies. Cookies are only persisted by
+        ``login()`` after a verified successful sign-in — saving on shutdown
+        would overwrite the on-disk session jar with whatever the in-memory
+        state happens to be (often stale/invalidated after a long-running
+        session or an anti-bot challenge), defeating the freshly-captured
+        cookies pushed by the operator. Every deploy used to silently rot
+        the cookie file because of this.
+        """
         try:
             if self.browser:
                 await self.browser.close()
