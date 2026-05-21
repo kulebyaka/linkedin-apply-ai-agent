@@ -7,6 +7,23 @@ from string import Template
 logger = logging.getLogger(__name__)
 
 
+CV_EXTRACTION_PROMPT = """You are extracting a structured résumé from a PDF document.
+
+Read the attached PDF and produce a JSON object matching the CV schema you have been instructed to follow.
+
+Rules:
+- Use ONLY information present in the PDF. Do not invent companies, dates, achievements, or contact details. If a field is missing, use null (for nullable fields) or an empty list.
+- Dates MUST be ISO 8601 strings: "YYYY-MM-DD". If the source only gives a month and year (e.g. "Sep 2020"), use the first of the month ("2020-09-01"). If only the year is known, use "YYYY-01-01". For ongoing positions/education, set end_date to null and is_current to true.
+- Email must be a valid address. If no email is present, use "unknown@example.com" so the structure validates — the user will correct it.
+- Group skills into sensible categories (e.g. "Programming Languages", "Frameworks", "Cloud", "Tools").
+- Keep descriptions and achievements concise — quote the résumé wording, do not paraphrase aggressively.
+- Preserve the original ordering of experiences and education (most recent first if that is how the résumé is laid out).
+- If the résumé lists projects separately from work experience, place them under "projects". If they are listed within a job, attach them to that experience's "projects" field.
+- For languages, return objects {"language": ..., "level": ...}. If proficiency is not stated, use "Conversational".
+- Return ONLY the JSON object — no commentary, no markdown fences.
+"""
+
+
 class PromptLoader:
     """Loads and manages prompts from external files"""
 

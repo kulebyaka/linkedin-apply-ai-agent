@@ -36,6 +36,7 @@ All providers use native structured outputs when a schema is provided to reduce
 JSON parsing errors and improve reliability.
 """
 
+import base64
 import json
 import logging
 import time
@@ -57,10 +58,31 @@ class LLMProvider(StrEnum):
 class BaseLLMClient(ABC):
     """Base class for LLM provider clients"""
 
+    # Override to True on subclasses that support native PDF document input.
+    SUPPORTS_PDF_INPUT: bool = False
+
     def __init__(self, api_key: str, model: str, **kwargs):
         self.api_key = api_key
         self.model = model
         self.config = kwargs
+
+    def generate_json_from_pdf(
+        self,
+        pdf_bytes: bytes,
+        prompt: str,
+        schema: dict | None = None,
+        *,
+        temperature: float = 0.1,
+        max_tokens: int = 8192,
+    ) -> dict:
+        """Generate structured JSON from a native PDF document input.
+
+        Override in providers whose APIs accept PDF document content blocks.
+        Default raises so callers can react with a clear UX error.
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not support native PDF input"
+        )
 
     @abstractmethod
     def generate(self, prompt: str, temperature: float = 0.7, **kwargs) -> str:
@@ -107,6 +129,8 @@ class BaseLLMClient(ABC):
 
 class OpenAIClient(BaseLLMClient):
     """OpenAI provider client"""
+
+    SUPPORTS_PDF_INPUT = True
 
     # Reasoning models that only support temperature=1 (default)
     _REASONING_MODELS = ("o1", "o3", "o4-mini", "gpt-5-mini")
@@ -211,6 +235,76 @@ class OpenAIClient(BaseLLMClient):
             except Exception as e:
                 logger.error(f"OpenAI JSON generation failed: {e}")
                 raise
+
+    def generate_json_from_pdf(
+        self,
+        pdf_bytes: bytes,
+        prompt: str,
+        schema: dict | None = None,
+        *,
+        temperature: float = 0.1,
+        max_tokens: int = 8192,
+    ) -> dict:
+        """Extract structured JSON from a PDF via OpenAI's Responses API.
+
+        Uses input_file content blocks to send the PDF natively. Requires a
+        GPT-4 family model with vision/document support.
+        """
+        pdf_b64 = base64.b64encode(pdf_bytes).decode("ascii")
+
+        strict_schema = self._make_schema_strict(schema) if schema else None
+        text_param: dict = {}
+        if strict_schema is not None:
+            text_param = {
+                "format": {
+                    "type": "json_schema",
+                    "name": "response",
+                    "strict": True,
+                    "schema": strict_schema,
+                }
+            }
+        else:
+            text_param = {"format": {"type": "json_object"}}
+
+        input_payload = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_file",
+                        "filename": "resume.pdf",
+                        "file_data": f"data:application/pdf;base64,{pdf_b64}",
+                    },
+                    {"type": "input_text", "text": prompt},
+                ],
+            }
+        ]
+
+        logger.info(
+            f"[TIMING] Starting OpenAI PDF extraction (model={self.model})"
+        )
+        api_start = time.time()
+        response = self.client.responses.create(
+            model=self.model,
+            input=input_payload,
+            text=text_param,
+            max_output_tokens=max_tokens,
+        )
+        api_elapsed = time.time() - api_start
+        logger.info(
+            f"[TIMING] OpenAI PDF extraction completed in {api_elapsed:.2f}s"
+        )
+
+        content = response.output_text
+        result = json.loads(content)
+        if (
+            schema is not None
+            and schema.get("type") == "array"
+            and isinstance(result, dict)
+            and "items" in result
+        ):
+            result = result["items"]
+        return result
 
     def _make_schema_strict(self, schema: dict) -> dict:
         """
@@ -544,6 +638,8 @@ class GrokClient(BaseLLMClient):
 class AnthropicClient(BaseLLMClient):
     """Anthropic Claude provider client"""
 
+    SUPPORTS_PDF_INPUT = True
+
     def __init__(self, api_key: str, model: str, **kwargs):
         super().__init__(api_key, model, **kwargs)
         try:
@@ -626,6 +722,60 @@ class AnthropicClient(BaseLLMClient):
                 logger.error(f"Anthropic JSON generation failed: {e}")
                 raise
 
+    def generate_json_from_pdf(
+        self,
+        pdf_bytes: bytes,
+        prompt: str,
+        schema: dict | None = None,
+        *,
+        temperature: float = 0.1,
+        max_tokens: int = 8192,
+    ) -> dict:
+        """Extract structured JSON from a PDF via Anthropic's document block.
+
+        Sends the PDF as a base64-encoded ``document`` content block. Supported
+        on Claude Sonnet 3.5+ models.
+        """
+        pdf_b64 = base64.b64encode(pdf_bytes).decode("ascii")
+
+        message_content: list[dict] = [
+            {
+                "type": "document",
+                "source": {
+                    "type": "base64",
+                    "media_type": "application/pdf",
+                    "data": pdf_b64,
+                },
+            },
+            {"type": "text", "text": prompt},
+        ]
+
+        create_kwargs: dict = {
+            "model": self.model,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "messages": [{"role": "user", "content": message_content}],
+        }
+        if schema is not None:
+            create_kwargs["output_format"] = {
+                "type": "json_schema",
+                "json_schema": {"name": "response", "strict": True, "schema": schema},
+            }
+
+        logger.info(
+            f"[TIMING] Starting Anthropic PDF extraction (model={self.model})"
+        )
+        api_start = time.time()
+        response = self.client.messages.create(**create_kwargs)
+        api_elapsed = time.time() - api_start
+        logger.info(
+            f"[TIMING] Anthropic PDF extraction completed in {api_elapsed:.2f}s"
+        )
+
+        text_parts = [block.text for block in response.content if getattr(block, "type", None) == "text"]
+        content = "".join(text_parts) if text_parts else response.content[0].text
+        return json.loads(content)
+
 
 class LLMClientFactory:
     """Factory for creating LLM clients"""
@@ -644,3 +794,9 @@ class LLMClientFactory:
         if not client_class:
             raise ValueError(f"Unsupported LLM provider: {provider}")
         return client_class(api_key, model, **kwargs)
+
+    @classmethod
+    def supports_pdf(cls, provider: LLMProvider) -> bool:
+        """Return True if the provider's client supports native PDF input."""
+        client_class = cls._clients.get(provider)
+        return bool(client_class and client_class.SUPPORTS_PDF_INPUT)

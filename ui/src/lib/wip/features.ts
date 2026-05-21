@@ -8,11 +8,6 @@ export const WIP = {
 		label: 'History view',
 		tooltip: 'The API records every decision; the UI surface is next.',
 	},
-	PDF_CV_UPLOAD: {
-		label: 'PDF CV upload',
-		tooltip:
-			"Coming soon — upload your PDF CV and we'll extract and convert it to JSON automatically using AI.",
-	},
 	GENERATE_PAGE_SCOPE: {
 		label: 'MVP',
 		tooltip:
@@ -21,7 +16,7 @@ export const WIP = {
 	V1_BETA: {
 		label: 'v1 beta',
 		tooltip:
-			'Early release. WIP surfaces: auto-apply, history view, PDF CV upload. Backend records every decision; UI catches up next.',
+			'Early release. WIP surfaces: auto-apply, history view. Backend records every decision; UI catches up next.',
 	},
 	DEEPSEEK_GROK_PICKER: {
 		label: 'Server config only',

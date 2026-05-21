@@ -157,6 +157,12 @@ class Settings(BaseSettings):
     cv_target_pages: int = 2
 
     # -------------------------------------------------------------------------
+    # PDF CV Upload  (same for everyone — defaults defined here)
+    # -------------------------------------------------------------------------
+    pdf_cv_upload_max_bytes: int = 10_485_760   # 10 MB
+    pdf_cv_upload_max_pages: int = 20
+
+    # -------------------------------------------------------------------------
     # Authentication  (secrets + env-specific — set in .env)
     # -------------------------------------------------------------------------
     resend_api_key: str = ""

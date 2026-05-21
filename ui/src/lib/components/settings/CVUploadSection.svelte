@@ -1,9 +1,12 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import type { User } from '$lib/api/auth';
-	import { updateCV } from '$lib/api/settings';
+	import {
+		extractCVFromPDF,
+		getCVExtractionStatus,
+		updateCV,
+	} from '$lib/api/settings';
 	import { auth } from '$lib/stores/auth.svelte';
-	import WIPButton from '$lib/components/wip/WIPButton.svelte';
-	import { WIP } from '$lib/wip/features';
 
 	let { user }: { user: User } = $props();
 
@@ -13,6 +16,19 @@
 	let saved = $state(false);
 	let error = $state<string | null>(null);
 	let fileInput: HTMLInputElement;
+	let pdfInput: HTMLInputElement;
+
+	let extractionStatus = $state<string | null>(null);
+	let validationErrors = $state<string[]>([]);
+	let pollTimer: ReturnType<typeof setTimeout> | null = null;
+	const extracting = $derived(extractionStatus !== null);
+
+	onDestroy(() => {
+		if (pollTimer !== null) {
+			clearTimeout(pollTimer);
+			pollTimer = null;
+		}
+	});
 
 	const cvSummary = $derived.by(() => {
 		if (!user.master_cv_json) return null;
@@ -50,6 +66,58 @@
 			jsonValid = validateJson(content);
 		};
 		reader.readAsText(file);
+	}
+
+	async function pollExtraction(extractionId: string) {
+		try {
+			const status = await getCVExtractionStatus(extractionId);
+
+			if (status.status === 'pending' || status.status === 'running') {
+				if (extractionStatus !== status.status) extractionStatus = status.status;
+				pollTimer = setTimeout(() => pollExtraction(extractionId), 2000);
+				return;
+			}
+
+			pollTimer = null;
+
+			if (status.status === 'failed') {
+				error = status.error_message || 'Extraction failed';
+				extractionStatus = null;
+				return;
+			}
+
+			if (status.result_json) {
+				cvText = JSON.stringify(status.result_json, null, 2);
+				jsonValid = validateJson(cvText);
+			}
+			validationErrors = status.validation_errors || [];
+			extractionStatus = null;
+			error = null;
+		} catch (err) {
+			pollTimer = null;
+			extractionStatus = null;
+			error = err instanceof Error ? err.message : 'Failed to poll extraction';
+		}
+	}
+
+	async function handlePdfUpload(e: Event) {
+		const target = e.target as HTMLInputElement;
+		const file = target.files?.[0];
+		// allow re-selecting the same file later
+		target.value = '';
+		if (!file) return;
+
+		error = null;
+		validationErrors = [];
+		extractionStatus = 'uploading';
+		try {
+			const started = await extractCVFromPDF(file);
+			extractionStatus = started.status;
+			pollExtraction(started.extraction_id);
+		} catch (err) {
+			extractionStatus = null;
+			error = err instanceof Error ? err.message : 'Failed to upload PDF';
+		}
 	}
 
 	const CV_TEMPLATE = {
@@ -241,22 +309,50 @@
 		/>
 		<button
 			onclick={() => fileInput.click()}
-			disabled={saving}
+			disabled={saving || extracting}
 			class="border-2 border-[var(--color-foreground)] bg-white px-3 py-1.5 font-mono text-xs uppercase tracking-wider text-[var(--color-foreground)] transition-all duration-200 hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
 		>
 			Upload .json file
 		</button>
 		<button
 			onclick={handleDownloadTemplate}
-			disabled={saving}
+			disabled={saving || extracting}
 			class="border-2 border-[var(--color-foreground)] bg-white px-3 py-1.5 font-mono text-xs uppercase tracking-wider text-[var(--color-foreground)] transition-all duration-200 hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
 		>
 			Download JSON template
 		</button>
-		<div class="inline-block">
-			<WIPButton label="Upload PDF CV" tooltip={WIP.PDF_CV_UPLOAD.tooltip} size="sm" />
-		</div>
+		<input
+			bind:this={pdfInput}
+			type="file"
+			accept="application/pdf,.pdf"
+			onchange={handlePdfUpload}
+			class="hidden"
+		/>
+		<button
+			onclick={() => pdfInput.click()}
+			disabled={saving || extracting}
+			class="border-2 border-[var(--color-foreground)] bg-[var(--color-primary)] px-3 py-1.5 font-mono text-xs uppercase tracking-wider text-[var(--color-primary-foreground)] transition-all duration-200 hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
+		>
+			{#if extracting}
+				Extracting…{extractionStatus ? ` (${extractionStatus})` : ''}
+			{:else}
+				Upload PDF CV
+			{/if}
+		</button>
 	</div>
+
+	{#if validationErrors.length > 0}
+		<div class="mb-4 border-2 border-[var(--color-warning,#b45309)] bg-amber-50 px-3 py-2 font-mono text-xs text-[var(--color-foreground)]">
+			<p class="mb-1 font-bold uppercase tracking-wider">
+				Extracted JSON has {validationErrors.length} validation issue{validationErrors.length === 1 ? '' : 's'} — fix in editor before saving:
+			</p>
+			<ul class="list-disc pl-5">
+				{#each validationErrors as ve}
+					<li>{ve}</li>
+				{/each}
+			</ul>
+		</div>
+	{/if}
 
 	{#if error}
 		<div class="mb-4 border-2 border-[var(--color-error)] bg-red-50 px-3 py-2 font-mono text-xs text-[var(--color-error)]">
@@ -267,7 +363,7 @@
 	<div class="flex items-center gap-3">
 		<button
 			onclick={handleSave}
-			disabled={saving || !jsonValid || !cvText.trim()}
+			disabled={saving || extracting || !jsonValid || !cvText.trim()}
 			class="border-2 border-[var(--color-foreground)] bg-[var(--color-primary)] px-4 py-2 font-mono text-xs uppercase tracking-wider text-[var(--color-primary-foreground)] shadow-brutal transition-all duration-200 hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
 		>
 			{saving ? 'Saving...' : 'Save CV'}

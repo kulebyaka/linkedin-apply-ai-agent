@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from src.services.alerts import AdminAlertService
     from src.services.auth.auth import AuthService
     from src.services.auth.user_repository import UserRepository
+    from src.services.cv.pdf_extraction import CVExtractionRegistry
     from src.services.db.job_repository import JobRepository
     from src.services.jobs.hitl_processor import HITLProcessor
     from src.services.jobs.job_orchestrator import JobOrchestrator
@@ -49,6 +50,7 @@ class AppContext:
     browser: LinkedInAutomation | None = None
     orchestrator: JobOrchestrator | None = None
     hitl_processor: HITLProcessor | None = None
+    cv_extraction_registry: CVExtractionRegistry | None = None
 
     # Thread-safe tracking for in-progress workflows
     _tracking_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
@@ -110,6 +112,7 @@ def create_app_context(
     from src.services.alerts import AdminAlertService
     from src.services.auth.auth import AuthService
     from src.services.auth.user_repository import UserRepository
+    from src.services.cv.pdf_extraction import CVExtractionRegistry
     from src.services.db.job_repository import get_repository
     from src.services.jobs.hitl_processor import HITLProcessor
     from src.services.jobs.job_orchestrator import JobOrchestrator
@@ -140,6 +143,7 @@ def create_app_context(
         auth_service=auth_service,
         admin_alert_service=admin_alert_service,
         job_queue=job_queue,
+        cv_extraction_registry=CVExtractionRegistry(),
     )
 
     # Wire domain services (they need the full context)
