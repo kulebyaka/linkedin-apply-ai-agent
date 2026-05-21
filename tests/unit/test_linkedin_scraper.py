@@ -304,6 +304,81 @@ def _make_show_more_loc(visible=False):
     return loc
 
 
+# Inline selector strings used by the production code, duplicated here so
+# tests don't have to import or peek inside the scraper module.
+_AUTH_SHOW_MORE_SELECTOR = (
+    "[data-sdui-component$='aboutTheJob'] [data-testid='expandable-text-button'], "
+    "button.jobs-description__footer-button, "
+    "button[aria-label='Show more']"
+)
+_AUTH_CRITERIA_SELECTOR = "li.jobs-unified-top-card__job-insight"
+_AUTH_SALARY_SELECTOR = "div.salary-main-rail__data-body, span.jobs-unified-top-card__salary"
+_GUEST_SHOW_MORE_SELECTOR = "button.show-more-less-html__button--more"
+_GUEST_CRITERIA_SELECTOR = (
+    "ul.description__job-criteria-list li, ul.job-criteria__list li"
+)
+
+
+def _build_auth_locator(
+    *,
+    show_more_loc,
+    desc_loc=None,
+    criteria_loc=None,
+    salary_loc=None,
+    about_h2_loc=None,
+):
+    """Build a `page.locator` side-effect for authenticated-layout tests.
+
+    Returns count=0 by default for any unmatched selector. The authenticated
+    layout markers in production include the description selectors AND the
+    'About the job' h2 — any one of them present is enough to trigger
+    `_detect_layout` -> 'authenticated'.
+    """
+    empty = MagicMock(count=AsyncMock(return_value=0))
+    empty.first = MagicMock(text_content=AsyncMock(return_value=""))
+
+    def side_effect(selector):
+        if selector == _AUTH_SHOW_MORE_SELECTOR:
+            return show_more_loc
+        if selector in LinkedInJobScraper.AUTHENTICATED_DESCRIPTION_SELECTORS:
+            return desc_loc if desc_loc is not None else empty
+        if selector == "h2:has-text('About the job')":
+            return about_h2_loc if about_h2_loc is not None else empty
+        if selector == _AUTH_CRITERIA_SELECTOR:
+            return criteria_loc if criteria_loc is not None else empty
+        if selector == _AUTH_SALARY_SELECTOR:
+            return salary_loc if salary_loc is not None else empty
+        return empty
+
+    return side_effect
+
+
+def _build_guest_locator(
+    *,
+    show_more_loc,
+    desc_loc=None,
+    criteria_loc=None,
+):
+    """Build a `page.locator` side-effect for guest-layout tests.
+
+    Returns count=0 for every authenticated marker so `_detect_layout`
+    falls through to 'guest'.
+    """
+    empty = MagicMock(count=AsyncMock(return_value=0))
+    empty.first = MagicMock(text_content=AsyncMock(return_value=""))
+
+    def side_effect(selector):
+        if selector == _GUEST_SHOW_MORE_SELECTOR:
+            return show_more_loc
+        if selector == LinkedInJobScraper.GUEST_DESCRIPTION_SELECTOR:
+            return desc_loc if desc_loc is not None else empty
+        if selector == _GUEST_CRITERIA_SELECTOR:
+            return criteria_loc if criteria_loc is not None else empty
+        return empty
+
+    return side_effect
+
+
 class TestParseJobDetailPage:
     @pytest.fixture
     def scraper(self):
@@ -312,8 +387,6 @@ class TestParseJobDetailPage:
     async def test_parses_description(self, scraper):
         page = MagicMock()
 
-        show_more_loc = _make_show_more_loc(visible=False)
-
         desc_loc = MagicMock()
         desc_loc.count = AsyncMock(return_value=1)
         desc_loc.first = MagicMock()
@@ -321,26 +394,12 @@ class TestParseJobDetailPage:
             return_value="  We are looking for a Python developer.  "
         )
 
-        criteria_loc = MagicMock()
-        criteria_loc.count = AsyncMock(return_value=0)
-
-        salary_loc = MagicMock()
-        salary_loc.count = AsyncMock(return_value=0)
-
-        def locator_side_effect(selector):
-            from src.services.linkedin.linkedin_scraper import SELECTORS
-
-            if selector == SELECTORS["detail_show_more"]:
-                return show_more_loc
-            if selector == SELECTORS["detail_description"]:
-                return desc_loc
-            if selector == SELECTORS["detail_criteria"]:
-                return criteria_loc
-            if selector == SELECTORS["detail_salary"]:
-                return salary_loc
-            return MagicMock(count=AsyncMock(return_value=0))
-
-        page.locator = MagicMock(side_effect=locator_side_effect)
+        page.locator = MagicMock(
+            side_effect=_build_auth_locator(
+                show_more_loc=_make_show_more_loc(visible=False),
+                desc_loc=desc_loc,
+            )
+        )
 
         result = await scraper._parse_job_detail_page(page)
         assert result["description"] == "We are looking for a Python developer."
@@ -356,26 +415,9 @@ class TestParseJobDetailPage:
         desc_loc.first = MagicMock()
         desc_loc.first.text_content = AsyncMock(return_value="Full expanded description text.")
 
-        criteria_loc = MagicMock()
-        criteria_loc.count = AsyncMock(return_value=0)
-
-        salary_loc = MagicMock()
-        salary_loc.count = AsyncMock(return_value=0)
-
-        def locator_side_effect(selector):
-            from src.services.linkedin.linkedin_scraper import SELECTORS
-
-            if selector == SELECTORS["detail_show_more"]:
-                return show_more_loc
-            if selector == SELECTORS["detail_description"]:
-                return desc_loc
-            if selector == SELECTORS["detail_criteria"]:
-                return criteria_loc
-            if selector == SELECTORS["detail_salary"]:
-                return salary_loc
-            return MagicMock(count=AsyncMock(return_value=0))
-
-        page.locator = MagicMock(side_effect=locator_side_effect)
+        page.locator = MagicMock(
+            side_effect=_build_auth_locator(show_more_loc=show_more_loc, desc_loc=desc_loc)
+        )
 
         result = await scraper._parse_job_detail_page(page)
         show_more_loc.first.click.assert_awaited_once()
@@ -384,14 +426,12 @@ class TestParseJobDetailPage:
     async def test_parses_criteria(self, scraper):
         page = MagicMock()
 
-        show_more_loc = _make_show_more_loc(visible=False)
-
+        # Desc present so layout detects as authenticated.
         desc_loc = MagicMock()
-        desc_loc.count = AsyncMock(return_value=0)
+        desc_loc.count = AsyncMock(return_value=1)
         desc_loc.first = MagicMock()
-        desc_loc.first.text_content = AsyncMock(return_value="")
+        desc_loc.first.text_content = AsyncMock(return_value="Some description text.")
 
-        # Two criteria items
         criteria_item_1 = MagicMock()
         criteria_item_1.text_content = AsyncMock(return_value="Mid-Senior level")
         criteria_item_2 = MagicMock()
@@ -401,23 +441,13 @@ class TestParseJobDetailPage:
         criteria_loc.count = AsyncMock(return_value=2)
         criteria_loc.nth = MagicMock(side_effect=lambda i: [criteria_item_1, criteria_item_2][i])
 
-        salary_loc = MagicMock()
-        salary_loc.count = AsyncMock(return_value=0)
-
-        def locator_side_effect(selector):
-            from src.services.linkedin.linkedin_scraper import SELECTORS
-
-            if selector == SELECTORS["detail_show_more"]:
-                return show_more_loc
-            if selector == SELECTORS["detail_description"]:
-                return desc_loc
-            if selector == SELECTORS["detail_criteria"]:
-                return criteria_loc
-            if selector == SELECTORS["detail_salary"]:
-                return salary_loc
-            return MagicMock(count=AsyncMock(return_value=0))
-
-        page.locator = MagicMock(side_effect=locator_side_effect)
+        page.locator = MagicMock(
+            side_effect=_build_auth_locator(
+                show_more_loc=_make_show_more_loc(visible=False),
+                desc_loc=desc_loc,
+                criteria_loc=criteria_loc,
+            )
+        )
 
         result = await scraper._parse_job_detail_page(page)
         assert "mid-senior" in result["experience_level"]
@@ -426,35 +456,23 @@ class TestParseJobDetailPage:
     async def test_parses_salary(self, scraper):
         page = MagicMock()
 
-        show_more_loc = _make_show_more_loc(visible=False)
-
         desc_loc = MagicMock()
-        desc_loc.count = AsyncMock(return_value=0)
+        desc_loc.count = AsyncMock(return_value=1)
         desc_loc.first = MagicMock()
-        desc_loc.first.text_content = AsyncMock(return_value="")
-
-        criteria_loc = MagicMock()
-        criteria_loc.count = AsyncMock(return_value=0)
+        desc_loc.first.text_content = AsyncMock(return_value="Some description.")
 
         salary_loc = MagicMock()
         salary_loc.count = AsyncMock(return_value=1)
         salary_loc.first = MagicMock()
         salary_loc.first.text_content = AsyncMock(return_value="$120,000 - $160,000")
 
-        def locator_side_effect(selector):
-            from src.services.linkedin.linkedin_scraper import SELECTORS
-
-            if selector == SELECTORS["detail_show_more"]:
-                return show_more_loc
-            if selector == SELECTORS["detail_description"]:
-                return desc_loc
-            if selector == SELECTORS["detail_criteria"]:
-                return criteria_loc
-            if selector == SELECTORS["detail_salary"]:
-                return salary_loc
-            return MagicMock(count=AsyncMock(return_value=0))
-
-        page.locator = MagicMock(side_effect=locator_side_effect)
+        page.locator = MagicMock(
+            side_effect=_build_auth_locator(
+                show_more_loc=_make_show_more_loc(visible=False),
+                desc_loc=desc_loc,
+                salary_loc=salary_loc,
+            )
+        )
 
         result = await scraper._parse_job_detail_page(page)
         assert result["salary_range"] == "$120,000 - $160,000"
@@ -464,47 +482,28 @@ class TestParseJobDetailPage:
         innerText. The scraper must strip that heading prefix before saving."""
         page = MagicMock()
 
-        show_more_loc = _make_show_more_loc(visible=False)
-
         desc_loc = MagicMock()
         desc_loc.count = AsyncMock(return_value=1)
         desc_loc.first = MagicMock()
-        # Mirrors the live SDUI layout: container innerText starts with the h2
         desc_loc.first.text_content = AsyncMock(
             return_value="About the job\nWe build distributed systems in Rust."
         )
 
-        criteria_loc = MagicMock()
-        criteria_loc.count = AsyncMock(return_value=0)
-        salary_loc = MagicMock()
-        salary_loc.count = AsyncMock(return_value=0)
-
-        def locator_side_effect(selector):
-            from src.services.linkedin.linkedin_scraper import SELECTORS
-
-            if selector == SELECTORS["detail_show_more"]:
-                return show_more_loc
-            if selector == SELECTORS["detail_description"]:
-                return desc_loc
-            if selector == SELECTORS["detail_criteria"]:
-                return criteria_loc
-            if selector == SELECTORS["detail_salary"]:
-                return salary_loc
-            return MagicMock(count=AsyncMock(return_value=0))
-
-        page.locator = MagicMock(side_effect=locator_side_effect)
+        page.locator = MagicMock(
+            side_effect=_build_auth_locator(
+                show_more_loc=_make_show_more_loc(visible=False),
+                desc_loc=desc_loc,
+            )
+        )
 
         result = await scraper._parse_job_detail_page(page)
         assert result["description"] == "We build distributed systems in Rust."
 
     async def test_parses_about_the_job_h2_fallback_path(self, scraper):
         """Verify description is extracted via h2 'About the job' grandparent
-        when the primary SDUI selector doesn't match."""
+        when the primary SDUI selectors don't match."""
         page = MagicMock()
 
-        show_more_loc = _make_show_more_loc(visible=False)
-
-        # h2:has-text('About the job') locator — primary path
         about_h2_loc = MagicMock()
         about_h2_loc.count = AsyncMock(return_value=1)
         container_loc = MagicMock()
@@ -514,54 +513,101 @@ class TestParseJobDetailPage:
         about_h2_loc.first = MagicMock()
         about_h2_loc.first.locator = MagicMock(return_value=container_loc)
 
-        criteria_loc = MagicMock()
-        criteria_loc.count = AsyncMock(return_value=0)
-
-        salary_loc = MagicMock()
-        salary_loc.count = AsyncMock(return_value=0)
-
-        def locator_side_effect(selector):
-            from src.services.linkedin.linkedin_scraper import SELECTORS
-
-            if selector == SELECTORS["detail_show_more"]:
-                return show_more_loc
-            if selector == "h2:has-text('About the job')":
-                return about_h2_loc
-            if selector == SELECTORS["detail_criteria"]:
-                return criteria_loc
-            if selector == SELECTORS["detail_salary"]:
-                return salary_loc
-            return MagicMock(count=AsyncMock(return_value=0))
-
-        page.locator = MagicMock(side_effect=locator_side_effect)
+        page.locator = MagicMock(
+            side_effect=_build_auth_locator(
+                show_more_loc=_make_show_more_loc(visible=False),
+                about_h2_loc=about_h2_loc,
+            )
+        )
 
         result = await scraper._parse_job_detail_page(page)
         assert result["description"] == "We are hiring a senior Python developer."
 
     async def test_handles_missing_elements(self, scraper):
+        """No layout markers match → falls through to guest parser, also empty."""
         page = MagicMock()
-
-        show_more_loc = _make_show_more_loc(visible=False)
 
         empty_loc = MagicMock()
         empty_loc.count = AsyncMock(return_value=0)
         empty_loc.first = MagicMock()
         empty_loc.first.text_content = AsyncMock(return_value="")
 
-        def locator_side_effect(selector):
-            from src.services.linkedin.linkedin_scraper import SELECTORS
-
-            if selector == SELECTORS["detail_show_more"]:
-                return show_more_loc
+        def side_effect(selector):
+            if "show-more" in selector or "expandable-text-button" in selector:
+                return _make_show_more_loc(visible=False)
             return empty_loc
 
-        page.locator = MagicMock(side_effect=locator_side_effect)
+        page.locator = MagicMock(side_effect=side_effect)
 
         result = await scraper._parse_job_detail_page(page)
         assert result["description"] == ""
         assert result["salary_range"] is None
         assert result["job_type"] is None
         assert result["experience_level"] is None
+
+    async def test_guest_layout_extracts_description_without_button_leakage(self, scraper):
+        """When no authenticated markers are present, the guest parser runs
+        and extracts only the inner markup div — never the outer wrapper that
+        would leak 'Show more'/'Show less' button labels."""
+        page = MagicMock()
+
+        desc_loc = MagicMock()
+        desc_loc.count = AsyncMock(return_value=1)
+        desc_loc.first = MagicMock()
+        desc_loc.first.text_content = AsyncMock(
+            return_value="Hledáme zkušeného AI Developera...Privacy Notice"
+        )
+
+        page.locator = MagicMock(
+            side_effect=_build_guest_locator(
+                show_more_loc=_make_show_more_loc(visible=False),
+                desc_loc=desc_loc,
+            )
+        )
+
+        result = await scraper._parse_job_detail_page(page)
+        assert "Show more" not in result["description"]
+        assert "Show less" not in result["description"]
+        assert "AI Developera" in result["description"]
+
+    async def test_layout_detection_prefers_authenticated_when_both_markers_present(
+        self, scraper
+    ):
+        """On a downgraded page that exposes BOTH the guest markup div and an
+        authenticated marker, the authenticated parser must win — that's the
+        path that produces clean text on the real SPA layout."""
+        page = MagicMock()
+
+        auth_desc_loc = MagicMock()
+        auth_desc_loc.count = AsyncMock(return_value=1)
+        auth_desc_loc.first = MagicMock()
+        auth_desc_loc.first.text_content = AsyncMock(
+            return_value="Authenticated SDUI description."
+        )
+
+        guest_desc_loc = MagicMock()
+        guest_desc_loc.count = AsyncMock(return_value=1)
+        guest_desc_loc.first = MagicMock()
+        guest_desc_loc.first.text_content = AsyncMock(
+            return_value="Guest markup description (should NOT be used)."
+        )
+
+        empty = MagicMock(count=AsyncMock(return_value=0))
+        empty.first = MagicMock(text_content=AsyncMock(return_value=""))
+
+        def side_effect(selector):
+            if selector == _AUTH_SHOW_MORE_SELECTOR:
+                return _make_show_more_loc(visible=False)
+            if selector in LinkedInJobScraper.AUTHENTICATED_DESCRIPTION_SELECTORS:
+                return auth_desc_loc
+            if selector == LinkedInJobScraper.GUEST_DESCRIPTION_SELECTOR:
+                return guest_desc_loc
+            return empty
+
+        page.locator = MagicMock(side_effect=side_effect)
+
+        result = await scraper._parse_job_detail_page(page)
+        assert result["description"] == "Authenticated SDUI description."
 
 
 # ---------------------------------------------------------------------------
