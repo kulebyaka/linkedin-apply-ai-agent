@@ -226,6 +226,22 @@ class UserRepository:
 
         return await self.get_by_id(user_id)
 
+    async def count_admins(self) -> int:
+        """Return the total number of users with role == admin.
+
+        Used by the last-admin demotion guard, which must not depend on a
+        paginated user listing — otherwise a deployment with more users than
+        the page size could undercount and false-409.
+        """
+        from src.services.db.tables import UserTable
+
+        rows = (
+            await UserTable.select(UserTable.id)
+            .where(UserTable.role == UserRole.ADMIN.value)
+            .run()
+        )
+        return len(rows)
+
     async def list_all_users(self, limit: int = 200, offset: int = 0) -> list[User]:
         """List all users ordered by created_at descending.
 

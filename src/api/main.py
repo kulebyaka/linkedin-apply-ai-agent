@@ -1658,8 +1658,7 @@ async def admin_set_user_role(
 
         # Refuse any demotion that would leave the system with zero admins.
         if target.role == UserRole.ADMIN and target_role != UserRole.ADMIN:
-            all_users = await ctx.user_repository.list_all_users(limit=1000, offset=0)
-            admin_count = sum(1 for u in all_users if u.role == UserRole.ADMIN)
+            admin_count = await ctx.user_repository.count_admins()
             if admin_count <= 1:
                 raise HTTPException(
                     409, "Cannot demote the last remaining admin",

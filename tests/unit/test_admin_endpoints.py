@@ -90,6 +90,7 @@ def _make_mock_ctx() -> MagicMock:
     user_repo.initialize = AsyncMock()
     user_repo.cleanup_expired_magic_links = AsyncMock(return_value=0)
     user_repo.list_all_users = AsyncMock(return_value=[])
+    user_repo.count_admins = AsyncMock(return_value=0)
     user_repo.get_by_id = AsyncMock(return_value=None)
     user_repo.set_role = AsyncMock()
 
@@ -479,7 +480,7 @@ class TestAdminSetUserRole:
     def test_409_last_admin_demotion_blocked(self, admin_user, mock_ctx):
         # admin demoting self when sole admin
         mock_ctx.user_repository.get_by_id.return_value = admin_user
-        mock_ctx.user_repository.list_all_users.return_value = [admin_user]
+        mock_ctx.user_repository.count_admins.return_value = 1
         with _patched_client(admin_user, mock_ctx) as client:
             resp = client.put(
                 f"/api/admin/users/{admin_user.id}/role",
@@ -494,7 +495,7 @@ class TestAdminSetUserRole:
             UserRole.ADMIN, user_id="solo-admin", email="solo@example.com"
         )
         mock_ctx.user_repository.get_by_id.return_value = target
-        mock_ctx.user_repository.list_all_users.return_value = [target]
+        mock_ctx.user_repository.count_admins.return_value = 1
         with _patched_client(admin_user, mock_ctx) as client:
             resp = client.put(
                 "/api/admin/users/solo-admin/role",
@@ -504,13 +505,8 @@ class TestAdminSetUserRole:
         mock_ctx.user_repository.set_role.assert_not_called()
 
     def test_admin_can_demote_self_if_other_admin_exists(self, admin_user, mock_ctx):
-        other_admin = _make_user(
-            UserRole.ADMIN, user_id="admin-2", email="admin2@example.com"
-        )
         mock_ctx.user_repository.get_by_id.return_value = admin_user
-        mock_ctx.user_repository.list_all_users.return_value = [
-            admin_user, other_admin
-        ]
+        mock_ctx.user_repository.count_admins.return_value = 2
         demoted = _make_user(
             UserRole.TRIAL, user_id=admin_user.id, email=admin_user.email
         )

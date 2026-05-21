@@ -101,6 +101,20 @@ async def test_list_all_users_pagination(repo):
 
 
 @pytest.mark.asyncio
+async def test_count_admins_counts_only_admin_role(repo):
+    await repo.create_user("trial@example.com")
+    a1 = await repo.create_user("admin1@example.com")
+    a2 = await repo.create_user("admin2@example.com")
+    await repo.set_role(a1.id, UserRole.ADMIN)
+    await repo.set_role(a2.id, UserRole.ADMIN)
+
+    assert await repo.count_admins() == 2
+
+    await repo.set_role(a2.id, UserRole.TRIAL)
+    assert await repo.count_admins() == 1
+
+
+@pytest.mark.asyncio
 async def test_migration_adds_role_column_to_old_db(tmp_path):
     """Simulate an old database missing the `role` column and verify migration."""
     from piccolo.engine.sqlite import SQLiteEngine
