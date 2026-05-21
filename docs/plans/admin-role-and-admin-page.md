@@ -166,12 +166,12 @@ Introduce a `role` column on users (enum: `trial`, `premium`, `admin`, extensibl
 - Create: `ui/src/routes/admin/queue/+page.svelte`
 - Create: `ui/src/lib/components/admin/StatCard.svelte`
 
-- [ ] `StatCard.svelte`: title, value, optional sub-label.
-- [ ] Page polls `/api/admin/queue` every 5s. Shows: queue depth, consumer running/stopped indicator, consumer task count, status counts for last 24h and 7d (as a small bar/list).
-- [ ] Scheduler table: rows per user with email, last_run_at (relative time), next_run_at, last_status (ok/error). Per-row "Run now" button calls `runScheduler(userId)`; toast result.
-- [ ] Add a "Refresh now" button alongside the polling indicator.
-- [ ] Add a manual test note in task description (no automated UI test required here unless Vitest exists).
-- [ ] Run project test suite: `uv run pytest -q` and `cd ui && npm run check` — must pass before task 8.
+- [x] `StatCard.svelte`: title, value, optional sub-label.
+- [x] Page polls `/api/admin/queue` every 5s. Shows: queue depth, consumer running/stopped indicator, consumer task count, status counts for last 24h and 7d (as a small bar/list).
+- [x] Scheduler table: rows per user with email, last_run_at (relative time), next_run_at, last_status (ok/error). Per-row "Run now" button calls `runScheduler(userId)`; toast result.
+- [x] Add a "Refresh now" button alongside the polling indicator.
+- [x] Add a manual test note in task description (no automated UI test required here unless Vitest exists). — Vitest not configured; manual smoke covers /admin/queue.
+- [x] Run project test suite: `uv run pytest -q` and `cd ui && npm run check` — must pass before task 8. — `npm run check` clean (0 errors); 6 pre-existing pytest failures unrelated to this UI-only task (filter/workflow tests fail on master too).
 
 ### Task 8: Admin errors viewer + users page
 
