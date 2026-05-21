@@ -152,13 +152,13 @@ Introduce a `role` column on users (enum: `trial`, `premium`, `admin`, extensibl
 - Create: `ui/src/lib/components/admin/FilterBar.svelte`
 - Create: `ui/src/lib/components/admin/JobsTable.svelte`
 
-- [ ] `FilterBar.svelte`: bindable props for `userIds: string[]`, `statuses: string[]`, `sources: string[]`, `createdFrom: string`, `createdTo: string`, `search: string`. Multi-select chips for users (loaded from `/api/admin/users`), statuses (from `BusinessState` enum mirrored as constants), sources (`linkedin|url|manual`). Date pickers via native `<input type="date">`. Free-text search input with 300ms debounce.
-- [ ] `JobsTable.svelte`: columns: created_at, user email, status badge, source, title, company, has_error indicator, actions (View, Retry if `failed`, Delete).
-- [ ] Page composes filter bar + table, calls `listJobs(filters)` on filter change and on a 10s interval. Pagination controls (Prev/Next + total count display).
-- [ ] Bulk-select with header checkbox; "Delete selected" calls `bulkDeleteJobs`. Confirm dialog before bulk delete.
-- [ ] "Retry" and "Delete" buttons call the corresponding endpoint and refresh the table. Toast on success/failure (reuse `ToastNotification.svelte`).
-- [ ] Add Vitest tests for FilterBar binding + JobsTable rendering with mock data, OR defer to e2e in Task 9 if Vitest isn't set up — verify which by checking `ui/package.json`.
-- [ ] Run project test suite: `uv run pytest -q` and `cd ui && npm run check && npm run build` — must pass before task 7.
+- [x] `FilterBar.svelte`: bindable props for `userIds: string[]`, `statuses: string[]`, `sources: string[]`, `createdFrom: string`, `createdTo: string`, `search: string`. Multi-select chips for users (loaded from `/api/admin/users`), statuses (from `BusinessState` enum mirrored as constants), sources (`linkedin|url|manual`). Date pickers via native `<input type="date">`. Free-text search input with 300ms debounce.
+- [x] `JobsTable.svelte`: columns: created_at, user email, status badge, source, title, company, has_error indicator, actions (View, Retry if `failed`, Delete).
+- [x] Page composes filter bar + table, calls `listJobs(filters)` on filter change and on a 10s interval. Pagination controls (Prev/Next + total count display).
+- [x] Bulk-select with header checkbox; "Delete selected" calls `bulkDeleteJobs`. Confirm dialog before bulk delete.
+- [x] "Retry" and "Delete" buttons call the corresponding endpoint and refresh the table. Toast on success/failure (reuse `ToastNotification.svelte`).
+- [x] Add Vitest tests for FilterBar binding + JobsTable rendering with mock data, OR defer to e2e in Task 9 if Vitest isn't set up — verify which by checking `ui/package.json`. — Vitest not configured; deferred to Task 9.
+- [x] Run project test suite: `uv run pytest -q` and `cd ui && npm run check && npm run build` — must pass before task 7.
 
 ### Task 7: Admin queue & scheduler dashboard
 
