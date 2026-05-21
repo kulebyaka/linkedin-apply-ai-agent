@@ -1032,7 +1032,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pyjwt" },
+    { name = "pypdf" },
     { name = "python-dotenv" },
+    { name = "python-multipart" },
     { name = "resend" },
     { name = "sqlalchemy" },
     { name = "uvicorn", extra = ["standard"] },
@@ -1068,10 +1070,12 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.5.3" },
     { name = "pydantic-settings", specifier = ">=2.1.0" },
     { name = "pyjwt", specifier = ">=2.8.0" },
+    { name = "pypdf", specifier = ">=4.0.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.4.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.21.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.1.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
+    { name = "python-multipart", specifier = ">=0.0.9" },
     { name = "resend", specifier = ">=2.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1.0" },
     { name = "sqlalchemy", specifier = ">=2.0.25" },
@@ -1693,6 +1697,15 @@ wheels = [
 ]
 
 [[package]]
+name = "pypdf"
+version = "6.11.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/bf/58/6dd97d78a4b17a7a6b9d1c6ad23895abc41f0fdc49c553cc05bdfdcc36d0/pypdf-6.11.0.tar.gz", hash = "sha256:062b51c81b0910e6d2755e99e1c5547a0a23b7d0a32322af66240d8edcfabe87", size = 6453975, upload-time = "2026-05-09T13:26:48.955Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/07/b1/68feb7eb3b99f0c020b414234825f4a5d70e0126c18d933770e8c93a35fc/pypdf-6.11.0-py3-none-any.whl", hash = "sha256:769394d5756d5b304c9b6bef88b54b1816b328e7e6fc9254e625529a15ed4ab8", size = 338819, upload-time = "2026-05-09T13:26:46.904Z" },
+]
+
+[[package]]
 name = "pyphen"
 version = "0.17.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1751,6 +1764,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/f0/26/19cadc79a718c5edbec86fd4919a6b6d3f681039a2f6d66d14be94e75fb9/python_dotenv-1.2.1.tar.gz", hash = "sha256:42667e897e16ab0d66954af0e60a9caa94f0fd4ecf3aaf6d2d260eec1aa36ad6", size = 44221, upload-time = "2025-10-26T15:12:10.434Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/14/1b/a298b06749107c305e1fe0f814c6c74aea7b2f1e10989cb30f544a1b3253/python_dotenv-1.2.1-py3-none-any.whl", hash = "sha256:b81ee9561e9ca4004139c6cbba3a238c32b03e4894671e181b671e8cb8425d61", size = 21230, upload-time = "2025-10-26T15:12:09.109Z" },
+]
+
+[[package]]
+name = "python-multipart"
+version = "0.0.29"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/4e/fe/70bd71a6738b09a0bdf6480ca6436b167469ca4578b2a0efbe390b4b0e70/python_multipart-0.0.29.tar.gz", hash = "sha256:643e93849196645e2dbdd81a0f8829a23123ad7f797a84a364c6fb3563f18904", size = 45678, upload-time = "2026-05-17T17:29:47.654Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8f/cb/769cfc37177252872a45a71f3fbdde9d51b471a3f3c14bfe95dde3407386/python_multipart-0.0.29-py3-none-any.whl", hash = "sha256:2ddcc971cef266225f54f552d8fa10bcfbb1f14446caec199060daac59ff2d69", size = 29640, upload-time = "2026-05-17T17:29:45.69Z" },
 ]
 
 [[package]]

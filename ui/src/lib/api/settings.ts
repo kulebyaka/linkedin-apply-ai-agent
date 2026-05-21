@@ -139,6 +139,61 @@ export async function updateModelPreferences(
 	return response.json();
 }
 
+export interface CVExtractionStartResponse {
+	extraction_id: string;
+	status: 'pending';
+}
+
+export interface CVExtractionStatusResponse {
+	extraction_id: string;
+	status: 'pending' | 'running' | 'completed' | 'failed';
+	result_json: Record<string, unknown> | null;
+	validation_errors: string[];
+	error_message: string | null;
+}
+
+async function extractDetail(response: Response, fallback: string): Promise<string> {
+	try {
+		const body = await response.json();
+		if (body && typeof body.detail === 'string') return body.detail;
+	} catch {
+		/* not JSON */
+	}
+	return `${fallback}: ${response.statusText}`;
+}
+
+export async function extractCVFromPDF(file: File): Promise<CVExtractionStartResponse> {
+	const form = new FormData();
+	form.append('file', file);
+
+	const response = await fetch(`${API_BASE}/api/users/me/master-cv/extract`, {
+		method: 'POST',
+		body: form,
+		credentials: 'include',
+	});
+
+	if (!response.ok) {
+		throw new Error(await extractDetail(response, 'Failed to upload PDF'));
+	}
+
+	return response.json();
+}
+
+export async function getCVExtractionStatus(
+	extractionId: string,
+): Promise<CVExtractionStatusResponse> {
+	const response = await fetch(
+		`${API_BASE}/api/users/me/master-cv/extract/${encodeURIComponent(extractionId)}`,
+		{ credentials: 'include' },
+	);
+
+	if (!response.ok) {
+		throw new Error(await extractDetail(response, 'Failed to get extraction status'));
+	}
+
+	return response.json();
+}
+
 export async function generateFilterPrompt(naturalLanguagePrefs: string): Promise<{ prompt: string }> {
 	const response = await fetch(`${API_BASE}/api/users/me/filter-preferences/generate-prompt`, {
 		method: 'POST',
