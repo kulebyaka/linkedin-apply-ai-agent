@@ -85,6 +85,7 @@ def _make_mock_ctx() -> MagicMock:
     repo.get = AsyncMock(return_value=None)
     repo.update = AsyncMock()
     repo.delete = AsyncMock(return_value=True)
+    repo.delete_cascade = AsyncMock(return_value=True)
 
     user_repo = AsyncMock()
     user_repo.initialize = AsyncMock()
@@ -245,7 +246,7 @@ class TestAdminRetryJob:
     def test_retry_failed_job_transitions_to_queued(self, admin_user, mock_ctx):
         failed_job = _make_job(
             "j1", status=BusinessState.FAILED.value, error_message="boom",
-            source="url",  # avoid the queue re-enqueue path
+            source="url",
             raw_input={"url": "https://example.com"},
         )
         queued_job = _make_job("j1", status=BusinessState.QUEUED.value)
@@ -257,6 +258,16 @@ class TestAdminRetryJob:
         args, _ = mock_ctx.repository.update.call_args
         assert args[0] == "j1"
         assert args[1]["status"] == BusinessState.QUEUED
+        assert args[1]["error_message"] is None
+        assert args[1]["last_scrape_error"] is None
+
+    def test_retry_409_when_no_raw_input(self, admin_user, mock_ctx):
+        mock_ctx.repository.get.return_value = _make_job(
+            "j1", status=BusinessState.FAILED.value, raw_input=None,
+        )
+        with _patched_client(admin_user, mock_ctx) as client:
+            resp = client.post("/api/admin/jobs/j1/retry")
+        assert resp.status_code == 409
 
     def test_retry_409_when_not_failed(self, admin_user, mock_ctx):
         mock_ctx.repository.get.return_value = _make_job(
@@ -280,16 +291,15 @@ class TestAdminRetryJob:
 
 class TestAdminDeleteJob:
     def test_deletes_job(self, admin_user, mock_ctx):
-        mock_ctx.repository.get.return_value = _make_job("j1")
-        mock_ctx.repository.delete.return_value = True
+        mock_ctx.repository.delete_cascade.return_value = True
         with _patched_client(admin_user, mock_ctx) as client:
             resp = client.delete("/api/admin/jobs/j1")
         assert resp.status_code == 200
         assert resp.json()["deleted"] is True
-        mock_ctx.repository.delete.assert_called_once_with("j1")
+        mock_ctx.repository.delete_cascade.assert_called_once_with("j1")
 
     def test_404_when_missing(self, admin_user, mock_ctx):
-        mock_ctx.repository.get.return_value = None
+        mock_ctx.repository.delete_cascade.return_value = False
         with _patched_client(admin_user, mock_ctx) as client:
             resp = client.delete("/api/admin/jobs/nope")
         assert resp.status_code == 404
@@ -302,10 +312,7 @@ class TestAdminDeleteJob:
 
 class TestAdminBulkDelete:
     def test_bulk_delete_succeeds(self, admin_user, mock_ctx):
-        mock_ctx.repository.get.side_effect = [
-            _make_job("j1"), _make_job("j2"), None
-        ]
-        mock_ctx.repository.delete.side_effect = [True, True]
+        mock_ctx.repository.delete_cascade.side_effect = [True, True, False]
         with _patched_client(admin_user, mock_ctx) as client:
             resp = client.post(
                 "/api/admin/jobs/bulk-delete",
@@ -458,6 +465,21 @@ class TestAdminSetUserRole:
         with _patched_client(admin_user, mock_ctx) as client:
             resp = client.put(
                 f"/api/admin/users/{admin_user.id}/role",
+                json={"role": "trial"},
+            )
+        assert resp.status_code == 409
+        mock_ctx.user_repository.set_role.assert_not_called()
+
+    def test_409_blocks_demoting_other_last_admin(self, admin_user, mock_ctx):
+        # admin A demoting admin B when B is the sole remaining admin
+        target = _make_user(
+            UserRole.ADMIN, user_id="solo-admin", email="solo@example.com"
+        )
+        mock_ctx.user_repository.get_by_id.return_value = target
+        mock_ctx.user_repository.list_all_users.return_value = [target]
+        with _patched_client(admin_user, mock_ctx) as client:
+            resp = client.put(
+                "/api/admin/users/solo-admin/role",
                 json={"role": "trial"},
             )
         assert resp.status_code == 409

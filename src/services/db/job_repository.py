@@ -164,6 +164,21 @@ class JobRepository(ABC):
         pass
 
     @abstractmethod
+    async def delete_cascade(self, job_id: str) -> bool:
+        """Cascade-delete a job record without ownership check (admin path).
+
+        Deletes the job row, all associated CV composition attempts, and unlinks
+        any PDF files referenced (current_pdf_path + each attempt's pdf_path).
+
+        Args:
+            job_id: Unique job identifier.
+
+        Returns:
+            True if deleted, False if not found.
+        """
+        pass
+
+    @abstractmethod
     async def delete_for_user(self, job_id: str, user_id: str) -> bool:
         """Cascade-delete a job record owned by the given user.
 
@@ -357,9 +372,17 @@ class JobRepository(ABC):
 
     @abstractmethod
     async def list_jobs_with_errors(
-        self, limit: int = 50, offset: int = 0
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        since: datetime | None = None,
     ) -> list[JobRecord]:
         """List jobs with a non-null error_message or last_scrape_error.
+
+        Args:
+            limit: Page size.
+            offset: Page offset.
+            since: If set, only include jobs with updated_at >= since.
 
         Returns:
             List of JobRecord ordered by updated_at desc.
@@ -593,6 +616,26 @@ class InMemoryJobRepository(JobRepository):
         _unlink_pdfs(pdf_paths, job_id)
         return True
 
+    async def delete_cascade(self, job_id: str) -> bool:
+        """Cascade-delete a job without ownership check (in-memory)."""
+        pdf_paths: list[str] = []
+        async with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                return False
+
+            if job.current_pdf_path:
+                pdf_paths.append(job.current_pdf_path)
+            for attempt in self._cv_attempts.get(job_id, []):
+                if attempt.pdf_path:
+                    pdf_paths.append(attempt.pdf_path)
+
+            del self._jobs[job_id]
+            self._cv_attempts.pop(job_id, None)
+
+        _unlink_pdfs(pdf_paths, job_id)
+        return True
+
     # =========================================================================
     # Query Methods
     # =========================================================================
@@ -769,12 +812,18 @@ class InMemoryJobRepository(JobRepository):
         return counts
 
     async def list_jobs_with_errors(
-        self, limit: int = 50, offset: int = 0
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        since: datetime | None = None,
     ) -> list[JobRecord]:
         matches = [
             j for j in self._jobs.values()
             if (j.error_message or j.last_scrape_error)
         ]
+        if since is not None:
+            since_aware = since if since.tzinfo else since.replace(tzinfo=timezone.utc)
+            matches = [j for j in matches if j.updated_at and j.updated_at >= since_aware]
         matches.sort(key=lambda j: j.updated_at, reverse=True)
         return matches[offset:offset + limit]
 
@@ -1237,7 +1286,7 @@ class SQLiteJobRepository(JobRepository):
         PDF files. PDF unlinking is best-effort and runs after the DB commit.
         """
         self._ensure_initialized()
-        from .tables import CVAttemptTable, Job
+        from .tables import Job
 
         existing = (
             await Job.select()
@@ -1248,6 +1297,25 @@ class SQLiteJobRepository(JobRepository):
         )
         if not existing:
             return False
+        return await self._cascade_delete_existing(job_id, existing)
+
+    async def delete_cascade(self, job_id: str) -> bool:
+        """Cascade-delete a job without ownership check (SQLite, admin path)."""
+        self._ensure_initialized()
+        from .tables import Job
+
+        existing = (
+            await Job.select()
+            .where(Job.job_id == job_id)
+            .first()
+            .run()
+        )
+        if not existing:
+            return False
+        return await self._cascade_delete_existing(job_id, existing)
+
+    async def _cascade_delete_existing(self, job_id: str, existing: dict) -> bool:
+        from .tables import CVAttemptTable, Job
 
         attempt_rows = (
             await CVAttemptTable.select(CVAttemptTable.pdf_path)
@@ -1264,7 +1332,7 @@ class SQLiteJobRepository(JobRepository):
 
         await CVAttemptTable.delete().where(CVAttemptTable.job_id == job_id).run()
         await Job.delete().where(Job.job_id == job_id).run()
-        logger.info("Cascade-deleted job %s (user=%s, %d pdfs)", job_id, user_id, len(pdf_paths))
+        logger.info("Cascade-deleted job %s (%d pdfs)", job_id, len(pdf_paths))
 
         _unlink_pdfs(pdf_paths, job_id)
         return True
@@ -1526,18 +1594,29 @@ class SQLiteJobRepository(JobRepository):
         return {row["status"]: row["n"] for row in rows if row["status"]}
 
     async def list_jobs_with_errors(
-        self, limit: int = 50, offset: int = 0
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        since: datetime | None = None,
     ) -> list[JobRecord]:
         self._ensure_initialized()
 
+        where_clauses = ["(error_message IS NOT NULL OR last_scrape_error IS NOT NULL)"]
+        params: list = []
+        if since is not None:
+            where_clauses.append("updated_at >= ?")
+            params.append(
+                since if since.tzinfo else since.replace(tzinfo=timezone.utc)
+            )
         sql = (
-            "SELECT * FROM job "
-            "WHERE error_message IS NOT NULL OR last_scrape_error IS NOT NULL "
-            "ORDER BY updated_at DESC LIMIT ? OFFSET ?"
+            "SELECT * FROM job WHERE "
+            + " AND ".join(where_clauses)
+            + " ORDER BY updated_at DESC LIMIT ? OFFSET ?"
         )
+        params.extend([limit, offset])
         conn = await self._engine.get_connection()
         try:
-            cursor = await conn.execute(sql, (limit, offset))
+            cursor = await conn.execute(sql, params)
             rows = await cursor.fetchall()
         finally:
             await conn.close()

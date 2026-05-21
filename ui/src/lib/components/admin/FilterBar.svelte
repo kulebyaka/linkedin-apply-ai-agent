@@ -25,8 +25,8 @@
 	const STATUS_OPTIONS = [
 		'queued',
 		'processing',
-		'cv_ready',
-		'pending_review',
+		'completed',
+		'pending',
 		'approved',
 		'declined',
 		'retrying',
@@ -34,8 +34,7 @@
 		'applied',
 		'failed',
 		'filtered_out',
-		'completed',
-		'pending',
+		'scrape_failed',
 	];
 	const SOURCE_OPTIONS = ['linkedin', 'url', 'manual'];
 

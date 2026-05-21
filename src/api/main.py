@@ -1324,7 +1324,12 @@ async def admin_get_job(
 async def admin_retry_job(
     job_id: str, request: Request, admin: AdminUser
 ) -> dict:
-    """Retry a failed job: transitions to queued and re-enqueues."""
+    """Retry a failed job: transitions to queued and re-runs the workflow.
+
+    Re-invokes the preparation workflow directly rather than re-enqueueing
+    on the LinkedIn queue, because the queue consumer's cross-cycle dedup
+    would skip the just-requeued row.
+    """
     ctx = _get_ctx(request)
     job = await ctx.repository.get(job_id)
     if job is None:
@@ -1336,53 +1341,96 @@ async def admin_retry_job(
             f"Job not retriable in status '{job.status}' (must be 'failed')",
         )
 
+    if not job.raw_input:
+        raise HTTPException(409, "Job has no raw_input — cannot retry")
+
     await ctx.repository.update(
         job_id,
-        {"status": BusinessState.QUEUED, "error_message": None},
+        {
+            "status": BusinessState.QUEUED,
+            "error_message": None,
+            "last_scrape_error": None,
+        },
     )
 
-    # Re-enqueue if it was a LinkedIn-sourced job with raw_input data.
-    if job.source == "linkedin" and ctx.job_queue is not None and job.raw_input:
-        try:
-            from src.models.job import ScrapedJob
-
-            scraped = ScrapedJob(**job.raw_input)
-            await ctx.job_queue.put(scraped, user_id=job.user_id or None)
-        except Exception:
-            logger.warning(
-                "Failed to re-enqueue LinkedIn job %s onto queue", job_id, exc_info=True,
-            )
+    ctx.create_background_task(_run_admin_retry(ctx, job_id))
 
     updated = await ctx.repository.get(job_id)
     return updated.model_dump(mode="json")
 
 
-def _try_unlink_job_pdf(user_id: str, job_id: str) -> None:
-    """Best-effort removal of the per-user PDF for an admin-deleted job."""
-    if not user_id:
+async def _run_admin_retry(ctx, job_id: str) -> None:
+    """Re-invoke the preparation workflow for an admin-retried job."""
+    import time as _time
+
+    job = await ctx.repository.get(job_id)
+    if job is None:
         return
+
+    master_cv = None
+    if job.user_id and ctx.user_repository is not None:
+        try:
+            user = await ctx.user_repository.get_by_id(job.user_id)
+            if user and user.master_cv_json:
+                master_cv = user.master_cv_json
+        except Exception:
+            logger.warning("Failed to load user %s for admin retry", job.user_id)
+
+    if master_cv is None:
+        try:
+            from src.agents._shared import load_master_cv
+
+            master_cv = load_master_cv()
+        except Exception:
+            master_cv = None
+
+    initial_state = {
+        "job_id": job_id,
+        "user_id": job.user_id or "",
+        "source": job.source,
+        "mode": job.mode,
+        "raw_input": job.raw_input,
+        "master_cv": master_cv,
+        "current_step": BusinessState.QUEUED,
+        "retry_count": 0,
+        "filter_result": None,
+        "user_feedback": None,
+        "error_message": None,
+    }
+    thread_id = f"admin-retry-{job_id}-{int(_time.time())}"
+    config = {
+        "configurable": {
+            "thread_id": thread_id,
+            "repository": ctx.repository,
+            "user_repository": ctx.user_repository,
+        }
+    }
     try:
-        pdf_path = Path(settings.generated_cvs_dir) / user_id / f"{job_id}.pdf"
-        pdf_path.unlink(missing_ok=True)
-    except OSError as exc:
-        logger.warning("Failed to unlink PDF for job %s: %s", job_id, exc)
+        await ctx.prep_workflow.ainvoke(initial_state, config)
+        logger.info("Admin retry workflow completed for job %s", job_id)
+    except Exception as exc:
+        logger.exception("Admin retry workflow failed for job %s", job_id)
+        try:
+            await ctx.repository.update(
+                job_id,
+                {
+                    "status": BusinessState.FAILED,
+                    "error_message": f"Admin retry failed: {exc}",
+                },
+            )
+        except Exception:
+            logger.warning("Could not mark job %s FAILED after admin retry", job_id)
 
 
 @app.delete("/api/admin/jobs/{job_id}")
 async def admin_delete_job(
     job_id: str, request: Request, admin: AdminUser
 ) -> dict:
-    """Delete any job and best-effort unlink its PDF."""
+    """Cascade-delete any job and unlink its PDFs."""
     ctx = _get_ctx(request)
-    job = await ctx.repository.get(job_id)
-    if job is None:
-        raise HTTPException(404, f"Job {job_id} not found")
-
-    deleted = await ctx.repository.delete(job_id)
+    deleted = await ctx.repository.delete_cascade(job_id)
     if not deleted:
         raise HTTPException(404, f"Job {job_id} not found")
-
-    _try_unlink_job_pdf(job.user_id, job_id)
     return {"deleted": True, "job_id": job_id}
 
 
@@ -1404,14 +1452,9 @@ async def admin_bulk_delete_jobs(
     failed: list[str] = []
     for jid in job_ids:
         try:
-            job = await ctx.repository.get(jid)
-            if job is None:
-                failed.append(jid)
-                continue
-            ok = await ctx.repository.delete(jid)
+            ok = await ctx.repository.delete_cascade(jid)
             if ok:
                 deleted += 1
-                _try_unlink_job_pdf(job.user_id, jid)
             else:
                 failed.append(jid)
         except Exception:
@@ -1482,9 +1525,9 @@ async def admin_list_errors(
 ) -> dict:
     """List jobs with non-null error_message or last_scrape_error."""
     ctx = _get_ctx(request)
-    items = await ctx.repository.list_jobs_with_errors(limit=limit, offset=offset)
-    if since is not None:
-        items = [j for j in items if j.updated_at and j.updated_at >= since]
+    items = await ctx.repository.list_jobs_with_errors(
+        limit=limit, offset=offset, since=since
+    )
     return {
         "items": [item.model_dump(mode="json") for item in items],
         "limit": limit,
@@ -1549,11 +1592,8 @@ async def admin_set_user_role(
     if target is None:
         raise HTTPException(404, f"User {user_id} not found")
 
-    if (
-        admin.id == user_id
-        and admin.role == UserRole.ADMIN
-        and target_role != UserRole.ADMIN
-    ):
+    # Refuse any demotion that would leave the system with zero admins.
+    if target.role == UserRole.ADMIN and target_role != UserRole.ADMIN:
         all_users = await ctx.user_repository.list_all_users(limit=1000, offset=0)
         admin_count = sum(1 for u in all_users if u.role == UserRole.ADMIN)
         if admin_count <= 1:
@@ -1561,7 +1601,10 @@ async def admin_set_user_role(
                 409, "Cannot demote the last remaining admin",
             )
 
-    updated = await ctx.user_repository.set_role(user_id, target_role)
+    try:
+        updated = await ctx.user_repository.set_role(user_id, target_role)
+    except KeyError:
+        raise HTTPException(404, f"User {user_id} not found") from None
     return _serialize_user_summary(updated)
 
 
