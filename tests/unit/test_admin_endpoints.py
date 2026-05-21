@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 from src.api.main import app, get_current_user
 from src.models.state_machine import BusinessState
 from src.models.unified import JobRecord
-from src.models.user import User, UserRole
+from src.models.user import User, UserRole, UserSearchPreferences
 
 
 # ---------------------------------------------------------------------------
@@ -376,10 +376,29 @@ class TestAdminRunScheduler:
         scheduler = MagicMock()
         scheduler.run_search = AsyncMock(return_value=3)
         mock_ctx.scheduler = scheduler
+        target_user = _make_user(UserRole.TRIAL, user_id="user-1", email="u1@example.com")
+        target_user.search_preferences = UserSearchPreferences(keywords="engineer")
+        mock_ctx.user_repository.get_by_id.return_value = target_user
         with _patched_client(admin_user, mock_ctx) as client:
             resp = client.post("/api/admin/scheduler/run/user-1")
         assert resp.status_code == 200
         assert resp.json()["status"] == "started"
+
+    def test_404_when_user_missing(self, admin_user, mock_ctx):
+        mock_ctx.scheduler = MagicMock()
+        mock_ctx.user_repository.get_by_id.return_value = None
+        with _patched_client(admin_user, mock_ctx) as client:
+            resp = client.post("/api/admin/scheduler/run/nope")
+        assert resp.status_code == 404
+
+    def test_409_when_user_has_no_search_prefs(self, admin_user, mock_ctx):
+        mock_ctx.scheduler = MagicMock()
+        target_user = _make_user(UserRole.TRIAL, user_id="user-2", email="u2@example.com")
+        target_user.search_preferences = None
+        mock_ctx.user_repository.get_by_id.return_value = target_user
+        with _patched_client(admin_user, mock_ctx) as client:
+            resp = client.post("/api/admin/scheduler/run/user-2")
+        assert resp.status_code == 409
 
 
 # ---------------------------------------------------------------------------

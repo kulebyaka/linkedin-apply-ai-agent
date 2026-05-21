@@ -1359,7 +1359,7 @@ async def admin_retry_job(
     return updated.model_dump(mode="json")
 
 
-async def _run_admin_retry(ctx, job_id: str) -> None:
+async def _run_admin_retry(ctx: AppContext, job_id: str) -> None:
     """Re-invoke the preparation workflow for an admin-retried job."""
     import time as _time
 
@@ -1428,24 +1428,36 @@ async def _run_admin_retry(ctx, job_id: str) -> None:
             "user_repository": ctx.user_repository,
         }
     }
+    await ctx.register_workflow(
+        job_id, thread_id, "preparation", user_id=job.user_id or ""
+    )
     try:
-        await ctx.register_workflow(
-            job_id, thread_id, "preparation", user_id=job.user_id or ""
-        )
         await ctx.prep_workflow.ainvoke(initial_state, config)
         logger.info("Admin retry workflow completed for job %s", job_id)
     except Exception as exc:
         logger.exception("Admin retry workflow failed for job %s", job_id)
+        # Only force-FAILED if the job is still in a non-terminal state.
+        # If the workflow already wrote a terminal state (e.g. CV_READY),
+        # transitioning to FAILED would raise InvalidStateTransitionError.
         try:
-            await ctx.repository.update(
-                job_id,
-                {
-                    "status": BusinessState.FAILED,
-                    "error_message": f"Admin retry failed: {exc}",
-                },
-            )
+            current = await ctx.repository.get(job_id)
+            if current is not None and str(current.status) not in {
+                BusinessState.CV_READY.value,
+                BusinessState.APPLIED.value,
+                BusinessState.DECLINED.value,
+                BusinessState.FILTERED_OUT.value,
+            }:
+                await ctx.repository.update(
+                    job_id,
+                    {
+                        "status": BusinessState.FAILED,
+                        "error_message": f"Admin retry failed: {exc}",
+                    },
+                )
         except Exception:
             logger.warning("Could not mark job %s FAILED after admin retry", job_id)
+    finally:
+        await ctx.unregister_workflow(job_id)
 
 
 @app.delete("/api/admin/jobs/{job_id}")
@@ -1472,6 +1484,8 @@ async def admin_bulk_delete_jobs(
         raise HTTPException(400, "job_ids must be a non-empty list")
     if len(job_ids) > 100:
         raise HTTPException(400, "Cannot delete more than 100 jobs at once")
+    if not all(isinstance(j, str) and j for j in job_ids):
+        raise HTTPException(400, "job_ids must be a list of non-empty strings")
 
     ctx = _get_ctx(request)
     deleted = 0
@@ -1525,6 +1539,16 @@ async def admin_run_scheduler(
     ctx = _get_ctx(request)
     if ctx.scheduler is None:
         raise HTTPException(503, "Scheduler not initialized")
+    if ctx.user_repository is None:
+        raise HTTPException(500, "User repository not initialized")
+
+    target_user = await ctx.user_repository.get_by_id(user_id)
+    if target_user is None:
+        raise HTTPException(404, f"User {user_id} not found")
+    if not target_user.search_preferences:
+        raise HTTPException(
+            409, f"User {user_id} has no LinkedIn search preferences configured"
+        )
 
     async def _run() -> None:
         try:
