@@ -122,11 +122,11 @@ Introduce a `role` column on users (enum: `trial`, `premium`, `admin`, extensibl
 - Create: `scripts/promote_user.py`
 - Modify: `tests/unit/test_user_role_migration.py` (add CLI tests OR create `tests/unit/test_promote_user_cli.py`)
 
-- [ ] `scripts/promote_user.py` accepts `--email <email>` and `--role <trial|premium|admin>` (default `admin`). Uses `uv run` shebang-compatible entry: `if __name__ == "__main__"` block, parses args with `argparse`, initialises `UserRepository`, calls `set_role`.
-- [ ] Prints `Promoted <email> to <role>` on success, exits 0. Exits 1 with clear error if user missing.
-- [ ] Add `--list-admins` flag that prints all current admins.
-- [ ] Write unit tests invoking the script via `subprocess` or by importing the `main()` function directly against a temp DB.
-- [ ] Run project test suite: `uv run pytest -q` — must pass before task 5.
+- [x] `scripts/promote_user.py` accepts `--email <email>` and `--role <trial|premium|admin>` (default `admin`). Uses `uv run` shebang-compatible entry: `if __name__ == "__main__"` block, parses args with `argparse`, initialises `UserRepository`, calls `set_role`.
+- [x] Prints `Promoted <email> to <role>` on success, exits 0. Exits 1 with clear error if user missing.
+- [x] Add `--list-admins` flag that prints all current admins.
+- [x] Write unit tests invoking the script via `subprocess` or by importing the `main()` function directly against a temp DB.
+- [x] Run project test suite: `uv run pytest -q` — must pass before task 5.
 
 ### Task 5: Frontend — auth store, admin layout, API client
 
