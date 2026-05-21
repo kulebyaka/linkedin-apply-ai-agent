@@ -284,6 +284,89 @@ class JobRepository(ABC):
         pass
 
     # =========================================================================
+    # Admin-scope Query Methods
+    #
+    # These methods are NOT user-scoped — they read across all users and are
+    # intended to be called only from admin-gated API endpoints.
+    # =========================================================================
+
+    @abstractmethod
+    async def list_all_jobs(
+        self,
+        *,
+        user_ids: list[str] | None = None,
+        statuses: list[str] | None = None,
+        sources: list[str] | None = None,
+        created_from: datetime | None = None,
+        created_to: datetime | None = None,
+        search: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[JobRecord]:
+        """List jobs across all users, with optional filters.
+
+        Args:
+            user_ids: Restrict to these owners (None = any user).
+            statuses: Restrict to these BusinessState values (None = any).
+            sources: Restrict to these sources (None = any).
+            created_from: Lower bound on created_at (inclusive).
+            created_to: Upper bound on created_at (inclusive).
+            search: Free-text match against job_posting.title, job_posting.company,
+                and error_message (case-insensitive LIKE).
+            limit: Page size.
+            offset: Page offset.
+
+        Returns:
+            List of JobRecord ordered by created_at desc.
+        """
+        pass
+
+    @abstractmethod
+    async def count_all_jobs(
+        self,
+        *,
+        user_ids: list[str] | None = None,
+        statuses: list[str] | None = None,
+        sources: list[str] | None = None,
+        created_from: datetime | None = None,
+        created_to: datetime | None = None,
+        search: str | None = None,
+    ) -> int:
+        """Count jobs matching the same filter shape as list_all_jobs.
+
+        Returns:
+            Total count of matching jobs (ignores limit/offset).
+        """
+        pass
+
+    @abstractmethod
+    async def count_by_status_global(
+        self, window_hours: int | None = None
+    ) -> dict[str, int]:
+        """Count jobs per status across all users, optionally limited to a
+        recent time window.
+
+        Args:
+            window_hours: If set, only count jobs whose created_at falls
+                within the last N hours. None = no time filter.
+
+        Returns:
+            Mapping of status string -> count. Statuses with zero jobs omitted.
+        """
+        pass
+
+    @abstractmethod
+    async def list_jobs_with_errors(
+        self, limit: int = 50, offset: int = 0
+    ) -> list[JobRecord]:
+        """List jobs with a non-null error_message or last_scrape_error.
+
+        Returns:
+            List of JobRecord ordered by updated_at desc.
+        """
+        pass
+
+    # =========================================================================
     # CV Attempt Methods
     # =========================================================================
 
@@ -582,6 +665,118 @@ class InMemoryJobRepository(JobRepository):
             key = str(j.status)
             counts[key] = counts.get(key, 0) + 1
         return counts
+
+    # =========================================================================
+    # Admin-scope Query Methods
+    # =========================================================================
+
+    def _matches_admin_filters(
+        self,
+        job: JobRecord,
+        *,
+        user_ids: list[str] | None,
+        statuses: list[str] | None,
+        sources: list[str] | None,
+        created_from: datetime | None,
+        created_to: datetime | None,
+        search: str | None,
+    ) -> bool:
+        if user_ids and job.user_id not in user_ids:
+            return False
+        if statuses and str(job.status) not in statuses:
+            return False
+        if sources and job.source not in sources:
+            return False
+        if created_from and job.created_at < created_from:
+            return False
+        if created_to and job.created_at > created_to:
+            return False
+        if search:
+            needle = search.lower()
+            haystacks: list[str] = []
+            if job.job_posting:
+                haystacks.append(str(job.job_posting.get("title", "")))
+                haystacks.append(str(job.job_posting.get("company", "")))
+            if job.error_message:
+                haystacks.append(job.error_message)
+            if not any(needle in h.lower() for h in haystacks):
+                return False
+        return True
+
+    async def list_all_jobs(
+        self,
+        *,
+        user_ids: list[str] | None = None,
+        statuses: list[str] | None = None,
+        sources: list[str] | None = None,
+        created_from: datetime | None = None,
+        created_to: datetime | None = None,
+        search: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[JobRecord]:
+        """List jobs across all users (in-memory)."""
+        matches = [
+            j for j in self._jobs.values()
+            if self._matches_admin_filters(
+                j,
+                user_ids=user_ids,
+                statuses=statuses,
+                sources=sources,
+                created_from=created_from,
+                created_to=created_to,
+                search=search,
+            )
+        ]
+        matches.sort(key=lambda j: j.created_at, reverse=True)
+        return matches[offset:offset + limit]
+
+    async def count_all_jobs(
+        self,
+        *,
+        user_ids: list[str] | None = None,
+        statuses: list[str] | None = None,
+        sources: list[str] | None = None,
+        created_from: datetime | None = None,
+        created_to: datetime | None = None,
+        search: str | None = None,
+    ) -> int:
+        return sum(
+            1 for j in self._jobs.values()
+            if self._matches_admin_filters(
+                j,
+                user_ids=user_ids,
+                statuses=statuses,
+                sources=sources,
+                created_from=created_from,
+                created_to=created_to,
+                search=search,
+            )
+        )
+
+    async def count_by_status_global(
+        self, window_hours: int | None = None
+    ) -> dict[str, int]:
+        cutoff: datetime | None = None
+        if window_hours is not None:
+            cutoff = datetime.now(tz=timezone.utc) - timedelta(hours=window_hours)
+        counts: dict[str, int] = {}
+        for j in self._jobs.values():
+            if cutoff is not None and j.created_at < cutoff:
+                continue
+            key = str(j.status)
+            counts[key] = counts.get(key, 0) + 1
+        return counts
+
+    async def list_jobs_with_errors(
+        self, limit: int = 50, offset: int = 0
+    ) -> list[JobRecord]:
+        matches = [
+            j for j in self._jobs.values()
+            if (j.error_message or j.last_scrape_error)
+        ]
+        matches.sort(key=lambda j: j.updated_at, reverse=True)
+        return matches[offset:offset + limit]
 
     # =========================================================================
     # CV Attempt Methods
@@ -1190,6 +1385,163 @@ class SQLiteJobRepository(JobRepository):
             await conn.close()
 
         return {row["status"]: row["n"] for row in rows if row["status"]}
+
+    # =========================================================================
+    # Admin-scope Query Methods
+    # =========================================================================
+
+    def _build_admin_filter_sql(
+        self,
+        *,
+        user_ids: list[str] | None,
+        statuses: list[str] | None,
+        sources: list[str] | None,
+        created_from: datetime | None,
+        created_to: datetime | None,
+        search: str | None,
+    ) -> tuple[str, list]:
+        """Build the WHERE clause + params list for admin list/count queries."""
+        where_parts: list[str] = []
+        params: list = []
+        if user_ids:
+            ph = ",".join(["?"] * len(user_ids))
+            where_parts.append(f"user_id IN ({ph})")
+            params.extend(user_ids)
+        if statuses:
+            ph = ",".join(["?"] * len(statuses))
+            where_parts.append(f"status IN ({ph})")
+            params.extend(statuses)
+        if sources:
+            ph = ",".join(["?"] * len(sources))
+            where_parts.append(f"source IN ({ph})")
+            params.extend(sources)
+        if created_from is not None:
+            where_parts.append("created_at >= ?")
+            params.append(created_from)
+        if created_to is not None:
+            where_parts.append("created_at <= ?")
+            params.append(created_to)
+        if search:
+            pat = f"%{search}%"
+            where_parts.append(
+                "("
+                "COALESCE(json_extract(job_posting, '$.title'), '') LIKE ? "
+                "OR COALESCE(json_extract(job_posting, '$.company'), '') LIKE ? "
+                "OR COALESCE(error_message, '') LIKE ?"
+                ")"
+            )
+            params.extend([pat, pat, pat])
+        where_sql = (" WHERE " + " AND ".join(where_parts)) if where_parts else ""
+        return where_sql, params
+
+    async def list_all_jobs(
+        self,
+        *,
+        user_ids: list[str] | None = None,
+        statuses: list[str] | None = None,
+        sources: list[str] | None = None,
+        created_from: datetime | None = None,
+        created_to: datetime | None = None,
+        search: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[JobRecord]:
+        """List jobs across all users (SQLite)."""
+        self._ensure_initialized()
+
+        where_sql, params = self._build_admin_filter_sql(
+            user_ids=user_ids,
+            statuses=statuses,
+            sources=sources,
+            created_from=created_from,
+            created_to=created_to,
+            search=search,
+        )
+        sql = (
+            f"SELECT * FROM job{where_sql} "
+            "ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        )
+        params.extend([limit, offset])
+
+        conn = await self._engine.get_connection()
+        try:
+            cursor = await conn.execute(sql, params)
+            rows = await cursor.fetchall()
+        finally:
+            await conn.close()
+        return [self._row_to_job_record(dict(row)) for row in rows]
+
+    async def count_all_jobs(
+        self,
+        *,
+        user_ids: list[str] | None = None,
+        statuses: list[str] | None = None,
+        sources: list[str] | None = None,
+        created_from: datetime | None = None,
+        created_to: datetime | None = None,
+        search: str | None = None,
+    ) -> int:
+        self._ensure_initialized()
+
+        where_sql, params = self._build_admin_filter_sql(
+            user_ids=user_ids,
+            statuses=statuses,
+            sources=sources,
+            created_from=created_from,
+            created_to=created_to,
+            search=search,
+        )
+        sql = f"SELECT COUNT(*) AS n FROM job{where_sql}"
+
+        conn = await self._engine.get_connection()
+        try:
+            cursor = await conn.execute(sql, params)
+            row = await cursor.fetchone()
+        finally:
+            await conn.close()
+        return int(row["n"]) if row else 0
+
+    async def count_by_status_global(
+        self, window_hours: int | None = None
+    ) -> dict[str, int]:
+        self._ensure_initialized()
+
+        if window_hours is not None:
+            cutoff = datetime.now(tz=timezone.utc) - timedelta(hours=window_hours)
+            sql = (
+                "SELECT status, COUNT(*) AS n FROM job WHERE created_at >= ? "
+                "GROUP BY status"
+            )
+            params = (cutoff,)
+        else:
+            sql = "SELECT status, COUNT(*) AS n FROM job GROUP BY status"
+            params = ()
+
+        conn = await self._engine.get_connection()
+        try:
+            cursor = await conn.execute(sql, params)
+            rows = await cursor.fetchall()
+        finally:
+            await conn.close()
+        return {row["status"]: row["n"] for row in rows if row["status"]}
+
+    async def list_jobs_with_errors(
+        self, limit: int = 50, offset: int = 0
+    ) -> list[JobRecord]:
+        self._ensure_initialized()
+
+        sql = (
+            "SELECT * FROM job "
+            "WHERE error_message IS NOT NULL OR last_scrape_error IS NOT NULL "
+            "ORDER BY updated_at DESC LIMIT ? OFFSET ?"
+        )
+        conn = await self._engine.get_connection()
+        try:
+            cursor = await conn.execute(sql, (limit, offset))
+            rows = await cursor.fetchall()
+        finally:
+            await conn.close()
+        return [self._row_to_job_record(dict(row)) for row in rows]
 
     # =========================================================================
     # CV Attempt Methods

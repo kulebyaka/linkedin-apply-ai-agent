@@ -48,6 +48,7 @@ from src.models.user import (
     LoginRequest,
     LoginResponse,
     User,
+    UserRole,
     UserSearchPreferences,
     UserUpdateRequest,
 )
@@ -137,6 +138,20 @@ async def get_optional_user(
 # Type aliases for dependency injection (avoids B008 ruff error)
 CurrentUser = Annotated[User, Depends(get_current_user)]
 OptionalUser = Annotated[User | None, Depends(get_optional_user)]
+
+
+async def get_admin_user(user: CurrentUser) -> User:
+    """FastAPI dependency: require an authenticated user with role == admin.
+
+    Layers on top of get_current_user. Raises 403 when the authenticated
+    user is not an admin.
+    """
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(403, "Admin role required")
+    return user
+
+
+AdminUser = Annotated[User, Depends(get_admin_user)]
 
 
 @asynccontextmanager

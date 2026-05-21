@@ -83,15 +83,15 @@ Introduce a `role` column on users (enum: `trial`, `premium`, `admin`, extensibl
 - Create: `tests/unit/test_admin_authz.py`
 - Create: `tests/unit/test_job_repository_admin.py`
 
-- [ ] On `JobRepository` ABC, add abstract methods: `list_all_jobs(*, user_ids: list[str] | None, statuses: list[str] | None, sources: list[str] | None, created_from: datetime | None, created_to: datetime | None, search: str | None, limit: int, offset: int) -> list[JobRecord]`, `count_all_jobs(...same filter args...) -> int`, `count_by_status_global(window_hours: int | None = None) -> dict[str, int]`, `list_jobs_with_errors(limit: int, offset: int) -> list[JobRecord]`, `delete(job_id: str) -> bool`.
-- [ ] Implement all five in `InMemoryJobRepository` (filter in Python over `self._jobs.values()`).
-- [ ] Implement all five in `SQLiteJobRepository` using Piccolo `Job.select().where(...)` and `Job.delete().where(...)`. For free-text search, `LIKE` against `job_posting->>'$.title'`, `job_posting->>'$.company'`, and `error_message` (use Piccolo raw `Job.raw` if JSON-path predicates are awkward).
-- [ ] Add `get_admin_user` dependency in `src/api/main.py` after `get_optional_user`: depends on `get_current_user`, raises `HTTPException(403, "Admin role required")` if `user.role != "admin"`.
-- [ ] Add type alias `AdminUser = Annotated[User, Depends(get_admin_user)]`.
-- [ ] Write unit test: non-admin user hitting any future admin endpoint gets 403; admin user passes.
-- [ ] Write unit tests for each new repository method against `InMemoryJobRepository` (filter combinations, paging, status counts including the `window_hours` filter, delete idempotency).
-- [ ] Write unit tests for the same surface against `SQLiteJobRepository` using a temp DB (mirror existing repo test conventions).
-- [ ] Run project test suite: `uv run pytest -q` — must pass before task 3.
+- [x] On `JobRepository` ABC, add abstract methods: `list_all_jobs(*, user_ids: list[str] | None, statuses: list[str] | None, sources: list[str] | None, created_from: datetime | None, created_to: datetime | None, search: str | None, limit: int, offset: int) -> list[JobRecord]`, `count_all_jobs(...same filter args...) -> int`, `count_by_status_global(window_hours: int | None = None) -> dict[str, int]`, `list_jobs_with_errors(limit: int, offset: int) -> list[JobRecord]`, `delete(job_id: str) -> bool`.
+- [x] Implement all five in `InMemoryJobRepository` (filter in Python over `self._jobs.values()`).
+- [x] Implement all five in `SQLiteJobRepository` using Piccolo `Job.select().where(...)` and `Job.delete().where(...)`. For free-text search, `LIKE` against `job_posting->>'$.title'`, `job_posting->>'$.company'`, and `error_message` (use Piccolo raw `Job.raw` if JSON-path predicates are awkward).
+- [x] Add `get_admin_user` dependency in `src/api/main.py` after `get_optional_user`: depends on `get_current_user`, raises `HTTPException(403, "Admin role required")` if `user.role != "admin"`.
+- [x] Add type alias `AdminUser = Annotated[User, Depends(get_admin_user)]`.
+- [x] Write unit test: non-admin user hitting any future admin endpoint gets 403; admin user passes.
+- [x] Write unit tests for each new repository method against `InMemoryJobRepository` (filter combinations, paging, status counts including the `window_hours` filter, delete idempotency).
+- [x] Write unit tests for the same surface against `SQLiteJobRepository` using a temp DB (mirror existing repo test conventions).
+- [x] Run project test suite: `uv run pytest -q` — must pass before task 3.
 
 ### Task 3: Admin API endpoints
 
