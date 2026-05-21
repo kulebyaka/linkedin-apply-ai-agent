@@ -16,6 +16,7 @@ from src.models.cv import (
     Interests,
     Language,
 )
+
 from .cv_composer import CVCompositionError
 
 logger = logging.getLogger(__name__)

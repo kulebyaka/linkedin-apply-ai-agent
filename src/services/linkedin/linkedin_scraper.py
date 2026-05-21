@@ -13,6 +13,7 @@ from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from src.config.settings import Settings
 from src.models.job import ScrapedJob
+
 from .browser_automation import LinkedInAutomation
 from .linkedin_search import LinkedInSearchParams, LinkedInSearchURLBuilder
 

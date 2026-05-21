@@ -20,7 +20,6 @@ from src.models.state_machine import BusinessState
 from src.models.unified import JobRecord
 from src.models.user import User, UserRole, UserSearchPreferences
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

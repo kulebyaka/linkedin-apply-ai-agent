@@ -31,6 +31,10 @@ from fastapi.staticfiles import StaticFiles
 from src.config.settings import get_settings
 from src.context import AppContext, create_app_context
 from src.models.job_filter import GeneratePromptRequest, UserFilterPreferences
+from src.models.pdf_extraction import (
+    CVExtractionStartResponse,
+    CVExtractionStatusResponse,
+)
 from src.models.state_machine import BusinessState, WorkflowStep
 from src.models.unified import (
     ApplicationHistoryItem,
@@ -40,10 +44,6 @@ from src.models.unified import (
     JobSubmitRequest,
     JobSubmitResponse,
     PendingApproval,
-)
-from src.models.pdf_extraction import (
-    CVExtractionStartResponse,
-    CVExtractionStatusResponse,
 )
 from src.models.user import (
     AuthResponse,
@@ -76,6 +76,10 @@ if not _src_logger.handlers:
 # Module-level state for consumer management (not business state)
 _consumer_manager = ConsumerManager()
 _linkedin_init_lock = asyncio.Lock()
+# Serializes admin role changes so the last-admin guard is atomic with set_role.
+_admin_role_lock = asyncio.Lock()
+# Serializes admin retry start so the status check + re-queue + schedule are atomic.
+_admin_retry_lock = asyncio.Lock()
 
 def _get_ctx(request: Request) -> AppContext:
     """Helper to retrieve AppContext from request."""
@@ -224,9 +228,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             _consumer_manager.start(ctx)
     elif settings.linkedin_search_schedule_enabled:
         try:
+            from src.services.jobs.scheduler import LinkedInSearchScheduler
             from src.services.linkedin.browser_automation import LinkedInAutomation
             from src.services.linkedin.linkedin_scraper import LinkedInJobScraper
-            from src.services.jobs.scheduler import LinkedInSearchScheduler
 
             browser = LinkedInAutomation(settings)
             await browser.initialize()
@@ -326,12 +330,12 @@ async def list_llm_models(
     Public endpoint (no auth) — exposes only model names, display names, and
     pricing. Never exposes API keys or user data.
     """
-    from src.llm.provider import LLMProvider
     from src.llm.model_catalog import (
         OPERATIONS,
         build_label,
         get_catalog_for_operation,
     )
+    from src.llm.provider import LLMProvider
 
     if operation is not None and operation not in OPERATIONS:
         raise HTTPException(
@@ -529,7 +533,7 @@ def _resolve_cv_model_choice(user: User) -> tuple[str, str | None]:
 async def start_cv_extraction(
     request: Request,
     user: CurrentUser,
-    file: UploadFile = File(...),
+    file: Annotated[UploadFile, File(...)],
 ) -> CVExtractionStartResponse:
     """Kick off background AI extraction of a CV from an uploaded PDF.
 
@@ -843,9 +847,9 @@ async def trigger_linkedin_search(request: Request, user: CurrentUser):
         if ctx.scheduler is None:
             # Create a temporary scheduler for one-off search
             try:
+                from src.services.jobs.scheduler import LinkedInSearchScheduler
                 from src.services.linkedin.browser_automation import LinkedInAutomation
                 from src.services.linkedin.linkedin_scraper import LinkedInJobScraper
-                from src.services.jobs.scheduler import LinkedInSearchScheduler
 
                 if ctx.browser is None:
                     browser = LinkedInAutomation(settings)
@@ -1331,31 +1335,36 @@ async def admin_retry_job(
     would skip the just-requeued row.
     """
     ctx = _get_ctx(request)
-    job = await ctx.repository.get(job_id)
-    if job is None:
-        raise HTTPException(404, f"Job {job_id} not found")
+    # Serialize retry starts so two concurrent requests cannot both observe
+    # status=failed and both schedule a workflow. A self-transition
+    # queued→queued is allowed by the state machine, so without this lock
+    # both updates succeed and duplicate workflows fight over the same job.
+    async with _admin_retry_lock:
+        job = await ctx.repository.get(job_id)
+        if job is None:
+            raise HTTPException(404, f"Job {job_id} not found")
 
-    if str(job.status) != BusinessState.FAILED.value:
-        raise HTTPException(
-            409,
-            f"Job not retriable in status '{job.status}' (must be 'failed')",
+        if str(job.status) != BusinessState.FAILED.value:
+            raise HTTPException(
+                409,
+                f"Job not retriable in status '{job.status}' (must be 'failed')",
+            )
+
+        if not job.raw_input:
+            raise HTTPException(409, "Job has no raw_input — cannot retry")
+
+        await ctx.repository.update(
+            job_id,
+            {
+                "status": BusinessState.QUEUED,
+                "error_message": None,
+                "last_scrape_error": None,
+            },
         )
 
-    if not job.raw_input:
-        raise HTTPException(409, "Job has no raw_input — cannot retry")
+        ctx.create_background_task(_run_admin_retry(ctx, job_id))
 
-    await ctx.repository.update(
-        job_id,
-        {
-            "status": BusinessState.QUEUED,
-            "error_message": None,
-            "last_scrape_error": None,
-        },
-    )
-
-    ctx.create_background_task(_run_admin_retry(ctx, job_id))
-
-    updated = await ctx.repository.get(job_id)
+        updated = await ctx.repository.get(job_id)
     return updated.model_dump(mode="json")
 
 
@@ -1640,23 +1649,26 @@ async def admin_set_user_role(
     if ctx.user_repository is None:
         raise HTTPException(500, "User repository not initialized")
 
-    target = await ctx.user_repository.get_by_id(user_id)
-    if target is None:
-        raise HTTPException(404, f"User {user_id} not found")
+    # Serialize concurrent role changes so the last-admin count and the write
+    # cannot interleave (two demotions could otherwise both observe count > 1).
+    async with _admin_role_lock:
+        target = await ctx.user_repository.get_by_id(user_id)
+        if target is None:
+            raise HTTPException(404, f"User {user_id} not found")
 
-    # Refuse any demotion that would leave the system with zero admins.
-    if target.role == UserRole.ADMIN and target_role != UserRole.ADMIN:
-        all_users = await ctx.user_repository.list_all_users(limit=1000, offset=0)
-        admin_count = sum(1 for u in all_users if u.role == UserRole.ADMIN)
-        if admin_count <= 1:
-            raise HTTPException(
-                409, "Cannot demote the last remaining admin",
-            )
+        # Refuse any demotion that would leave the system with zero admins.
+        if target.role == UserRole.ADMIN and target_role != UserRole.ADMIN:
+            all_users = await ctx.user_repository.list_all_users(limit=1000, offset=0)
+            admin_count = sum(1 for u in all_users if u.role == UserRole.ADMIN)
+            if admin_count <= 1:
+                raise HTTPException(
+                    409, "Cannot demote the last remaining admin",
+                )
 
-    try:
-        updated = await ctx.user_repository.set_role(user_id, target_role)
-    except KeyError:
-        raise HTTPException(404, f"User {user_id} not found") from None
+        try:
+            updated = await ctx.user_repository.set_role(user_id, target_role)
+        except KeyError:
+            raise HTTPException(404, f"User {user_id} not found") from None
     return _serialize_user_summary(updated)
 
 

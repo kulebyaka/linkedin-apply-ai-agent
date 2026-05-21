@@ -31,7 +31,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from playwright.async_api import async_playwright
 
-
 OUTPUT_PATH = Path("data/linkedin_cookies.json").resolve()
 PROXY = os.environ.get("PROXY", "socks5://127.0.0.1:1080")
 

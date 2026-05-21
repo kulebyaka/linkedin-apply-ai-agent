@@ -19,13 +19,14 @@ from typing import TYPE_CHECKING, Literal
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from src.config.settings import Settings
-from .job_queue import JobQueue
 from src.services.linkedin.linkedin_search import LinkedInSearchParams, LinkedInSearchURLBuilder
+
+from .job_queue import JobQueue
 
 if TYPE_CHECKING:
     from src.services.alerts import AdminAlertService
-    from src.services.linkedin.linkedin_scraper import LinkedInJobScraper
     from src.services.auth.user_repository import UserRepository
+    from src.services.linkedin.linkedin_scraper import LinkedInJobScraper
 
 logger = logging.getLogger(__name__)
 
