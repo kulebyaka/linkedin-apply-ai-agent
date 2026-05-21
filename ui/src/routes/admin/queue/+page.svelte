@@ -140,6 +140,7 @@
 			applying: 'bg-indigo-100',
 			applied: 'bg-emerald-300',
 			failed: 'bg-red-200',
+			scrape_failed: 'bg-red-100',
 			filtered_out: 'bg-zinc-200',
 			completed: 'bg-emerald-200',
 		};

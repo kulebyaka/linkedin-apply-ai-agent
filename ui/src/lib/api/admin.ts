@@ -13,7 +13,8 @@ export type JobStatus =
 	| 'applying'
 	| 'applied'
 	| 'failed'
-	| 'filtered_out';
+	| 'filtered_out'
+	| 'scrape_failed';
 
 export type JobSource = 'linkedin' | 'url' | 'manual';
 

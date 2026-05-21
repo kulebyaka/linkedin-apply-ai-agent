@@ -52,6 +52,7 @@
 			applying: 'bg-indigo-100 text-indigo-900',
 			applied: 'bg-emerald-300 text-emerald-900',
 			failed: 'bg-red-200 text-red-900',
+			scrape_failed: 'bg-red-100 text-red-900',
 			filtered_out: 'bg-zinc-200 text-zinc-700',
 			completed: 'bg-emerald-200 text-emerald-900',
 		};

@@ -1368,28 +1368,51 @@ async def _run_admin_retry(ctx, job_id: str) -> None:
         return
 
     master_cv = None
+    cv_provider: str | None = None
+    cv_model: str | None = None
     if job.user_id and ctx.user_repository is not None:
         try:
             user = await ctx.user_repository.get_by_id(job.user_id)
             if user and user.master_cv_json:
                 master_cv = user.master_cv_json
+            if user and user.model_preferences and user.model_preferences.cv_generation:
+                cv_provider = user.model_preferences.cv_generation.provider
+                cv_model = user.model_preferences.cv_generation.model
         except Exception:
             logger.warning("Failed to load user %s for admin retry", job.user_id)
 
     if master_cv is None:
+        # Do not fall back to the global filesystem CV — that would silently
+        # tailor a CV for user X using whoever's master_cv.json happens to be
+        # on the server. Fail the retry explicitly instead.
+        logger.error(
+            "Admin retry for job %s: no master CV available for user %s",
+            job_id, job.user_id,
+        )
         try:
-            from src.agents._shared import load_master_cv
-
-            master_cv = load_master_cv()
+            await ctx.repository.update(
+                job_id,
+                {
+                    "status": BusinessState.FAILED,
+                    "error_message": "Admin retry failed: user has no master CV",
+                },
+            )
         except Exception:
-            master_cv = None
+            logger.warning("Could not mark job %s FAILED for missing master CV", job_id)
+        return
+
+    raw_input = dict(job.raw_input or {})
+    if cv_provider:
+        raw_input["llm_provider"] = cv_provider
+    if cv_model:
+        raw_input["llm_model"] = cv_model
 
     initial_state = {
         "job_id": job_id,
         "user_id": job.user_id or "",
         "source": job.source,
         "mode": job.mode,
-        "raw_input": job.raw_input,
+        "raw_input": raw_input,
         "master_cv": master_cv,
         "current_step": BusinessState.QUEUED,
         "retry_count": 0,
@@ -1406,6 +1429,9 @@ async def _run_admin_retry(ctx, job_id: str) -> None:
         }
     }
     try:
+        await ctx.register_workflow(
+            job_id, thread_id, "preparation", user_id=job.user_id or ""
+        )
         await ctx.prep_workflow.ainvoke(initial_state, config)
         logger.info("Admin retry workflow completed for job %s", job_id)
     except Exception as exc:
@@ -1548,26 +1574,28 @@ async def admin_list_users(
         raise HTTPException(500, "User repository not initialized")
 
     users = await ctx.user_repository.list_all_users(limit=limit, offset=offset)
-    out: list[dict] = []
-    for u in users:
-        all_jobs = await ctx.repository.list_all_jobs(
+
+    async def _per_user(u):
+        last_job_task = ctx.repository.list_all_jobs(
             user_ids=[u.id], limit=1, offset=0
         )
-        last_job_at = all_jobs[0].created_at if all_jobs else None
-        # Per-user status counts via count_all_jobs over each status.
-        # Cheaper: count via repository's user-scoped status counts.
-        try:
-            job_counts = await ctx.repository.get_status_counts(u.id)
-        except Exception:
-            job_counts = {}
-        out.append(
-            {
-                "user": _serialize_user_summary(u),
-                "job_counts": job_counts,
-                "last_job_at": last_job_at.isoformat() if last_job_at else None,
-            }
+        counts_task = ctx.repository.get_status_counts(u.id)
+        all_jobs, counts = await asyncio.gather(
+            last_job_task, counts_task, return_exceptions=True,
         )
-    return {"items": out, "limit": limit, "offset": offset}
+        if isinstance(counts, BaseException):
+            counts = {}
+        if isinstance(all_jobs, BaseException):
+            all_jobs = []
+        last_job_at = all_jobs[0].created_at if all_jobs else None
+        return {
+            "user": _serialize_user_summary(u),
+            "job_counts": counts,
+            "last_job_at": last_job_at.isoformat() if last_job_at else None,
+        }
+
+    out = await asyncio.gather(*(_per_user(u) for u in users)) if users else []
+    return {"items": list(out), "limit": limit, "offset": offset}
 
 
 @app.put("/api/admin/users/{user_id}/role")
