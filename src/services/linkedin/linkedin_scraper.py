@@ -383,12 +383,41 @@ class LinkedInJobScraper:
             logger.debug("Failed to parse job card: %s", exc)
             return None
 
-    async def _parse_job_detail_page(self, page) -> dict:
-        """Extract full details from a job detail page.
+    # Authenticated (SDUI / legacy SPA) description container selectors,
+    # tried in priority order.
+    AUTHENTICATED_DESCRIPTION_SELECTORS = (
+        "[data-sdui-component$='aboutTheJob']",
+        "div.jobs-description__content",
+        "div#job-details",
+    )
 
-        Returns dict with keys: description, requirements, salary,
-        job_type, experience_level.
-        """
+    # Guest (JSERP) description selector. Only the inner markup div — never
+    # the outer `div.description__text` wrapper, which contains the
+    # "Show more"/"Show less" toggle buttons as siblings of the markup.
+    GUEST_DESCRIPTION_SELECTOR = "div.show-more-less-html__markup"
+
+    # Markers used to detect which layout LinkedIn served. Authenticated
+    # markers are checked first; absence implies guest. (We don't trust
+    # `li_at` cookie presence alone — sessions can be silently downgraded.)
+    AUTHENTICATED_LAYOUT_MARKERS = (
+        "[data-sdui-component$='aboutTheJob']",
+        "div.jobs-description__content",
+        "div#job-details",
+        "h2:has-text('About the job')",
+    )
+
+    async def _detect_layout(self, page) -> str:
+        """Return 'authenticated' if SDUI/SPA markers are present, else 'guest'."""
+        for marker in self.AUTHENTICATED_LAYOUT_MARKERS:
+            try:
+                if await page.locator(marker).count() > 0:
+                    return "authenticated"
+            except Exception:
+                continue
+        return "guest"
+
+    async def _parse_authenticated_detail(self, page) -> dict:
+        """Extract description + criteria + salary from authenticated SDUI/SPA layout."""
         result: dict = {
             "description": "",
             "requirements": None,
@@ -397,36 +426,27 @@ class LinkedInJobScraper:
             "experience_level": None,
         }
 
-        try:
-            # Click "Show more" button to expand truncated job descriptions.
-            # LinkedIn hides long descriptions behind this button by default.
-            # Bound the click to avoid hanging on modal overlays (default click
-            # timeout is 30s and modals routinely intercept pointer events).
-            show_more = page.locator(SELECTORS["detail_show_more"]).first
-            try:
-                if await show_more.is_visible(timeout=2000):
-                    try:
-                        await show_more.click(timeout=3000)
-                        await self.browser.random_delay(0.5, 1.0)
-                    except Exception as exc:
-                        logger.debug("Show more click failed: %s", exc)
-            except Exception:
-                pass  # Button not present — continue with whatever is visible
+        # Click "Show more" to expand truncated descriptions. Bound the click
+        # so a modal overlay can't hang us (default click timeout is 30s).
+        show_more_selector = (
+            "[data-sdui-component$='aboutTheJob'] [data-testid='expandable-text-button'], "
+            "button.jobs-description__footer-button, "
+            "button[aria-label='Show more']"
+        )
+        await self._maybe_click(page, show_more_selector)
 
-            # Primary: scoped SDUI selector (authenticated 2026 layout). The
-            # container's innerText starts with the "About the job" heading;
-            # strip it. For legacy SPA fallbacks (jobs-description__content /
-            # job-details) the heading isn't present, so the strip is a no-op.
-            desc_loc = page.locator(SELECTORS["detail_description"]).first
-            desc_count = await page.locator(SELECTORS["detail_description"]).count()
-            if desc_count > 0:
-                text = (await desc_loc.text_content() or "").strip()
+        try:
+            for selector in self.AUTHENTICATED_DESCRIPTION_SELECTORS:
+                if await page.locator(selector).count() == 0:
+                    continue
+                text = (await page.locator(selector).first.text_content() or "").strip()
                 text = text.removeprefix("About the job").strip()
                 if text:
                     result["description"] = text
+                    break
 
-            # Fallback: text-anchored h2 lookup (covers SDUI variants where
-            # the component name attribute may have rotated)
+            # Fallback: h2 anchor (covers SDUI variants where the component
+            # name attribute may have rotated).
             if not result["description"]:
                 about_h2 = page.locator("h2:has-text('About the job')")
                 if await about_h2.count() > 0:
@@ -436,41 +456,120 @@ class LinkedInJobScraper:
                     if desc:
                         result["description"] = desc
         except Exception as exc:
-            logger.debug("Failed to extract description: %s", exc)
+            logger.debug("Authenticated description extraction failed: %s", exc)
+
+        # Criteria selectors used by SPA detail pages.
+        try:
+            criteria = page.locator("li.jobs-unified-top-card__job-insight")
+            count = await criteria.count()
+            for i in range(count):
+                self._classify_criterion(
+                    (await criteria.nth(i).text_content() or "").strip().lower(),
+                    result,
+                )
+        except Exception as exc:
+            logger.debug("Authenticated criteria extraction failed: %s", exc)
+
+        # Salary (SPA layout).
+        try:
+            salary_selector = (
+                "div.salary-main-rail__data-body, span.jobs-unified-top-card__salary"
+            )
+            if await page.locator(salary_selector).count() > 0:
+                result["salary_range"] = (
+                    await page.locator(salary_selector).first.text_content() or ""
+                ).strip()
+        except Exception as exc:
+            logger.debug("Authenticated salary extraction failed: %s", exc)
+
+        return result
+
+    async def _parse_guest_detail(self, page) -> dict:
+        """Extract description + criteria + salary from guest JSERP layout."""
+        result: dict = {
+            "description": "",
+            "requirements": None,
+            "salary_range": None,
+            "job_type": None,
+            "experience_level": None,
+        }
+
+        await self._maybe_click(page, "button.show-more-less-html__button--more")
+
+        try:
+            loc = page.locator(self.GUEST_DESCRIPTION_SELECTOR)
+            if await loc.count() > 0:
+                text = (await loc.first.text_content() or "").strip()
+                if text:
+                    result["description"] = text
+        except Exception as exc:
+            logger.debug("Guest description extraction failed: %s", exc)
+
+        # Guest criteria live in a different list structure.
+        try:
+            criteria = page.locator(
+                "ul.description__job-criteria-list li, ul.job-criteria__list li"
+            )
+            count = await criteria.count()
+            for i in range(count):
+                self._classify_criterion(
+                    (await criteria.nth(i).text_content() or "").strip().lower(),
+                    result,
+                )
+        except Exception as exc:
+            logger.debug("Guest criteria extraction failed: %s", exc)
+
+        # Guest layout rarely exposes salary; left empty.
+        return result
+
+    async def _maybe_click(self, page, selector: str) -> None:
+        """Best-effort click on a possibly-absent element, bounded so a modal
+        overlay can't hang the scrape."""
+        try:
+            loc = page.locator(selector).first
+            if await loc.is_visible(timeout=2000):
+                try:
+                    await loc.click(timeout=3000)
+                    await self.browser.random_delay(0.5, 1.0)
+                except Exception as exc:
+                    logger.debug("Click on %s failed: %s", selector, exc)
+        except Exception:
+            pass  # Element not present — continue.
+
+    @staticmethod
+    def _classify_criterion(text: str, result: dict) -> None:
+        """Bucket a job-criteria string into experience_level or job_type."""
+        if not text:
+            return
+        if any(kw in text for kw in ("entry", "associate", "mid-senior", "director", "executive")):
+            result["experience_level"] = text
+        elif any(
+            kw in text for kw in ("full-time", "part-time", "contract", "temporary", "internship")
+        ):
+            result["job_type"] = text
+
+    async def _parse_job_detail_page(self, page) -> dict:
+        """Dispatch to the layout-specific detail parser.
+
+        LinkedIn serves two distinct layouts on /jobs/view/ — authenticated
+        SDUI/SPA and public guest JSERP — with mutually incompatible DOM
+        structures. Detect once, then run a layout-scoped parser; this
+        prevents cross-layout selector unions from leaking UI chrome (e.g.
+        "Show more"/"Show less" toggle buttons) into the scraped description.
+        """
+        layout = await self._detect_layout(page)
+        logger.debug("Detail layout detected: %s (%s)", layout, page.url)
+
+        if layout == "authenticated":
+            result = await self._parse_authenticated_detail(page)
+        else:
+            result = await self._parse_guest_detail(page)
 
         if not result["description"]:
             logger.warning(
-                "Empty description on detail page: %s (selectors did not match — "
-                "session may be unauthenticated or layout changed)",
+                "Empty description on detail page: %s (layout=%s — "
+                "selectors did not match or session was downgraded)",
                 page.url,
+                layout,
             )
-
-        # Extract job criteria (experience level, job type, etc.)
-        try:
-            criteria_items = page.locator(SELECTORS["detail_criteria"])
-            criteria_count = await criteria_items.count()
-            for i in range(criteria_count):
-                text = (await criteria_items.nth(i).text_content() or "").strip().lower()
-                if any(
-                    kw in text
-                    for kw in ("entry", "associate", "mid-senior", "director", "executive")
-                ):
-                    result["experience_level"] = text.strip()
-                elif any(
-                    kw in text
-                    for kw in ("full-time", "part-time", "contract", "temporary", "internship")
-                ):
-                    result["job_type"] = text.strip()
-        except Exception as exc:
-            logger.debug("Failed to extract criteria: %s", exc)
-
-        # Salary
-        try:
-            salary_count = await page.locator(SELECTORS["detail_salary"]).count()
-            if salary_count > 0:
-                salary_el = page.locator(SELECTORS["detail_salary"]).first
-                result["salary_range"] = (await salary_el.text_content() or "").strip()
-        except Exception as exc:
-            logger.debug("Failed to extract salary: %s", exc)
-
         return result
