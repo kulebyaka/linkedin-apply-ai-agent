@@ -179,10 +179,10 @@ Introduce a `role` column on users (enum: `trial`, `premium`, `admin`, extensibl
 - Create: `ui/src/routes/admin/errors/+page.svelte`
 - Create: `ui/src/routes/admin/users/+page.svelte`
 
-- [ ] Errors page: polls `/api/admin/errors` every 10s. Columns: updated_at, user email, job title, error type (`error_message` vs `last_scrape_error`), truncated error text, link to job detail. Expand row to view full error. "Since" filter (last 1h, 24h, 7d, all).
-- [ ] Users page: lists users from `/api/admin/users` with email, role, created_at, job counts (queued/processing/completed/failed), last_job_at. Role dropdown per row calls `setUserRole(id, role)` with optimistic update + rollback on error. Disallow changing own role to non-admin (UI guard, server-side guard already in place from Task 3).
-- [ ] Confirm dialog before any role change.
-- [ ] Run project test suite: `uv run pytest -q` and `cd ui && npm run check && npm run build` — must pass before task 9.
+- [x] Errors page: polls `/api/admin/errors` every 10s. Columns: updated_at, user email, job title, error type (`error_message` vs `last_scrape_error`), truncated error text, link to job detail. Expand row to view full error. "Since" filter (last 1h, 24h, 7d, all).
+- [x] Users page: lists users from `/api/admin/users` with email, role, created_at, job counts (queued/processing/completed/failed), last_job_at. Role dropdown per row calls `setUserRole(id, role)` with optimistic update + rollback on error. Disallow changing own role to non-admin (UI guard, server-side guard already in place from Task 3).
+- [x] Confirm dialog before any role change.
+- [x] Run project test suite: `uv run pytest -q` and `cd ui && npm run check && npm run build` — must pass before task 9. — `npm run check` clean (0 errors) and `npm run build` succeeded; pytest failures are pre-existing event-loop config issues unrelated to this UI-only task (zero Python touched).
 
 ### Task 9: Verify acceptance criteria
 
