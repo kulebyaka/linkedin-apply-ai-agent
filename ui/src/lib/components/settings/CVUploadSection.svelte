@@ -7,6 +7,7 @@
 		updateCV,
 	} from '$lib/api/settings';
 	import { auth } from '$lib/stores/auth.svelte';
+	import ToastNotification from '$lib/components/ToastNotification.svelte';
 
 	let { user }: { user: User } = $props();
 
@@ -22,6 +23,9 @@
 	let validationErrors = $state<string[]>([]);
 	let pollTimer: ReturnType<typeof setTimeout> | null = null;
 	const extracting = $derived(extractionStatus !== null);
+
+	let toastMessage = $state<string | null>(null);
+	let toastType = $state<'success' | 'error' | 'info'>('success');
 
 	onDestroy(() => {
 		if (pollTimer !== null) {
@@ -83,6 +87,8 @@
 			if (status.status === 'failed') {
 				error = status.error_message || 'Extraction failed';
 				extractionStatus = null;
+				toastType = 'error';
+				toastMessage = error;
 				return;
 			}
 
@@ -93,6 +99,11 @@
 			validationErrors = status.validation_errors || [];
 			extractionStatus = null;
 			error = null;
+			toastType = 'success';
+			toastMessage =
+				validationErrors.length > 0
+					? `CV extracted with ${validationErrors.length} validation issue${validationErrors.length === 1 ? '' : 's'} — review below.`
+					: 'CV extracted from PDF. Review and click Save.';
 		} catch (err) {
 			pollTimer = null;
 			extractionStatus = null;
@@ -288,7 +299,7 @@
 			bind:value={cvText}
 			oninput={handleInput}
 			placeholder={'{"contact": {"full_name": "..."}, "experience": [...], "skills": [...]}'}
-			disabled={saving}
+			disabled={saving || extracting}
 			rows="12"
 			class="font-mono w-full border-2 bg-white px-3 py-2 text-xs leading-relaxed text-[var(--color-foreground)] placeholder:text-[var(--color-muted-foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] disabled:opacity-50 {jsonValid ? 'border-[var(--color-foreground)]' : 'border-[var(--color-error)]'}"
 		></textarea>
@@ -373,3 +384,11 @@
 		{/if}
 	</div>
 </section>
+
+{#if toastMessage}
+	<ToastNotification
+		message={toastMessage}
+		type={toastType}
+		onClose={() => (toastMessage = null)}
+	/>
+{/if}
