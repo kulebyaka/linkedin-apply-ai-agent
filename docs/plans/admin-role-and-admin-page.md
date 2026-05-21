@@ -63,17 +63,17 @@ Introduce a `role` column on users (enum: `trial`, `premium`, `admin`, extensibl
 - Modify: `src/services/auth/user_repository.py`
 - Create: `tests/unit/test_user_role_migration.py`
 
-- [ ] Add `UserRole` Python enum in `src/models/user.py` with values `TRIAL = "trial"`, `PREMIUM = "premium"`, `ADMIN = "admin"`.
-- [ ] Add `role: UserRole = UserRole.TRIAL` field to `User` Pydantic model.
-- [ ] Add `role = Varchar(length=20, default="trial", index=True)` column to `UserTable` in `src/services/db/tables.py`.
-- [ ] In `UserRepository.initialize()`, extend the existing `PRAGMA table_info(user)` block: if `role` column missing, `ALTER TABLE user ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'trial'`, then commit.
-- [ ] Update `UserRepository.create_user()`, `get_user_by_email()`, `get_user_by_id()`, `update_user()` to read/write the `role` field (default `"trial"` when creating).
-- [ ] Add `UserRepository.set_role(user_id: str, role: UserRole) -> User` method.
-- [ ] Add `UserRepository.list_all_users(limit: int = 200, offset: int = 0) -> list[User]` method ordered by `created_at` desc.
-- [ ] Write unit test: fresh DB creates user with `role="trial"`.
-- [ ] Write unit test: old DB without `role` column gets migrated, existing rows default to `"trial"`.
-- [ ] Write unit test: `set_role` persists and round-trips.
-- [ ] Run project test suite: `uv run pytest tests/unit/test_user_role_migration.py -v` then `uv run pytest -q` — must pass before task 2.
+- [x] Add `UserRole` Python enum in `src/models/user.py` with values `TRIAL = "trial"`, `PREMIUM = "premium"`, `ADMIN = "admin"`.
+- [x] Add `role: UserRole = UserRole.TRIAL` field to `User` Pydantic model.
+- [x] Add `role = Varchar(length=20, default="trial", index=True)` column to `UserTable` in `src/services/db/tables.py`.
+- [x] In `UserRepository.initialize()`, extend the existing `PRAGMA table_info(user)` block: if `role` column missing, `ALTER TABLE user ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'trial'`, then commit.
+- [x] Update `UserRepository.create_user()`, `get_user_by_email()`, `get_user_by_id()`, `update_user()` to read/write the `role` field (default `"trial"` when creating).
+- [x] Add `UserRepository.set_role(user_id: str, role: UserRole) -> User` method.
+- [x] Add `UserRepository.list_all_users(limit: int = 200, offset: int = 0) -> list[User]` method ordered by `created_at` desc.
+- [x] Write unit test: fresh DB creates user with `role="trial"`.
+- [x] Write unit test: old DB without `role` column gets migrated, existing rows default to `"trial"`.
+- [x] Write unit test: `set_role` persists and round-trips.
+- [x] Run project test suite: `uv run pytest tests/unit/test_user_role_migration.py -v` then `uv run pytest -q` — must pass before task 2.
 
 ### Task 2: Admin-scope repository methods + `get_admin_user` dependency
 
