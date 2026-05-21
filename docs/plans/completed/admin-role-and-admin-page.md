@@ -200,10 +200,10 @@ Introduce a `role` column on users (enum: `trial`, `premium`, `admin`, extensibl
 
 ### Task 10: Update documentation
 
-- [ ] Update `CLAUDE.md`:
+- [x] Update `CLAUDE.md`:
   - Add `UserRole` enum + `role` field to "User & Auth Models" section.
   - Add `Admin API` table listing all `/api/admin/*` endpoints.
   - Add an "Admin & Roles" section explaining the role model, promotion via `scripts/promote_user.py`, and the `get_admin_user` dependency pattern.
   - Mark "Admin Role & Admin Page" as ✅ Complete in the Implementation Status table.
-- [ ] Update `README.md` (if it covers user roles or first-time setup) to mention `scripts/promote_user.py --email you@example.com --role admin` as the first-admin bootstrap step.
-- [ ] Move this plan to `docs/plans/completed/admin-role-and-admin-page.md`.
+- [x] Update `README.md` (if it covers user roles or first-time setup) to mention `scripts/promote_user.py --email you@example.com --role admin` as the first-admin bootstrap step.
+- [x] Move this plan to `docs/plans/completed/admin-role-and-admin-page.md`.

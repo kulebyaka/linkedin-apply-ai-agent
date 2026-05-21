@@ -215,6 +215,18 @@ The system uses a **two-workflow pipeline** split at the HITL boundary, enabling
 - Scheduler iterates all users with configured search preferences, runs separate LinkedIn searches per user
 - `JobRepository.get_for_user(job_id, user_id)` enforces ownership verification
 
+### 11. Admin & Roles
+- `UserRole` enum (`src/models/user.py`): `trial`, `premium`, `admin`. Default is `trial`; the enum is the extension point for future tiers.
+- Persisted as a `role` `Varchar(20)` column on `UserTable` with an index; new sign-ups land in `trial`. `UserRepository.initialize()` runtime-migrates older DBs by adding the column and defaulting existing rows to `"trial"` (same pattern as `filter_preferences`).
+- `UserRepository` exposes `set_role(user_id, role)` and `list_all_users(limit, offset)` for admin operations.
+- Authorization in the API uses two layered dependencies in `src/api/main.py`:
+  - `get_current_user` — extracts the JWT and 401s when missing.
+  - `get_admin_user` — depends on `get_current_user` and raises `HTTPException(403)` when `user.role != "admin"`. Type alias: `AdminUser = Annotated[User, Depends(get_admin_user)]`.
+- Admin-scope repository methods are additive on top of the user-scoped ones: `list_all_jobs`, `count_all_jobs`, `count_by_status_global`, `list_jobs_with_errors`, `delete`. User-scoped methods (`list_for_user`, `get_for_user`, etc.) remain the default path for non-admin callers.
+- Bootstrapping the first admin: `uv run python scripts/promote_user.py --email you@example.com --role admin`. The same script supports `--role trial|premium|admin` and `--list-admins`.
+- Last-admin guard: `PUT /api/admin/users/{user_id}/role` refuses (409) to demote yourself when you are the only remaining admin. The UI mirrors this guard, but the server-side check is authoritative.
+- Frontend: `ui/src/routes/admin/+layout.svelte` redirects to `/` when `authStore.isAdmin` is false. The auth store reads `role` from `/api/auth/me` and exposes `isAdmin` as a `$derived` value.
+
 #### Important Notes about strict schema support
 - **OpenAI**: Requires GPT-4 or newer models for strict schema support
 - **Anthropic**: Requires beta header `anthropic-beta: structured-outputs-2025-11-13` (already configured)
@@ -297,11 +309,29 @@ See `src/llm/provider.py` module documentation for detailed implementation.
 | GET | `/api/jobs/linkedin-search/status` | Get scheduler state and last run info |
 | GET | `/api/health` | Health check (includes queue consumer status) |
 
+### Admin (requires `role == "admin"`)
+
+All routes depend on `get_admin_user`, which raises 403 for non-admin callers.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/admin/jobs` | Paged, filterable list of jobs across all users (filters: `user_id`, `status`, `source`, `created_from`, `created_to`, `search`, `limit`, `offset`) |
+| GET | `/api/admin/jobs/{job_id}` | Full job detail for any user |
+| POST | `/api/admin/jobs/{job_id}/retry` | Re-enqueue a `failed` job (409 otherwise) |
+| DELETE | `/api/admin/jobs/{job_id}` | Delete a job record + associated PDF (best-effort) |
+| POST | `/api/admin/jobs/bulk-delete` | Delete up to 100 jobs by id list |
+| GET | `/api/admin/queue` | Consumer snapshot + scheduler state + global status counts (24h / 7d) |
+| POST | `/api/admin/scheduler/run/{user_id}` | Manually fire the LinkedIn search for a specific user |
+| GET | `/api/admin/errors` | Paged list of jobs whose `error_message` or `last_scrape_error` is non-null |
+| GET | `/api/admin/users` | Paged user list with derived per-status job counts and `last_job_at` |
+| PUT | `/api/admin/users/{user_id}/role` | Change a user's role; refuses to demote the last admin (409) |
+
 ## Data Models
 
 ### User & Auth Models (`src/models/user.py`)
 
-- `User` - User entity: id, email, display_name, master_cv_json, search_preferences, filter_preferences, timestamps
+- `UserRole` - Enum of role values: `TRIAL = "trial"`, `PREMIUM = "premium"`, `ADMIN = "admin"`. Extensible.
+- `User` - User entity: id, email, display_name, `role` (`UserRole`, default `trial`), master_cv_json, search_preferences, filter_preferences, timestamps
 - `LoginRequest` - Email input for magic link request
 - `LoginResponse` - Success message after magic link sent
 - `VerifyRequest` - Token for magic link verification
@@ -372,6 +402,7 @@ See `src/llm/provider.py` module documentation for detailed implementation.
 | **HITL Frontend UI** | ✅ Complete | Svelte 5 SPA with Tinder-like review interface |
 | **Application Workflow** | 🟡 Stubs | `src/agents/application_workflow.py` - stubs only |
 | **Job Filter (LLM)** | ✅ Complete | `src/services/job_filter.py` — two-threshold routing, hidden disqualifier detection, per-user prompt, HITL badge |
+| **Admin Role & Admin Page** | ✅ Complete | `UserRole` enum + `role` column, `get_admin_user` dependency, `/api/admin/*` endpoints, `/admin` UI (jobs / queue / errors / users), `scripts/promote_user.py` CLI |
 
 ## Development Guidelines
 
