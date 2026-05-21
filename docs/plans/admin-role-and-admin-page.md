@@ -101,20 +101,20 @@ Introduce a `role` column on users (enum: `trial`, `premium`, `admin`, extensibl
 - Modify: `src/services/jobs/job_queue.py` (expose `ConsumerManager.snapshot() -> {is_running, task_count, queue_depth}` — read `queue.qsize()` from the queue it manages)
 - Create: `tests/unit/test_admin_endpoints.py`
 
-- [ ] `GET /api/admin/jobs` — query params: `user_id` (repeatable), `status` (repeatable), `source` (repeatable), `created_from`, `created_to`, `search`, `limit` (default 50, max 200), `offset`. Returns `{items: list[JobRecord], total: int}`. Uses `list_all_jobs` + `count_all_jobs`.
-- [ ] `GET /api/admin/jobs/{job_id}` — full job detail (any user). 404 if missing.
-- [ ] `POST /api/admin/jobs/{job_id}/retry` — only valid if status in {`failed`}; transitions to `queued`, re-enqueues onto `ctx.job_queue`, returns updated record. 409 if not retriable.
-- [ ] `DELETE /api/admin/jobs/{job_id}` — deletes the record and any associated PDF file under `data/generated_cvs/{user_id}/{job_id}.pdf` (best-effort, log on failure). 404 if missing.
-- [ ] `POST /api/admin/jobs/bulk-delete` — body: `{job_ids: list[str]}` (max 100). Returns `{deleted: int, failed: list[str]}`.
-- [ ] `GET /api/admin/queue` — returns `ConsumerManager.snapshot()` + scheduler `get_jobs_state()` + `count_by_status_global(window_hours=24)` and same for `window_hours=168`.
-- [ ] `POST /api/admin/scheduler/run/{user_id}` — manually fires the LinkedIn search for the named user. Reuses scheduler trigger logic from existing `/api/jobs/linkedin-search` endpoint, but admin can specify any `user_id`.
-- [ ] `GET /api/admin/errors` — paged list of jobs where `error_message` or `last_scrape_error` is non-null, ordered by `updated_at` desc. Query params: `limit`, `offset`, `since` (datetime).
-- [ ] `GET /api/admin/users` — returns paged user list with derived counts: `{user, job_counts: dict[status, int], last_job_at: datetime | None}`. Uses `count_by_status_global` per-user variant or N+1 (acceptable at expected scale; <500 users).
-- [ ] `PUT /api/admin/users/{user_id}/role` — body `{role: "trial"|"premium"|"admin"}`. Calls `UserRepository.set_role`. 400 on invalid role. **Disallow demoting the last admin**: count admins first; if `current_user_id == user_id and current_role == admin and target_role != admin and admin_count == 1`, raise 409.
-- [ ] All admin endpoints depend on `AdminUser`.
-- [ ] `GET /api/auth/me` response: extend so the frontend receives `role`.
-- [ ] Write endpoint unit tests with `TestClient`: at minimum one success + one 403 (non-admin) for each endpoint, plus the last-admin demotion guard.
-- [ ] Run project test suite: `uv run pytest -q` — must pass before task 4.
+- [x] `GET /api/admin/jobs` — query params: `user_id` (repeatable), `status` (repeatable), `source` (repeatable), `created_from`, `created_to`, `search`, `limit` (default 50, max 200), `offset`. Returns `{items: list[JobRecord], total: int}`. Uses `list_all_jobs` + `count_all_jobs`.
+- [x] `GET /api/admin/jobs/{job_id}` — full job detail (any user). 404 if missing.
+- [x] `POST /api/admin/jobs/{job_id}/retry` — only valid if status in {`failed`}; transitions to `queued`, re-enqueues onto `ctx.job_queue`, returns updated record. 409 if not retriable.
+- [x] `DELETE /api/admin/jobs/{job_id}` — deletes the record and any associated PDF file under `data/generated_cvs/{user_id}/{job_id}.pdf` (best-effort, log on failure). 404 if missing.
+- [x] `POST /api/admin/jobs/bulk-delete` — body: `{job_ids: list[str]}` (max 100). Returns `{deleted: int, failed: list[str]}`.
+- [x] `GET /api/admin/queue` — returns `ConsumerManager.snapshot()` + scheduler `get_jobs_state()` + `count_by_status_global(window_hours=24)` and same for `window_hours=168`.
+- [x] `POST /api/admin/scheduler/run/{user_id}` — manually fires the LinkedIn search for the named user. Reuses scheduler trigger logic from existing `/api/jobs/linkedin-search` endpoint, but admin can specify any `user_id`.
+- [x] `GET /api/admin/errors` — paged list of jobs where `error_message` or `last_scrape_error` is non-null, ordered by `updated_at` desc. Query params: `limit`, `offset`, `since` (datetime).
+- [x] `GET /api/admin/users` — returns paged user list with derived counts: `{user, job_counts: dict[status, int], last_job_at: datetime | None}`. Uses `count_by_status_global` per-user variant or N+1 (acceptable at expected scale; <500 users).
+- [x] `PUT /api/admin/users/{user_id}/role` — body `{role: "trial"|"premium"|"admin"}`. Calls `UserRepository.set_role`. 400 on invalid role. **Disallow demoting the last admin**: count admins first; if `current_user_id == user_id and current_role == admin and target_role != admin and admin_count == 1`, raise 409.
+- [x] All admin endpoints depend on `AdminUser`.
+- [x] `GET /api/auth/me` response: extend so the frontend receives `role`.
+- [x] Write endpoint unit tests with `TestClient`: at minimum one success + one 403 (non-admin) for each endpoint, plus the last-admin demotion guard.
+- [x] Run project test suite: `uv run pytest -q` — must pass before task 4.
 
 ### Task 4: Promotion CLI script
 

@@ -115,10 +115,9 @@ class TestInvalidTransitions:
             (BusinessState.QUEUED, BusinessState.APPLIED),
             (BusinessState.QUEUED, BusinessState.APPROVED),
             (BusinessState.PENDING_REVIEW, BusinessState.APPLIED),
-            # Failed can only go to retrying
+            # Failed can only go to retrying or queued (admin retry)
             (BusinessState.FAILED, BusinessState.APPROVED),
             (BusinessState.FAILED, BusinessState.PENDING_REVIEW),
-            (BusinessState.FAILED, BusinessState.QUEUED),
         ],
     )
     def test_invalid_transition_raises(self, current, target):
@@ -160,7 +159,11 @@ class TestTerminalStates:
         assert ALLOWED_TRANSITIONS[BusinessState.APPLIED] == set()
 
     def test_failed_only_allows_retrying(self):
-        assert ALLOWED_TRANSITIONS[BusinessState.FAILED] == {BusinessState.RETRYING}
+        # FAILED can transition to RETRYING (HITL retry) or QUEUED (admin retry).
+        assert ALLOWED_TRANSITIONS[BusinessState.FAILED] == {
+            BusinessState.RETRYING,
+            BusinessState.QUEUED,
+        }
 
     def test_all_states_have_transition_entry(self):
         """Every BusinessState must have an entry in ALLOWED_TRANSITIONS."""

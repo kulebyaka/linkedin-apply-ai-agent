@@ -325,3 +325,25 @@ class LinkedInSearchScheduler:
     def get_last_run_for_user(self, user_id: str) -> UserLastRun | None:
         """Return the most recent run outcome for a specific user, if any."""
         return self._last_run_per_user.get(user_id)
+
+    def get_jobs_state(self) -> list[dict]:
+        """Return per-user scheduler state for the admin dashboard.
+
+        For each user with a recorded run, returns the user_id, last run time,
+        the global next scheduled run, and the last status reason.
+        """
+        next_run = self.next_run_time
+        out: list[dict] = []
+        for user_id, run in self._last_run_per_user.items():
+            out.append(
+                {
+                    "user_id": user_id,
+                    "last_run_at": run.time.isoformat() if run.time else None,
+                    "next_run_at": next_run.isoformat() if next_run else None,
+                    "last_status": run.reason,
+                    "jobs_found": run.jobs_found,
+                    "message": run.message,
+                    "search_url": run.search_url,
+                }
+            )
+        return out

@@ -389,6 +389,24 @@ class ConsumerManager:
             "consumer_running": self._task is not None and not self._task.done(),
         }
 
+    def snapshot(self) -> dict:
+        """Return a queue + consumer state snapshot for admin dashboards.
+
+        Reads queue depth from the JobQueue stored in the AppContext at
+        start() time. queue_depth is 0 when the manager hasn't been started.
+        """
+        is_running = self._task is not None and not self._task.done()
+        queue_depth = 0
+        if self._ctx is not None and self._ctx.job_queue is not None:
+            queue_depth = self._ctx.job_queue.size()
+        return {
+            "is_running": is_running,
+            "task_count": 1 if is_running else 0,
+            "queue_depth": queue_depth,
+            "is_healthy": self.is_healthy,
+            "restart_count": self.restart_count,
+        }
+
     @property
     def task(self) -> asyncio.Task | None:
         return self._task

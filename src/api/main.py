@@ -8,10 +8,12 @@ import logging
 import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
 from fastapi import (
+    Body,
     Cookie,
     Depends,
     FastAPI,
@@ -1246,6 +1248,321 @@ async def delete_job(
     except Exception as e:
         logger.error(f"Failed to delete job {job_id}: {e}", exc_info=True)
         raise HTTPException(500, "Failed to delete job") from None
+
+
+# =============================================================================
+# Admin Endpoints (admin role required)
+# =============================================================================
+
+
+def _serialize_user_summary(u: User) -> dict:
+    """Compact user dict for admin endpoints."""
+    return {
+        "id": u.id,
+        "email": u.email,
+        "display_name": u.display_name,
+        "role": u.role.value if hasattr(u.role, "value") else str(u.role),
+        "created_at": u.created_at.isoformat() if u.created_at else None,
+        "updated_at": u.updated_at.isoformat() if u.updated_at else None,
+    }
+
+
+@app.get("/api/admin/jobs")
+async def admin_list_jobs(
+    request: Request,
+    admin: AdminUser,
+    user_id: Annotated[list[str] | None, Query()] = None,
+    status: Annotated[list[str] | None, Query()] = None,
+    source: Annotated[list[str] | None, Query()] = None,
+    created_from: Annotated[datetime | None, Query()] = None,
+    created_to: Annotated[datetime | None, Query()] = None,
+    search: Annotated[str | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> dict:
+    """List jobs across all users with optional filters."""
+    ctx = _get_ctx(request)
+    items = await ctx.repository.list_all_jobs(
+        user_ids=user_id,
+        statuses=status,
+        sources=source,
+        created_from=created_from,
+        created_to=created_to,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
+    total = await ctx.repository.count_all_jobs(
+        user_ids=user_id,
+        statuses=status,
+        sources=source,
+        created_from=created_from,
+        created_to=created_to,
+        search=search,
+    )
+    return {
+        "items": [item.model_dump(mode="json") for item in items],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@app.get("/api/admin/jobs/{job_id}")
+async def admin_get_job(
+    job_id: str, request: Request, admin: AdminUser
+) -> dict:
+    """Return full job detail for any user. 404 if missing."""
+    ctx = _get_ctx(request)
+    job = await ctx.repository.get(job_id)
+    if job is None:
+        raise HTTPException(404, f"Job {job_id} not found")
+    return job.model_dump(mode="json")
+
+
+@app.post("/api/admin/jobs/{job_id}/retry")
+async def admin_retry_job(
+    job_id: str, request: Request, admin: AdminUser
+) -> dict:
+    """Retry a failed job: transitions to queued and re-enqueues."""
+    ctx = _get_ctx(request)
+    job = await ctx.repository.get(job_id)
+    if job is None:
+        raise HTTPException(404, f"Job {job_id} not found")
+
+    if str(job.status) != BusinessState.FAILED.value:
+        raise HTTPException(
+            409,
+            f"Job not retriable in status '{job.status}' (must be 'failed')",
+        )
+
+    await ctx.repository.update(
+        job_id,
+        {"status": BusinessState.QUEUED, "error_message": None},
+    )
+
+    # Re-enqueue if it was a LinkedIn-sourced job with raw_input data.
+    if job.source == "linkedin" and ctx.job_queue is not None and job.raw_input:
+        try:
+            from src.models.job import ScrapedJob
+
+            scraped = ScrapedJob(**job.raw_input)
+            await ctx.job_queue.put(scraped, user_id=job.user_id or None)
+        except Exception:
+            logger.warning(
+                "Failed to re-enqueue LinkedIn job %s onto queue", job_id, exc_info=True,
+            )
+
+    updated = await ctx.repository.get(job_id)
+    return updated.model_dump(mode="json")
+
+
+def _try_unlink_job_pdf(user_id: str, job_id: str) -> None:
+    """Best-effort removal of the per-user PDF for an admin-deleted job."""
+    if not user_id:
+        return
+    try:
+        pdf_path = Path(settings.generated_cvs_dir) / user_id / f"{job_id}.pdf"
+        pdf_path.unlink(missing_ok=True)
+    except OSError as exc:
+        logger.warning("Failed to unlink PDF for job %s: %s", job_id, exc)
+
+
+@app.delete("/api/admin/jobs/{job_id}")
+async def admin_delete_job(
+    job_id: str, request: Request, admin: AdminUser
+) -> dict:
+    """Delete any job and best-effort unlink its PDF."""
+    ctx = _get_ctx(request)
+    job = await ctx.repository.get(job_id)
+    if job is None:
+        raise HTTPException(404, f"Job {job_id} not found")
+
+    deleted = await ctx.repository.delete(job_id)
+    if not deleted:
+        raise HTTPException(404, f"Job {job_id} not found")
+
+    _try_unlink_job_pdf(job.user_id, job_id)
+    return {"deleted": True, "job_id": job_id}
+
+
+@app.post("/api/admin/jobs/bulk-delete")
+async def admin_bulk_delete_jobs(
+    request: Request,
+    admin: AdminUser,
+    body: Annotated[dict, Body(...)],
+) -> dict:
+    """Bulk-delete up to 100 jobs by ID. Returns counts + failures."""
+    job_ids = body.get("job_ids")
+    if not isinstance(job_ids, list) or not job_ids:
+        raise HTTPException(400, "job_ids must be a non-empty list")
+    if len(job_ids) > 100:
+        raise HTTPException(400, "Cannot delete more than 100 jobs at once")
+
+    ctx = _get_ctx(request)
+    deleted = 0
+    failed: list[str] = []
+    for jid in job_ids:
+        try:
+            job = await ctx.repository.get(jid)
+            if job is None:
+                failed.append(jid)
+                continue
+            ok = await ctx.repository.delete(jid)
+            if ok:
+                deleted += 1
+                _try_unlink_job_pdf(job.user_id, jid)
+            else:
+                failed.append(jid)
+        except Exception:
+            logger.warning("Failed to delete job %s in bulk-delete", jid, exc_info=True)
+            failed.append(jid)
+    return {"deleted": deleted, "failed": failed}
+
+
+@app.get("/api/admin/queue")
+async def admin_get_queue(request: Request, admin: AdminUser) -> dict:
+    """Return queue, consumer, and scheduler state for the admin dashboard."""
+    ctx = _get_ctx(request)
+    consumer_manager = getattr(request.app.state, "consumer_manager", _consumer_manager)
+
+    snapshot = consumer_manager.snapshot()
+    scheduler_state: list[dict] = []
+    if ctx.scheduler is not None:
+        try:
+            scheduler_state = ctx.scheduler.get_jobs_state()
+        except Exception:
+            logger.warning("Failed to read scheduler state", exc_info=True)
+
+    counts_24h = await ctx.repository.count_by_status_global(window_hours=24)
+    counts_7d = await ctx.repository.count_by_status_global(window_hours=168)
+    counts_all = await ctx.repository.count_by_status_global()
+    return {
+        "consumer": snapshot,
+        "scheduler": scheduler_state,
+        "counts": {
+            "last_24h": counts_24h,
+            "last_7d": counts_7d,
+            "all_time": counts_all,
+        },
+    }
+
+
+@app.post("/api/admin/scheduler/run/{user_id}")
+async def admin_run_scheduler(
+    user_id: str, request: Request, admin: AdminUser
+) -> dict:
+    """Manually fire a LinkedIn search for the given user."""
+    ctx = _get_ctx(request)
+    if ctx.scheduler is None:
+        raise HTTPException(503, "Scheduler not initialized")
+
+    async def _run() -> None:
+        try:
+            count = await ctx.scheduler.run_search(user_id=user_id)
+            logger.info(
+                "Admin-triggered LinkedIn search for user=%s: %d jobs", user_id, count
+            )
+        except Exception:
+            logger.exception(
+                "Admin-triggered LinkedIn search failed for user=%s", user_id
+            )
+
+    ctx.create_background_task(_run())
+    return {"status": "started", "user_id": user_id}
+
+
+@app.get("/api/admin/errors")
+async def admin_list_errors(
+    request: Request,
+    admin: AdminUser,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    since: Annotated[datetime | None, Query()] = None,
+) -> dict:
+    """List jobs with non-null error_message or last_scrape_error."""
+    ctx = _get_ctx(request)
+    items = await ctx.repository.list_jobs_with_errors(limit=limit, offset=offset)
+    if since is not None:
+        items = [j for j in items if j.updated_at and j.updated_at >= since]
+    return {
+        "items": [item.model_dump(mode="json") for item in items],
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@app.get("/api/admin/users")
+async def admin_list_users(
+    request: Request,
+    admin: AdminUser,
+    limit: Annotated[int, Query(ge=1, le=500)] = 200,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> dict:
+    """List users with per-user job counts and last_job_at."""
+    ctx = _get_ctx(request)
+    if ctx.user_repository is None:
+        raise HTTPException(500, "User repository not initialized")
+
+    users = await ctx.user_repository.list_all_users(limit=limit, offset=offset)
+    out: list[dict] = []
+    for u in users:
+        all_jobs = await ctx.repository.list_all_jobs(
+            user_ids=[u.id], limit=1, offset=0
+        )
+        last_job_at = all_jobs[0].created_at if all_jobs else None
+        # Per-user status counts via count_all_jobs over each status.
+        # Cheaper: count via repository's user-scoped status counts.
+        try:
+            job_counts = await ctx.repository.get_status_counts(u.id)
+        except Exception:
+            job_counts = {}
+        out.append(
+            {
+                "user": _serialize_user_summary(u),
+                "job_counts": job_counts,
+                "last_job_at": last_job_at.isoformat() if last_job_at else None,
+            }
+        )
+    return {"items": out, "limit": limit, "offset": offset}
+
+
+@app.put("/api/admin/users/{user_id}/role")
+async def admin_set_user_role(
+    user_id: str,
+    request: Request,
+    admin: AdminUser,
+    body: Annotated[dict, Body(...)],
+) -> dict:
+    """Change a user's role. Refuses to demote the last remaining admin."""
+    role_raw = body.get("role")
+    try:
+        target_role = UserRole(role_raw)
+    except (ValueError, TypeError):
+        raise HTTPException(400, f"Invalid role: {role_raw!r}") from None
+
+    ctx = _get_ctx(request)
+    if ctx.user_repository is None:
+        raise HTTPException(500, "User repository not initialized")
+
+    target = await ctx.user_repository.get_by_id(user_id)
+    if target is None:
+        raise HTTPException(404, f"User {user_id} not found")
+
+    if (
+        admin.id == user_id
+        and admin.role == UserRole.ADMIN
+        and target_role != UserRole.ADMIN
+    ):
+        all_users = await ctx.user_repository.list_all_users(limit=1000, offset=0)
+        admin_count = sum(1 for u in all_users if u.role == UserRole.ADMIN)
+        if admin_count <= 1:
+            raise HTTPException(
+                409, "Cannot demote the last remaining admin",
+            )
+
+    updated = await ctx.user_repository.set_role(user_id, target_role)
+    return _serialize_user_summary(updated)
 
 
 # =============================================================================
