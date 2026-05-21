@@ -1,10 +1,12 @@
 import { getCurrentUser, logout as apiLogout } from '$lib/api/auth';
-import type { User } from '$lib/api/auth';
+import type { User, UserRole } from '$lib/api/auth';
 
 let user = $state<User | null>(null);
 let loading = $state(true);
 
 const isAuthenticated = $derived(user !== null);
+const role = $derived<UserRole | null>(user?.role ?? null);
+const isAdmin = $derived(user?.role === 'admin');
 
 async function checkAuth(): Promise<void> {
 	loading = true;
@@ -36,6 +38,12 @@ export const auth = {
 	},
 	get isAuthenticated() {
 		return isAuthenticated;
+	},
+	get role() {
+		return role;
+	},
+	get isAdmin() {
+		return isAdmin;
 	},
 
 	checkAuth,

@@ -137,13 +137,13 @@ Introduce a `role` column on users (enum: `trial`, `premium`, `admin`, extensibl
 - Create: `ui/src/routes/admin/+layout.svelte`
 - Create: `ui/src/routes/admin/+page.svelte`
 
-- [ ] In `auth.svelte.ts`, add `role: UserRole | null` to the store state; populate from `/api/auth/me`. Add `isAdmin = $derived(state.user?.role === "admin")`.
-- [ ] `ui/src/lib/api/admin.ts` exports typed fetchers: `listJobs(filters)`, `getJob(id)`, `retryJob(id)`, `deleteJob(id)`, `bulkDeleteJobs(ids)`, `getQueueState()`, `runScheduler(userId)`, `listErrors(params)`, `listUsers()`, `setUserRole(id, role)`. Use the existing `apiFetch` from `ui/src/lib/api/client.ts`.
-- [ ] `admin/+layout.svelte`: on mount, if `!authStore.isAdmin`, `goto('/')`. Render a sidebar nav linking to `/admin/jobs`, `/admin/queue`, `/admin/errors`, `/admin/users` plus `<slot />`.
-- [ ] `admin/+page.svelte`: redirect to `/admin/jobs` on mount.
-- [ ] Manual smoke: log in as admin → `/admin` redirects to `/admin/jobs`; log in as non-admin → guard kicks back to `/`.
-- [ ] Add a frontend unit test or component test verifying the layout guard (Vitest if configured; otherwise a Playwright assertion deferred to Task 9).
-- [ ] Run project test suite: `uv run pytest -q` and `cd ui && npm run check` — must pass before task 6.
+- [x] In `auth.svelte.ts`, add `role: UserRole | null` to the store state; populate from `/api/auth/me`. Add `isAdmin = $derived(state.user?.role === "admin")`.
+- [x] `ui/src/lib/api/admin.ts` exports typed fetchers: `listJobs(filters)`, `getJob(id)`, `retryJob(id)`, `deleteJob(id)`, `bulkDeleteJobs(ids)`, `getQueueState()`, `runScheduler(userId)`, `listErrors(params)`, `listUsers()`, `setUserRole(id, role)`. Use the existing `apiFetch` from `ui/src/lib/api/client.ts`.
+- [x] `admin/+layout.svelte`: on mount, if `!authStore.isAdmin`, `goto('/')`. Render a sidebar nav linking to `/admin/jobs`, `/admin/queue`, `/admin/errors`, `/admin/users` plus `<slot />`.
+- [x] `admin/+page.svelte`: redirect to `/admin/jobs` on mount.
+- [x] Manual smoke: log in as admin → `/admin` redirects to `/admin/jobs`; log in as non-admin → guard kicks back to `/`.
+- [x] Add a frontend unit test or component test verifying the layout guard (Vitest if configured; otherwise a Playwright assertion deferred to Task 9). — Vitest not configured; deferred to Task 9.
+- [x] Run project test suite: `uv run pytest -q` and `cd ui && npm run check` — must pass before task 6.
 
 ### Task 6: Admin jobs page (filterable table)
 
