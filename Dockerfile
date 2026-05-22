@@ -23,6 +23,10 @@ COPY pyproject.toml uv.lock ./
 # Install Python dependencies with uv (much faster than pip!)
 RUN uv sync --frozen --no-dev
 
+# Put the venv first on PATH so `python` resolves to /app/.venv/bin/python
+ENV PATH="/app/.venv/bin:$PATH" \
+    VIRTUAL_ENV="/app/.venv"
+
 # Install Playwright browsers
 RUN uv run playwright install chromium
 RUN uv run playwright install-deps chromium
