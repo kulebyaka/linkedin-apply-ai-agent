@@ -1,8 +1,13 @@
 """User Repository - Data Access Layer for user persistence.
 
-Provides CRUD operations for users and magic link token management
-using Piccolo ORM with SQLite backend.
+CRUD over the user table using Piccolo ORM on a shared SQLite engine.
+
+Magic-link token storage lives in `magic_link_repository.MagicLinkRepository`.
+Business operations that combine multiple queries (e.g. last-admin demotion
+guard) live in `user_service.UserService`.
 """
+
+from __future__ import annotations
 
 import json
 import logging
@@ -15,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class UserRepository:
-    """Repository for user accounts and magic link tokens.
+    """Repository for user accounts.
 
     Uses the same Piccolo engine as the job repository (set during
     SQLiteJobRepository.initialize()). When repo_type=memory, call
@@ -59,12 +64,7 @@ class UserRepository:
     async def create_user(self, email: str, display_name: str = "") -> User:
         """Create a new user account.
 
-        Args:
-            email: User's email address.
-            display_name: Optional display name (defaults to email local part).
-
-        Returns:
-            The created User.
+        Returns the created User.
         """
         import uuid
 
@@ -100,11 +100,6 @@ class UserRepository:
         )
 
     async def get_by_id(self, user_id: str) -> User | None:
-        """Get a user by ID.
-
-        Returns:
-            User if found, None otherwise.
-        """
         from src.services.db.tables import UserTable
 
         row = await UserTable.select().where(UserTable.id == user_id).first().run()
@@ -113,11 +108,6 @@ class UserRepository:
         return self._row_to_user(row)
 
     async def get_by_email(self, email: str) -> User | None:
-        """Get a user by email address.
-
-        Returns:
-            User if found, None otherwise.
-        """
         from src.services.db.tables import UserTable
 
         row = await UserTable.select().where(UserTable.email == email).first().run()
@@ -128,16 +118,10 @@ class UserRepository:
     async def update(self, user_id: str, updates: dict) -> User:
         """Update a user's profile fields.
 
-        Args:
-            user_id: User ID.
-            updates: Dict of fields to update. Supports: display_name,
-                     master_cv_json, search_preferences, filter_preferences.
+        Supports display_name, master_cv_json, search_preferences,
+        filter_preferences, model_preferences.
 
-        Returns:
-            The updated User.
-
-        Raises:
-            KeyError: If user not found.
+        Raises KeyError if the user is missing.
         """
         from src.services.db.tables import UserTable
 
@@ -177,17 +161,10 @@ class UserRepository:
         return await self.get_by_id(user_id)
 
     async def set_role(self, user_id: str, role: UserRole) -> User:
-        """Set a user's role.
+        """Set a user's role unconditionally.
 
-        Args:
-            user_id: User ID.
-            role: New role value.
-
-        Returns:
-            The updated User.
-
-        Raises:
-            KeyError: If user not found.
+        Lacks the last-admin guard — use UserService.set_role() instead from
+        admin-facing endpoints.
         """
         from src.services.db.tables import UserTable
 
@@ -204,56 +181,10 @@ class UserRepository:
 
         return await self.get_by_id(user_id)
 
-    class LastAdminError(Exception):
-        """Raised by set_role_with_admin_guard when demoting the last admin."""
-
-    async def set_role_with_admin_guard(
-        self, user_id: str, role: UserRole
-    ) -> User:
-        """Set role atomically; raise LastAdminError if it would leave zero admins.
-
-        SQLite's single-writer lock makes the transaction multi-worker safe.
-        Raises KeyError if the user is missing.
-        """
-        from src.services.db.tables import UserTable
-
-        async with UserTable._meta.db.transaction():
-            existing = (
-                await UserTable.select().where(UserTable.id == user_id).first().run()
-            )
-            if not existing:
-                raise KeyError(f"User {user_id} not found")
-
-            current_role = (existing.get("role") or UserRole.TRIAL.value)
-            if (
-                current_role == UserRole.ADMIN.value
-                and role != UserRole.ADMIN
-            ):
-                admin_rows = (
-                    await UserTable.select(UserTable.id)
-                    .where(UserTable.role == UserRole.ADMIN.value)
-                    .run()
-                )
-                if len(admin_rows) <= 1:
-                    raise UserRepository.LastAdminError(
-                        "Cannot demote the last remaining admin"
-                    )
-
-            await UserTable.update(
-                {
-                    "role": role.value,
-                    "updated_at": datetime.now(tz=timezone.utc),
-                }
-            ).where(UserTable.id == user_id).run()
-
-        return await self.get_by_id(user_id)
-
     async def count_admins(self) -> int:
         """Return the total number of users with role == admin.
 
-        Used by the last-admin demotion guard, which must not depend on a
-        paginated user listing — otherwise a deployment with more users than
-        the page size could undercount and false-409.
+        Used by the last-admin demotion guard in UserService.
         """
         from src.services.db.tables import UserTable
 
@@ -265,15 +196,7 @@ class UserRepository:
         return len(rows)
 
     async def list_all_users(self, limit: int = 200, offset: int = 0) -> list[User]:
-        """List all users ordered by created_at descending.
-
-        Args:
-            limit: Max number of users to return.
-            offset: Number of users to skip.
-
-        Returns:
-            List of Users.
-        """
+        """List all users ordered by created_at descending."""
         from src.services.db.tables import UserTable
 
         rows = (
@@ -296,11 +219,7 @@ class UserRepository:
         return users
 
     async def get_all_with_search_prefs(self) -> list[User]:
-        """Get all users that have non-null search preferences configured.
-
-        Returns:
-            List of Users with search_preferences set.
-        """
+        """All users with non-null search preferences."""
         from src.services.db.tables import UserTable
 
         rows = (
@@ -321,146 +240,10 @@ class UserRepository:
         return users
 
     # =========================================================================
-    # Magic Link Methods
-    # =========================================================================
-
-    async def create_magic_link(
-        self, email: str, token: str, expires_at: datetime
-    ) -> None:
-        """Store a magic link token for email verification.
-
-        Args:
-            email: Email address the link was sent to.
-            token: The magic link token.
-            expires_at: When the token expires.
-        """
-        from src.services.db.tables import MagicLinkTable
-
-        await MagicLinkTable.insert(
-            MagicLinkTable(
-                token=token,
-                email=email,
-                expires_at=expires_at,
-                used=False,
-            )
-        ).run()
-
-    async def peek_magic_link(self, token: str) -> str | None:
-        """Check that a magic link token is valid without consuming it.
-
-        Returns the email if the token exists, is unused, and has not
-        expired. Does NOT mark the token as used — call claim_magic_link()
-        after downstream steps succeed.
-
-        Args:
-            token: The magic link token to check.
-
-        Returns:
-            The email address if the token is currently valid, None otherwise.
-        """
-        from src.services.db.tables import MagicLinkTable
-
-        row = (
-            await MagicLinkTable.select()
-            .where(MagicLinkTable.token == token)
-            .first()
-            .run()
-        )
-
-        if not row or row["used"]:
-            return None
-
-        expires_at = row["expires_at"]
-        if isinstance(expires_at, str):
-            expires_at = datetime.fromisoformat(expires_at)
-        if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=timezone.utc)
-
-        if expires_at < datetime.now(tz=timezone.utc):
-            return None
-
-        return row["email"]
-
-    async def verify_magic_link(self, token: str) -> str | None:
-        """Validate and consume a magic link token in a single step.
-
-        Equivalent to peek_magic_link() followed by claim_magic_link().
-        Kept for callers that have no downstream steps that could fail
-        between the two. Returns the email if the claim succeeded, None
-        otherwise.
-        """
-        email = await self.peek_magic_link(token)
-        if email is None:
-            return None
-        if not await self.claim_magic_link(token):
-            return None
-        return email
-
-    async def claim_magic_link(self, token: str) -> bool:
-        """Atomically mark a magic link token as used.
-
-        Uses an UPDATE with the full validity predicate so the claim only
-        succeeds if the token is still unused AND unexpired. This prevents
-        TOCTOU races where two concurrent verifications both pass
-        peek_magic_link() — only one UPDATE can match WHERE used=0.
-
-        Args:
-            token: The token to claim.
-
-        Returns:
-            True if the caller won the claim, False if it was already
-            consumed or has expired.
-        """
-        from src.services.db.tables import MagicLinkTable
-
-        engine = MagicLinkTable._meta._db
-        conn = await engine.get_connection()
-        try:
-            cursor = await conn.execute(
-                "UPDATE magic_link SET used = 1 "
-                "WHERE token = ? AND used = 0 AND expires_at > datetime('now')",
-                (token,),
-            )
-            if cursor.rowcount == 0:
-                return False
-            await conn.commit()
-        finally:
-            await conn.close()
-        return True
-
-    async def cleanup_expired_magic_links(self) -> int:
-        """Delete expired magic link tokens.
-
-        Returns:
-            Number of tokens deleted.
-        """
-        from src.services.db.tables import MagicLinkTable
-
-        now = datetime.now(tz=timezone.utc)
-
-        # Count expired
-        expired = (
-            await MagicLinkTable.select(MagicLinkTable.token)
-            .where(MagicLinkTable.expires_at < now)
-            .run()
-        )
-        count = len(expired)
-
-        if count > 0:
-            await (
-                MagicLinkTable.delete()
-                .where(MagicLinkTable.expires_at < now)
-                .run()
-            )
-
-        return count
-
-    # =========================================================================
     # Helpers
     # =========================================================================
 
     def _parse_json_field(self, value) -> dict | None:
-        """Parse a JSON field that may be string or dict."""
         if value is None:
             return None
         if isinstance(value, dict):
@@ -470,7 +253,6 @@ class UserRepository:
         return value
 
     def _row_to_user(self, row: dict) -> User:
-        """Convert a database row to a User model."""
         search_prefs_raw = self._parse_json_field(row.get("search_preferences"))
         search_prefs = (
             UserSearchPreferences(**search_prefs_raw)

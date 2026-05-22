@@ -17,7 +17,9 @@ if TYPE_CHECKING:
     from src.agents.dispatcher import WorkflowDispatcher
     from src.services.alerts import AdminAlertService
     from src.services.auth.auth import AuthService
+    from src.services.auth.magic_link_repository import MagicLinkRepository
     from src.services.auth.user_repository import UserRepository
+    from src.services.auth.user_service import UserService
     from src.services.cv.pdf_extraction import CVExtractionRegistry
     from src.services.db.job_repository import JobRepository
     from src.services.jobs.hitl_processor import HITLProcessor
@@ -44,6 +46,8 @@ class AppContext:
     prep_workflow: CompiledStateGraph
     retry_workflow: CompiledStateGraph
     user_repository: UserRepository | None = None
+    magic_link_repository: MagicLinkRepository | None = None
+    user_service: UserService | None = None
     auth_service: AuthService | None = None
     admin_alert_service: AdminAlertService | None = None
     job_queue: JobQueue | None = None
@@ -122,7 +126,9 @@ def create_app_context(
     from src.agents.retry_workflow import create_retry_workflow
     from src.services.alerts import AdminAlertService
     from src.services.auth.auth import AuthService
+    from src.services.auth.magic_link_repository import MagicLinkRepository
     from src.services.auth.user_repository import UserRepository
+    from src.services.auth.user_service import UserService
     from src.services.cv.pdf_extraction import CVExtractionRegistry
     from src.services.db.job_repository import get_repository
     from src.services.jobs.hitl_processor import HITLProcessor
@@ -142,7 +148,9 @@ def create_app_context(
     job_queue = JobQueue()
 
     user_repository = UserRepository()
-    auth_service = AuthService(settings, user_repository)
+    magic_link_repository = MagicLinkRepository()
+    user_service = UserService(user_repository)
+    auth_service = AuthService(settings, user_repository, magic_link_repository)
     admin_alert_service = AdminAlertService(settings)
 
     ctx = AppContext(
@@ -151,6 +159,8 @@ def create_app_context(
         prep_workflow=prep_workflow,
         retry_workflow=retry_workflow,
         user_repository=user_repository,
+        magic_link_repository=magic_link_repository,
+        user_service=user_service,
         auth_service=auth_service,
         admin_alert_service=admin_alert_service,
         job_queue=job_queue,

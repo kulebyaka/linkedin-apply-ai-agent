@@ -13,7 +13,7 @@ from src.api.deps import AdminUser, get_ctx, normalize_query_datetime
 from src.context import AppContext
 from src.models.state_machine import BusinessState
 from src.models.user import User, UserRole
-from src.services.auth.user_repository import UserRepository
+from src.services.auth.user_service import LastAdminError
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -374,16 +374,14 @@ async def admin_set_user_role(
         raise HTTPException(400, f"Invalid role: {role_raw!r}") from None
 
     ctx = get_ctx(request)
-    if ctx.user_repository is None:
-        raise HTTPException(500, "User repository not initialized")
+    if ctx.user_service is None:
+        raise HTTPException(500, "User service not initialized")
 
     async with ctx.admin_role_lock:
         try:
-            updated = await ctx.user_repository.set_role_with_admin_guard(
-                user_id, target_role
-            )
+            updated = await ctx.user_service.set_role(user_id, target_role)
         except KeyError:
             raise HTTPException(404, f"User {user_id} not found") from None
-        except UserRepository.LastAdminError as exc:
+        except LastAdminError as exc:
             raise HTTPException(409, str(exc)) from None
     return _serialize_user_summary(updated)

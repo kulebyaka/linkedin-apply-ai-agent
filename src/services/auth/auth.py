@@ -15,6 +15,7 @@ import jwt
 from src.config.settings import Settings
 from src.models.user import User
 
+from .magic_link_repository import MagicLinkRepository
 from .user_repository import UserRepository
 
 logger = logging.getLogger(__name__)
@@ -31,9 +32,15 @@ class AuthService:
 
     _MIN_SECRET_LENGTH = 32
 
-    def __init__(self, settings: Settings, user_repository: UserRepository) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        user_repository: UserRepository,
+        magic_link_repository: MagicLinkRepository,
+    ) -> None:
         self._settings = settings
         self._user_repo = user_repository
+        self._magic_link_repo = magic_link_repository
         secret = settings.jwt_secret
         if not secret:
             raise RuntimeError(
@@ -69,7 +76,7 @@ class AuthService:
         )
 
         # Store token in database
-        await self._user_repo.create_magic_link(email, token, expires_at)
+        await self._magic_link_repo.create_magic_link(email, token, expires_at)
 
         # Build magic link URL
         verify_url = f"{self._settings.app_url}/auth/verify?token={token}"
@@ -120,7 +127,7 @@ class AuthService:
         # Peek first — validate the token without consuming it so that
         # downstream failures (e.g. database errors during user lookup) do
         # not burn the user's only magic link.
-        email = await self._user_repo.peek_magic_link(token)
+        email = await self._magic_link_repo.peek_magic_link(token)
         if email is None:
             raise ValueError("Invalid or expired magic link token")
 
@@ -143,7 +150,7 @@ class AuthService:
         # Atomically claim the token only after the user lookup succeeded.
         # If a concurrent request already consumed it, surface the same
         # error as an invalid token.
-        claimed = await self._user_repo.claim_magic_link(token)
+        claimed = await self._magic_link_repo.claim_magic_link(token)
         if not claimed:
             raise ValueError("Invalid or expired magic link token")
 

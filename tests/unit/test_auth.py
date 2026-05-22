@@ -12,6 +12,7 @@ import pytest
 from src.config.settings import Settings
 from src.models.user import User
 from src.services.auth.auth import AuthService
+from src.services.auth.magic_link_repository import MagicLinkRepository
 from src.services.auth.user_repository import UserRepository
 
 
@@ -36,8 +37,14 @@ def user_repo():
 
 
 @pytest.fixture
-def auth_service(settings, user_repo):
-    return AuthService(settings, user_repo)
+def magic_link_repo():
+    """Mock MagicLinkRepository for unit tests."""
+    return AsyncMock(spec=MagicLinkRepository)
+
+
+@pytest.fixture
+def auth_service(settings, user_repo, magic_link_repo):
+    return AuthService(settings, user_repo, magic_link_repo)
 
 
 # =============================================================================
@@ -111,23 +118,23 @@ class TestJWT:
 
 class TestMagicLink:
     @pytest.mark.asyncio
-    async def test_send_magic_link_stores_token(self, auth_service, user_repo):
+    async def test_send_magic_link_stores_token(self, auth_service, magic_link_repo):
         """send_magic_link should create a token in the repository."""
         await auth_service.send_magic_link("user@example.com")
 
-        user_repo.create_magic_link.assert_called_once()
-        call_args = user_repo.create_magic_link.call_args
+        magic_link_repo.create_magic_link.assert_called_once()
+        call_args = magic_link_repo.create_magic_link.call_args
         assert call_args[0][0] == "user@example.com"  # email
         assert isinstance(call_args[0][1], str)  # token
         assert len(call_args[0][1]) > 20  # reasonable token length
         assert isinstance(call_args[0][2], datetime)  # expires_at
 
     @pytest.mark.asyncio
-    async def test_send_magic_link_no_resend_key_logs_token(self, auth_service, user_repo):
+    async def test_send_magic_link_no_resend_key_logs_token(self, auth_service, magic_link_repo):
         """Without RESEND_API_KEY, token should still be stored but no email sent."""
         # resend_api_key is "" in test settings, so it should just log
         await auth_service.send_magic_link("nokey@example.com")
-        user_repo.create_magic_link.assert_called_once()
+        magic_link_repo.create_magic_link.assert_called_once()
 
 
 # =============================================================================
@@ -137,13 +144,13 @@ class TestMagicLink:
 
 class TestVerifyToken:
     @pytest.mark.asyncio
-    async def test_verify_token_existing_user(self, auth_service, user_repo):
+    async def test_verify_token_existing_user(self, auth_service, user_repo, magic_link_repo):
         """verify_token should return existing user without creating new one."""
         existing_user = User(
             id="existing-id", email="existing@example.com", display_name="Existing"
         )
-        user_repo.peek_magic_link.return_value = "existing@example.com"
-        user_repo.claim_magic_link.return_value = True
+        magic_link_repo.peek_magic_link.return_value = "existing@example.com"
+        magic_link_repo.claim_magic_link.return_value = True
         user_repo.get_by_email.return_value = existing_user
 
         result = await auth_service.verify_token("valid-token")
@@ -153,13 +160,13 @@ class TestVerifyToken:
         user_repo.create_user.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_verify_token_auto_creates_user(self, auth_service, user_repo):
+    async def test_verify_token_auto_creates_user(self, auth_service, user_repo, magic_link_repo):
         """verify_token should auto-create user on first login."""
         new_user = User(
             id="new-id", email="new@example.com", display_name="new"
         )
-        user_repo.peek_magic_link.return_value = "new@example.com"
-        user_repo.claim_magic_link.return_value = True
+        magic_link_repo.peek_magic_link.return_value = "new@example.com"
+        magic_link_repo.claim_magic_link.return_value = True
         user_repo.get_by_email.return_value = None  # No existing user
         user_repo.create_user.return_value = new_user
 
@@ -169,43 +176,43 @@ class TestVerifyToken:
         user_repo.create_user.assert_called_once_with("new@example.com")
 
     @pytest.mark.asyncio
-    async def test_verify_token_invalid_raises(self, auth_service, user_repo):
+    async def test_verify_token_invalid_raises(self, auth_service, magic_link_repo):
         """verify_token should raise ValueError for invalid tokens."""
-        user_repo.peek_magic_link.return_value = None
+        magic_link_repo.peek_magic_link.return_value = None
 
         with pytest.raises(ValueError, match="Invalid or expired"):
             await auth_service.verify_token("bad-token")
 
     @pytest.mark.asyncio
-    async def test_verify_token_expired_raises(self, auth_service, user_repo):
+    async def test_verify_token_expired_raises(self, auth_service, magic_link_repo):
         """verify_token should raise ValueError for expired tokens."""
-        user_repo.peek_magic_link.return_value = None  # Expired = not found
+        magic_link_repo.peek_magic_link.return_value = None  # Expired = not found
 
         with pytest.raises(ValueError, match="Invalid or expired"):
             await auth_service.verify_token("expired-token")
 
     @pytest.mark.asyncio
     async def test_verify_token_does_not_consume_on_user_lookup_failure(
-        self, auth_service, user_repo
+        self, auth_service, user_repo, magic_link_repo
     ):
         """Token must not be claimed if user lookup/creation fails."""
-        user_repo.peek_magic_link.return_value = "lookup-fail@example.com"
+        magic_link_repo.peek_magic_link.return_value = "lookup-fail@example.com"
         user_repo.get_by_email.side_effect = RuntimeError("db down")
 
         with pytest.raises(RuntimeError, match="db down"):
             await auth_service.verify_token("good-token")
 
-        user_repo.claim_magic_link.assert_not_called()
+        magic_link_repo.claim_magic_link.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_verify_token_raises_when_claim_lost(self, auth_service, user_repo):
+    async def test_verify_token_raises_when_claim_lost(self, auth_service, user_repo, magic_link_repo):
         """If a concurrent request claimed the token first, surface invalid."""
         existing_user = User(
             id="existing-id", email="existing@example.com", display_name="Existing"
         )
-        user_repo.peek_magic_link.return_value = "existing@example.com"
+        magic_link_repo.peek_magic_link.return_value = "existing@example.com"
         user_repo.get_by_email.return_value = existing_user
-        user_repo.claim_magic_link.return_value = False
+        magic_link_repo.claim_magic_link.return_value = False
 
         with pytest.raises(ValueError, match="Invalid or expired"):
             await auth_service.verify_token("losing-token")

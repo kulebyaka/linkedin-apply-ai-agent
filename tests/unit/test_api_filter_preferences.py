@@ -58,8 +58,10 @@ def _make_mock_ctx(test_user: User) -> MagicMock:
 
     user_repo = AsyncMock()
     user_repo.initialize = AsyncMock()
-    user_repo.cleanup_expired_magic_links = AsyncMock(return_value=0)
     user_repo.update = AsyncMock(return_value=test_user)
+
+    magic_link_repo = AsyncMock()
+    magic_link_repo.cleanup_expired_magic_links = AsyncMock(return_value=0)
 
     consumer_manager = MagicMock()
     consumer_manager.task = None
@@ -73,6 +75,8 @@ def _make_mock_ctx(test_user: User) -> MagicMock:
     ctx = MagicMock()
     ctx.repository = repo
     ctx.user_repository = user_repo
+    ctx.magic_link_repository = magic_link_repo
+    ctx.user_service = AsyncMock()
     ctx.auth_service = MagicMock()
     ctx.settings = _make_mock_settings()
     ctx.job_queue = MagicMock()

@@ -109,9 +109,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     async def _cleanup_magic_links_loop():
         while True:
-            if ctx.user_repository:
+            if ctx.magic_link_repository:
                 try:
-                    deleted = await ctx.user_repository.cleanup_expired_magic_links()
+                    deleted = await ctx.magic_link_repository.cleanup_expired_magic_links()
                     if deleted:
                         logger.info("Cleaned up %d expired magic link tokens", deleted)
                 except Exception:

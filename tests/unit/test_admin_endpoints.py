@@ -89,12 +89,16 @@ def _make_mock_ctx() -> MagicMock:
 
     user_repo = AsyncMock()
     user_repo.initialize = AsyncMock()
-    user_repo.cleanup_expired_magic_links = AsyncMock(return_value=0)
     user_repo.list_all_users = AsyncMock(return_value=[])
     user_repo.count_admins = AsyncMock(return_value=0)
     user_repo.get_by_id = AsyncMock(return_value=None)
     user_repo.set_role = AsyncMock()
-    user_repo.set_role_with_admin_guard = AsyncMock()
+
+    magic_link_repo = AsyncMock()
+    magic_link_repo.cleanup_expired_magic_links = AsyncMock(return_value=0)
+
+    user_service = AsyncMock()
+    user_service.set_role = AsyncMock()
 
     consumer_manager = MagicMock()
     consumer_manager.task = None
@@ -108,6 +112,8 @@ def _make_mock_ctx() -> MagicMock:
     ctx = MagicMock()
     ctx.repository = repo
     ctx.user_repository = user_repo
+    ctx.magic_link_repository = magic_link_repo
+    ctx.user_service = user_service
     ctx.auth_service = MagicMock()
     ctx.settings = _make_mock_settings()
     ctx.job_queue = MagicMock()
@@ -473,14 +479,14 @@ class TestAdminListUsers:
 class TestAdminSetUserRole:
     def test_sets_role(self, admin_user, mock_ctx):
         promoted = _make_user(UserRole.ADMIN, user_id="u1", email="u1@example.com")
-        mock_ctx.user_repository.set_role_with_admin_guard.return_value = promoted
+        mock_ctx.user_service.set_role.return_value = promoted
         with _patched_client(admin_user, mock_ctx) as client:
             resp = client.put(
                 "/api/admin/users/u1/role", json={"role": "admin"}
             )
         assert resp.status_code == 200
         assert resp.json()["role"] == "admin"
-        mock_ctx.user_repository.set_role_with_admin_guard.assert_called_once_with(
+        mock_ctx.user_service.set_role.assert_called_once_with(
             "u1", UserRole.ADMIN
         )
 
@@ -492,10 +498,7 @@ class TestAdminSetUserRole:
         assert resp.status_code == 400
 
     def test_404_when_user_missing(self, admin_user, mock_ctx):
-        from src.services.auth.user_repository import UserRepository
-        mock_ctx.user_repository.set_role_with_admin_guard.side_effect = KeyError(
-            "missing"
-        )
+        mock_ctx.user_service.set_role.side_effect = KeyError("missing")
         with _patched_client(admin_user, mock_ctx) as client:
             resp = client.put(
                 "/api/admin/users/missing/role", json={"role": "premium"}
@@ -503,11 +506,11 @@ class TestAdminSetUserRole:
         assert resp.status_code == 404
 
     def test_409_last_admin_demotion_blocked(self, admin_user, mock_ctx):
-        from src.services.auth.user_repository import UserRepository
+        from src.services.auth.user_service import LastAdminError
         # The DB-side guard raises LastAdminError when the demotion would
         # leave zero admins.
-        mock_ctx.user_repository.set_role_with_admin_guard.side_effect = (
-            UserRepository.LastAdminError("Cannot demote the last remaining admin")
+        mock_ctx.user_service.set_role.side_effect = LastAdminError(
+            "Cannot demote the last remaining admin"
         )
         with _patched_client(admin_user, mock_ctx) as client:
             resp = client.put(
@@ -517,9 +520,9 @@ class TestAdminSetUserRole:
         assert resp.status_code == 409
 
     def test_409_blocks_demoting_other_last_admin(self, admin_user, mock_ctx):
-        from src.services.auth.user_repository import UserRepository
-        mock_ctx.user_repository.set_role_with_admin_guard.side_effect = (
-            UserRepository.LastAdminError("Cannot demote the last remaining admin")
+        from src.services.auth.user_service import LastAdminError
+        mock_ctx.user_service.set_role.side_effect = LastAdminError(
+            "Cannot demote the last remaining admin"
         )
         with _patched_client(admin_user, mock_ctx) as client:
             resp = client.put(
@@ -532,14 +535,14 @@ class TestAdminSetUserRole:
         demoted = _make_user(
             UserRole.TRIAL, user_id=admin_user.id, email=admin_user.email
         )
-        mock_ctx.user_repository.set_role_with_admin_guard.return_value = demoted
+        mock_ctx.user_service.set_role.return_value = demoted
         with _patched_client(admin_user, mock_ctx) as client:
             resp = client.put(
                 f"/api/admin/users/{admin_user.id}/role",
                 json={"role": "trial"},
             )
         assert resp.status_code == 200
-        mock_ctx.user_repository.set_role_with_admin_guard.assert_called_once()
+        mock_ctx.user_service.set_role.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
