@@ -61,6 +61,15 @@ def _make_mock_ctx(test_user: User) -> MagicMock:
     user_repo.cleanup_expired_magic_links = AsyncMock(return_value=0)
     user_repo.update = AsyncMock(return_value=test_user)
 
+    consumer_manager = MagicMock()
+    consumer_manager.task = None
+    consumer_manager.start = MagicMock()
+    consumer_manager.stop = MagicMock()
+    consumer_manager.wait_stopped = AsyncMock()
+    consumer_manager.reset = MagicMock()
+    consumer_manager.health_check = MagicMock(return_value={})
+    consumer_manager.snapshot = MagicMock(return_value={})
+
     ctx = MagicMock()
     ctx.repository = repo
     ctx.user_repository = user_repo
@@ -70,6 +79,10 @@ def _make_mock_ctx(test_user: User) -> MagicMock:
     ctx.job_queue.size = MagicMock(return_value=0)
     ctx.scheduler = None
     ctx.browser = None
+    ctx.consumer_manager = consumer_manager
+    ctx.linkedin_init_lock = asyncio.Lock()
+    ctx.admin_role_lock = asyncio.Lock()
+    ctx.admin_retry_lock = asyncio.Lock()
 
     # Close any coroutine passed in rather than scheduling it,
     # to avoid "coroutine never awaited" warnings and runaway sleep loops.

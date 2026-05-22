@@ -57,7 +57,6 @@ from src.models.user import (
 from src.services.auth.user_repository import UserRepository
 from src.services.jobs.hitl_processor import HITLProcessor
 from src.services.jobs.job_orchestrator import JobOrchestrator
-from src.services.jobs.job_queue import ConsumerManager
 from src.utils.logger import setup_api_logger
 
 settings = get_settings()
@@ -73,14 +72,6 @@ if not _src_logger.handlers:
     ))
     _src_logger.addHandler(_handler)
     _src_logger.setLevel(logging.INFO)
-
-# Module-level state for consumer management (not business state)
-_consumer_manager = ConsumerManager()
-_linkedin_init_lock = asyncio.Lock()
-# Serializes admin role changes so the last-admin guard is atomic with set_role.
-_admin_role_lock = asyncio.Lock()
-# Serializes admin retry start so the status check + re-queue + schedule are atomic.
-_admin_retry_lock = asyncio.Lock()
 
 
 def _normalize_query_datetime(value: datetime | None) -> datetime | None:
@@ -176,7 +167,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan: create AppContext, initialize, yield, cleanup."""
     ctx = create_app_context(settings)
     app.state.ctx = ctx
-    app.state.consumer_manager = _consumer_manager
 
     if settings.dev_auth_bypass:
         if not (
@@ -236,7 +226,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             result["enqueued"], result["skipped"], result["total_in_file"],
         )
         if result["enqueued"] > 0:
-            _consumer_manager.start(ctx)
+            ctx.consumer_manager.start(ctx)
     elif settings.linkedin_search_schedule_enabled:
         try:
             from src.services.jobs.scheduler import LinkedInSearchScheduler
@@ -256,7 +246,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             scheduler.start()
             ctx.scheduler = scheduler
 
-            _consumer_manager.start(ctx)
+            ctx.consumer_manager.start(ctx)
 
             logger.info("LinkedIn search scheduler started")
         except Exception:
@@ -265,8 +255,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
 
     # Shutdown
-    _consumer_manager.stop()
-    await _consumer_manager.wait_stopped()
+    if ctx.consumer_manager is not None:
+        ctx.consumer_manager.stop()
+        await ctx.consumer_manager.wait_stopped()
 
     if ctx.scheduler:
         ctx.scheduler.stop()
@@ -318,12 +309,14 @@ async def log_requests(request: Request, call_next):
 
 
 @app.get("/api/health")
-async def health():
+async def health(request: Request):
     """Health check endpoint with consumer health status."""
+    ctx = _get_ctx(request)
+    consumer_health = ctx.consumer_manager.health_check() if ctx.consumer_manager else {}
     return {
         "status": "running",
         "message": "LinkedIn Job Application Agent API",
-        **_consumer_manager.health_check(),
+        **consumer_health,
     }
 
 
@@ -842,7 +835,7 @@ async def trigger_linkedin_search(request: Request, user: CurrentUser):
             "(SEED_JOBS_FROM_FILE=true). Use POST /api/jobs/replay-fixtures instead.",
         )
 
-    async with _linkedin_init_lock:
+    async with ctx.linkedin_init_lock:
         # Drop a dead browser before reusing it — the scheduler's scraper
         # captures the browser handle at construction, so we also reset the
         # scheduler to force a rebuild with the fresh browser.
@@ -878,8 +871,8 @@ async def trigger_linkedin_search(request: Request, user: CurrentUser):
                 raise HTTPException(500, "Failed to initialize LinkedIn search components") from None
 
         # Ensure a queue consumer is running
-        cm = _consumer_manager
-        if cm.task is None or cm.task.done():
+        cm = ctx.consumer_manager
+        if cm is not None and (cm.task is None or cm.task.done()):
             cm.reset()
             cm.start(ctx)
 
@@ -965,8 +958,8 @@ async def replay_fixtures(request: Request, user: CurrentUser, limit: Annotated[
         raise HTTPException(404, f"Fixture file not found or empty: {path}")
 
     # Ensure queue consumer is running to process the enqueued jobs
-    cm = _consumer_manager
-    if result["enqueued"] > 0 and (cm.task is None or cm.task.done()):
+    cm = ctx.consumer_manager
+    if cm is not None and result["enqueued"] > 0 and (cm.task is None or cm.task.done()):
         cm.reset()
         cm.start(ctx)
 
@@ -1356,7 +1349,7 @@ async def admin_retry_job(
 
     # try_claim_failed_for_retry is the cross-worker guard; the lock is a
     # single-worker fast-path so duplicate retries don't both enqueue.
-    async with _admin_retry_lock:
+    async with ctx.admin_retry_lock:
         updated = await ctx.repository.try_claim_failed_for_retry(job_id)
         if updated is None:
             current = await ctx.repository.get(job_id)
@@ -1520,9 +1513,10 @@ async def admin_bulk_delete_jobs(
 async def admin_get_queue(request: Request, admin: AdminUser) -> dict:
     """Return queue, consumer, and scheduler state for the admin dashboard."""
     ctx = _get_ctx(request)
-    consumer_manager = getattr(request.app.state, "consumer_manager", _consumer_manager)
+    if ctx.consumer_manager is None:
+        raise HTTPException(500, "Consumer manager not initialized")
 
-    snapshot = consumer_manager.snapshot()
+    snapshot = ctx.consumer_manager.snapshot()
     scheduler_state: list[dict] = []
     if ctx.scheduler is not None:
         try:
@@ -1663,7 +1657,7 @@ async def admin_set_user_role(
 
     # DB-side transaction in set_role_with_admin_guard is the cross-worker
     # guard; the lock is a single-worker fast-path.
-    async with _admin_role_lock:
+    async with ctx.admin_role_lock:
         try:
             updated = await ctx.user_repository.set_role_with_admin_guard(
                 user_id, target_role

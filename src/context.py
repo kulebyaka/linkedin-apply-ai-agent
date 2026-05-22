@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from src.services.db.job_repository import JobRepository
     from src.services.jobs.hitl_processor import HITLProcessor
     from src.services.jobs.job_orchestrator import JobOrchestrator
-    from src.services.jobs.job_queue import JobQueue
+    from src.services.jobs.job_queue import ConsumerManager, JobQueue
     from src.services.jobs.scheduler import LinkedInSearchScheduler
     from src.services.linkedin.browser_automation import LinkedInAutomation
 
@@ -51,6 +51,14 @@ class AppContext:
     orchestrator: JobOrchestrator | None = None
     hitl_processor: HITLProcessor | None = None
     cv_extraction_registry: CVExtractionRegistry | None = None
+    consumer_manager: ConsumerManager | None = None
+
+    # Lock for LinkedIn search/browser initialization (manual trigger path).
+    linkedin_init_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    # Serializes admin role changes so the last-admin guard is atomic with set_role.
+    admin_role_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    # Serializes admin retry start so the status check + re-queue + schedule are atomic.
+    admin_retry_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     # Thread-safe tracking for in-progress workflows
     _tracking_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
@@ -116,7 +124,7 @@ def create_app_context(
     from src.services.db.job_repository import get_repository
     from src.services.jobs.hitl_processor import HITLProcessor
     from src.services.jobs.job_orchestrator import JobOrchestrator
-    from src.services.jobs.job_queue import JobQueue
+    from src.services.jobs.job_queue import ConsumerManager, JobQueue
 
     if settings is None:
         settings = get_settings()
@@ -144,6 +152,7 @@ def create_app_context(
         admin_alert_service=admin_alert_service,
         job_queue=job_queue,
         cv_extraction_registry=CVExtractionRegistry(),
+        consumer_manager=ConsumerManager(),
     )
 
     # Wire domain services (they need the full context)

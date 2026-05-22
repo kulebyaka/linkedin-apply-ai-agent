@@ -96,6 +96,15 @@ def _make_mock_ctx() -> MagicMock:
     user_repo.set_role = AsyncMock()
     user_repo.set_role_with_admin_guard = AsyncMock()
 
+    consumer_manager = MagicMock()
+    consumer_manager.task = None
+    consumer_manager.start = MagicMock()
+    consumer_manager.stop = MagicMock()
+    consumer_manager.wait_stopped = AsyncMock()
+    consumer_manager.reset = MagicMock()
+    consumer_manager.health_check = MagicMock(return_value={})
+    consumer_manager.snapshot = MagicMock(return_value={})
+
     ctx = MagicMock()
     ctx.repository = repo
     ctx.user_repository = user_repo
@@ -106,6 +115,10 @@ def _make_mock_ctx() -> MagicMock:
     ctx.job_queue.put = AsyncMock()
     ctx.scheduler = None
     ctx.browser = None
+    ctx.consumer_manager = consumer_manager
+    ctx.linkedin_init_lock = asyncio.Lock()
+    ctx.admin_role_lock = asyncio.Lock()
+    ctx.admin_retry_lock = asyncio.Lock()
 
     def _noop_bg_task(coro):
         if asyncio.iscoroutine(coro):
