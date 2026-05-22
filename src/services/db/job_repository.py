@@ -165,13 +165,10 @@ class JobRepository(ABC):
 
     @abstractmethod
     async def try_claim_failed_for_retry(self, job_id: str) -> "JobRecord | None":
-        """Atomically transition status FAILED → QUEUED for an admin retry.
+        """Atomic FAILED → QUEUED claim for admin retry; multi-worker safe.
 
-        Returns the updated record on success, or None if the job is missing,
-        not in FAILED state, or another caller already claimed it. The
-        atomicity holds across multiple worker processes because the
-        underlying SQL is a single transaction protected by SQLite's
-        single-writer lock.
+        Returns the updated record, or None if the job is missing, not
+        FAILED, or already claimed by another caller.
         """
         pass
 
@@ -1306,11 +1303,7 @@ class SQLiteJobRepository(JobRepository):
         return True
 
     async def try_claim_failed_for_retry(self, job_id: str) -> JobRecord | None:
-        """Atomically transition FAILED → QUEUED (SQLite).
-
-        Performs the read-and-conditional-update inside a single transaction
-        so it is safe across multiple worker processes.
-        """
+        """Atomic FAILED → QUEUED claim (SQLite, multi-worker safe)."""
         self._ensure_initialized()
         from .tables import Job
 
@@ -1387,14 +1380,12 @@ class SQLiteJobRepository(JobRepository):
             if row.get("pdf_path"):
                 pdf_paths.append(row["pdf_path"])
 
-        # Wrap both DELETEs in a single SQLite transaction so a mid-step
-        # failure does not leave the job row orphaned of its CV history.
+        # Atomic so a mid-step failure can't orphan the job from its history.
         async with Job._meta.db.transaction():
             await CVAttemptTable.delete().where(CVAttemptTable.job_id == job_id).run()
             await Job.delete().where(Job.job_id == job_id).run()
         logger.info("Cascade-deleted job %s (%d pdfs)", job_id, len(pdf_paths))
 
-        # PDF unlinking is best-effort and intentionally outside the txn.
         _unlink_pdfs(pdf_paths, job_id)
         return True
 

@@ -84,12 +84,7 @@ _admin_retry_lock = asyncio.Lock()
 
 
 def _normalize_query_datetime(value: datetime | None) -> datetime | None:
-    """Coerce a FastAPI Query(datetime) value to a tz-aware UTC datetime.
-
-    FastAPI parses bare date strings like ``2026-01-01`` into tz-naive
-    datetimes, which cannot be compared against the tz-aware ``created_at``
-    stored on JobRecord. Attach UTC when no offset is present.
-    """
+    """FastAPI parses bare YYYY-MM-DD as naive; JobRecord.created_at is UTC-aware."""
     if value is None:
         return None
     if value.tzinfo is None:
@@ -1353,23 +1348,17 @@ async def admin_retry_job(
     would skip the just-requeued row.
     """
     ctx = _get_ctx(request)
-    # Pre-check existence so we can return a clean 404 instead of a generic
-    # "not retriable" message when the job_id is bogus.
     existing = await ctx.repository.get(job_id)
     if existing is None:
         raise HTTPException(404, f"Job {job_id} not found")
     if not existing.raw_input:
         raise HTTPException(409, "Job has no raw_input — cannot retry")
 
-    # Asyncio.Lock is a fast-path optimisation for single-worker deployments;
-    # the real cross-worker guard is the conditional UPDATE inside
-    # try_claim_failed_for_retry, which only succeeds if status is still
-    # FAILED. Only the winning request schedules the workflow.
+    # try_claim_failed_for_retry is the cross-worker guard; the lock is a
+    # single-worker fast-path so duplicate retries don't both enqueue.
     async with _admin_retry_lock:
         updated = await ctx.repository.try_claim_failed_for_retry(job_id)
         if updated is None:
-            # Re-fetch to give the caller an accurate reason (already retried
-            # vs. wrong starting state).
             current = await ctx.repository.get(job_id)
             current_status = current.status if current else "missing"
             raise HTTPException(
@@ -1574,9 +1563,7 @@ async def admin_run_scheduler(
             409, f"User {user_id} has no LinkedIn search preferences configured"
         )
 
-    # scheduler.run_search short-circuits to a no-op when its lock is already
-    # held. Surface that to the caller as 409 instead of returning a misleading
-    # "started" response.
+    # run_search silently returns 0 when its lock is held; surface as 409.
     if ctx.scheduler.search_in_progress:
         raise HTTPException(
             409,
@@ -1674,9 +1661,8 @@ async def admin_set_user_role(
     if ctx.user_repository is None:
         raise HTTPException(500, "User repository not initialized")
 
-    # Serialize within this worker as a fast-path, but the real guarantee
-    # against demoting the last admin comes from the DB-side transaction in
-    # set_role_with_admin_guard — that holds across multiple workers too.
+    # DB-side transaction in set_role_with_admin_guard is the cross-worker
+    # guard; the lock is a single-worker fast-path.
     async with _admin_role_lock:
         try:
             updated = await ctx.user_repository.set_role_with_admin_guard(

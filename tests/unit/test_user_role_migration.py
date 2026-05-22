@@ -185,15 +185,7 @@ async def test_migration_adds_role_column_to_old_db(tmp_path):
 
 @pytest.mark.asyncio
 async def test_migration_leaves_role_index_consistent(tmp_path):
-    """Pre-existing rows must be reachable via the role index after migration.
-
-    Regression for: Piccolo's create_table(if_not_exists=True) issues
-    CREATE INDEX IF NOT EXISTS for indexed columns even when the column
-    doesn't exist yet on the legacy schema; the index ends up populated
-    only by rows inserted *after* the ALTER TABLE, so pre-existing rows
-    are missing entries (PRAGMA integrity_check: "row N missing from
-    index user_role"). The migration must REINDEX to repair this.
-    """
+    """Pre-existing rows must end up in user_role; migration must REINDEX."""
     from piccolo.engine.sqlite import SQLiteEngine
 
     from src.services.db.tables import MagicLinkTable, UserTable
@@ -239,13 +231,8 @@ async def test_migration_leaves_role_index_consistent(tmp_path):
     UserTable._meta._db = engine
     MagicLinkTable._meta._db = engine
 
-    # Reproduce the production sequence: SQLiteJobRepository.initialize
-    # invokes UserTable.create_table(if_not_exists=True) before the
-    # migration block runs. SQLite happily creates `CREATE INDEX user_role
-    # ON "user" ("role")` even though the role column does not yet exist;
-    # the index is built empty and the subsequent ALTER TABLE never
-    # backfills it. Without REINDEX, integrity_check then reports
-    # "row N missing from index user_role".
+    # Reproduce the production order: create_table runs CREATE INDEX
+    # against the not-yet-existing role column before ALTER TABLE adds it.
     await UserTable.create_table(if_not_exists=True).run()
     await MagicLinkTable.create_table(if_not_exists=True).run()
 

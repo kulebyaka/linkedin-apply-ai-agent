@@ -52,9 +52,7 @@
 		if (userIds.length > 0) f.user_id = userIds;
 		if (statuses.length > 0) f.status = statuses;
 		if (sources.length > 0) f.source = sources;
-		// Parse YYYY-MM-DD as LOCAL midnight, not UTC midnight, so the
-		// filter window matches the admin's wall-clock day rather than
-		// shifting by their timezone offset.
+		// Anchor to local midnight so the window matches the admin's wall-clock day.
 		if (createdFrom) {
 			const [y, m, d] = createdFrom.split('-').map(Number);
 			f.created_from = new Date(y, m - 1, d, 0, 0, 0, 0).toISOString();

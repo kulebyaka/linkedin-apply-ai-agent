@@ -78,16 +78,8 @@ class UserRepository:
                 migrated = True
             await conn.commit()
 
-            # Piccolo's create_table(if_not_exists=True) issues
-            # `CREATE INDEX IF NOT EXISTS <name>` for every column declared
-            # with index=True. On a DB that pre-dates this column, that
-            # statement runs before the ALTER TABLE below, so the index ends
-            # up either missing or built against an empty schema and never
-            # backfilled with pre-existing rows (`PRAGMA integrity_check`
-            # reports "row N missing from index <name>"). REINDEX-ing the
-            # user table after any ALTER TABLE rebuilds every declared
-            # index from current data, so the guard holds for future
-            # indexed columns added the same way.
+            # SQLite lets CREATE INDEX reference a not-yet-existing column,
+            # so pre-existing rows are missing from the index until REINDEX.
             if migrated:
                 logger.info("Rebuilding indexes on user table after migration")
                 await conn.execute('REINDEX "user"')
@@ -251,18 +243,10 @@ class UserRepository:
     async def set_role_with_admin_guard(
         self, user_id: str, role: UserRole
     ) -> User:
-        """Atomically update a user's role, refusing to demote the last admin.
+        """Set role atomically; raise LastAdminError if it would leave zero admins.
 
-        Runs the role read, admin count, and write inside a single SQLite
-        transaction. Because SQLite serializes writers at the file level,
-        this guard holds even when the API is run with multiple worker
-        processes — the asyncio.Lock in the route handler only serializes
-        within one event loop.
-
-        Raises:
-            KeyError: If user not found.
-            UserRepository.LastAdminError: If the change would demote the
-                last remaining admin.
+        SQLite's single-writer lock makes the transaction multi-worker safe.
+        Raises KeyError if the user is missing.
         """
         from src.services.db.tables import UserTable
 
