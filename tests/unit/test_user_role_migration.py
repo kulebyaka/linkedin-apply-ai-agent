@@ -182,4 +182,82 @@ async def test_migration_adds_role_column_to_old_db(tmp_path):
     assert legacy is not None
     assert legacy.role == UserRole.TRIAL
 
+
+@pytest.mark.asyncio
+async def test_migration_leaves_role_index_consistent(tmp_path):
+    """Pre-existing rows must be reachable via the role index after migration.
+
+    Regression for: Piccolo's create_table(if_not_exists=True) issues
+    CREATE INDEX IF NOT EXISTS for indexed columns even when the column
+    doesn't exist yet on the legacy schema; the index ends up populated
+    only by rows inserted *after* the ALTER TABLE, so pre-existing rows
+    are missing entries (PRAGMA integrity_check: "row N missing from
+    index user_role"). The migration must REINDEX to repair this.
+    """
+    from piccolo.engine.sqlite import SQLiteEngine
+
+    from src.services.db.tables import MagicLinkTable, UserTable
+
+    db_path = tmp_path / "legacy_indexed.db"
+
+    raw = sqlite3.connect(db_path)
+    raw.execute(
+        """
+        CREATE TABLE "user" (
+            "id" VARCHAR(36) PRIMARY KEY NOT NULL,
+            "email" VARCHAR(255) NOT NULL UNIQUE,
+            "display_name" VARCHAR(100) NOT NULL DEFAULT '',
+            "master_cv_json" JSON,
+            "search_preferences" JSON,
+            "created_at" TIMESTAMP NOT NULL,
+            "updated_at" TIMESTAMP NOT NULL
+        )
+        """
+    )
+    raw.execute(
+        """
+        CREATE TABLE "magic_link" (
+            "token" VARCHAR(64) PRIMARY KEY NOT NULL,
+            "email" VARCHAR(255) NOT NULL,
+            "expires_at" TIMESTAMP NOT NULL,
+            "used" INTEGER NOT NULL DEFAULT 0
+        )
+        """
+    )
+    # Two pre-existing rows that must end up in the role index.
+    for i in range(2):
+        raw.execute(
+            'INSERT INTO "user" (id, email, display_name, master_cv_json, '
+            "search_preferences, created_at, updated_at) VALUES "
+            f"('legacy-{i}', 'legacy{i}@example.com', 'Legacy {i}', NULL, NULL, "
+            "'2024-01-01 00:00:00', '2024-01-01 00:00:00')"
+        )
+    raw.commit()
+    raw.close()
+
+    engine = SQLiteEngine(path=str(db_path))
+    UserTable._meta._db = engine
+    MagicLinkTable._meta._db = engine
+
+    # Reproduce the production sequence: SQLiteJobRepository.initialize
+    # invokes UserTable.create_table(if_not_exists=True) before the
+    # migration block runs. SQLite happily creates `CREATE INDEX user_role
+    # ON "user" ("role")` even though the role column does not yet exist;
+    # the index is built empty and the subsequent ALTER TABLE never
+    # backfills it. Without REINDEX, integrity_check then reports
+    # "row N missing from index user_role".
+    await UserTable.create_table(if_not_exists=True).run()
+    await MagicLinkTable.create_table(if_not_exists=True).run()
+
+    repo = UserRepository()
+    await repo.initialize(db_path=str(db_path))
+
+    # Database must pass integrity_check — no "row N missing from index".
+    raw = sqlite3.connect(db_path)
+    integrity = [r[0] for r in raw.execute("PRAGMA integrity_check").fetchall()]
+    raw.close()
+    assert integrity == ["ok"], (
+        f"DB integrity broken after migration: {integrity}"
+    )
+
     await engine.close_connection_pool()

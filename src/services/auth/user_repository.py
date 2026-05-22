@@ -57,22 +57,41 @@ class UserRepository:
             cursor = await conn.execute("PRAGMA table_info(user)")
             rows = await cursor.fetchall()
             user_columns = {row["name"] for row in rows}
+            migrated = False
             if "filter_preferences" not in user_columns:
                 logger.info("Migrating: adding filter_preferences column to user table")
                 await conn.execute(
                     "ALTER TABLE user ADD COLUMN filter_preferences JSON NULL"
                 )
+                migrated = True
             if "model_preferences" not in user_columns:
                 logger.info("Migrating: adding model_preferences column to user table")
                 await conn.execute(
                     "ALTER TABLE user ADD COLUMN model_preferences JSON NULL"
                 )
+                migrated = True
             if "role" not in user_columns:
                 logger.info("Migrating: adding role column to user table")
                 await conn.execute(
                     "ALTER TABLE user ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'trial'"
                 )
+                migrated = True
             await conn.commit()
+
+            # Piccolo's create_table(if_not_exists=True) issues
+            # `CREATE INDEX IF NOT EXISTS <name>` for every column declared
+            # with index=True. On a DB that pre-dates this column, that
+            # statement runs before the ALTER TABLE below, so the index ends
+            # up either missing or built against an empty schema and never
+            # backfilled with pre-existing rows (`PRAGMA integrity_check`
+            # reports "row N missing from index <name>"). REINDEX-ing the
+            # user table after any ALTER TABLE rebuilds every declared
+            # index from current data, so the guard holds for future
+            # indexed columns added the same way.
+            if migrated:
+                logger.info("Rebuilding indexes on user table after migration")
+                await conn.execute('REINDEX "user"')
+                await conn.commit()
         finally:
             await conn.close()
 
