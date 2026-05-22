@@ -18,7 +18,6 @@ if TYPE_CHECKING:
 
 from src.models.state_machine import BusinessState
 from src.models.unified import (
-    JobRecord,
     JobStatusResponse,
     JobSubmitRequest,
     JobSubmitResponse,
@@ -132,12 +131,26 @@ class JobOrchestrator:
             "error_message": None,
         }
 
-        # Track thread
-        await self._ctx.register_workflow(job_id, thread_id, "preparation", user_id=user_id)
+        # Dispatch workflow in background via the shared WorkflowDispatcher.
+        # Register synchronously so get_status() can find the job immediately
+        # after submit_job returns; the dispatcher will re-register
+        # (idempotent) and handle unregister + FAILED-recovery in the
+        # background task.
+        dispatcher = self._ctx.workflow_dispatcher
+        if dispatcher is None:
+            raise RuntimeError("workflow_dispatcher not initialized on AppContext")
 
-        # Dispatch workflow in background
+        await self._ctx.register_workflow(
+            job_id, thread_id, "preparation", user_id=user_id,
+        )
         self._ctx.create_background_task(
-            self._run_preparation_workflow(job_id, thread_id, initial_state)
+            dispatcher.dispatch_preparation(
+                job_id=job_id,
+                thread_id=thread_id,
+                initial_state=initial_state,
+                user_id=user_id,
+                create_failure_record=True,
+            )
         )
 
         logger.info("Job %s submitted: source=%s, mode=%s", job_id, request.source, request.mode)
@@ -202,47 +215,3 @@ class JobOrchestrator:
             )
 
         raise KeyError(f"Job {job_id} not found")
-
-    async def _run_preparation_workflow(
-        self, job_id: str, thread_id: str, initial_state: dict
-    ) -> None:
-        """Execute preparation workflow asynchronously."""
-        try:
-            config = {
-                "configurable": {
-                    "thread_id": thread_id,
-                    "repository": self._ctx.repository,
-                    "user_repository": self._ctx.user_repository,
-                }
-            }
-            result = await self._ctx.prep_workflow.ainvoke(initial_state, config)
-            logger.info(
-                "Preparation workflow for job %s completed: %s",
-                job_id,
-                result.get("current_step"),
-            )
-        except Exception as e:
-            logger.error("Preparation workflow for job %s failed: %s", job_id, e, exc_info=True)
-            try:
-                existing = await self._ctx.repository.get(job_id)
-                if existing:
-                    await self._ctx.repository.update(
-                        job_id, {"status": BusinessState.FAILED, "error_message": str(e)}
-                    )
-                else:
-                    # Job failed before save_to_db_node created the record
-                    source = initial_state.get("source", "url")
-                    mode = initial_state.get("mode", "mvp")
-                    user_id = initial_state.get("user_id", "")
-                    await self._ctx.repository.create(JobRecord(
-                        job_id=job_id,
-                        user_id=user_id,
-                        source=source,
-                        mode=mode,
-                        status=BusinessState.FAILED,
-                        error_message=str(e),
-                    ))
-            except Exception:
-                logger.warning("Failed to mark job %s as FAILED in repository", job_id)
-        finally:
-            await self._ctx.unregister_workflow(job_id)

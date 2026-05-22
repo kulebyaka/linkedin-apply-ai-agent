@@ -1425,45 +1425,17 @@ async def _run_admin_retry(ctx: AppContext, job_id: str) -> None:
         "error_message": None,
     }
     thread_id = f"admin-retry-{job_id}-{int(_time.time())}"
-    config = {
-        "configurable": {
-            "thread_id": thread_id,
-            "repository": ctx.repository,
-            "user_repository": ctx.user_repository,
-        }
-    }
-    await ctx.register_workflow(
-        job_id, thread_id, "preparation", user_id=job.user_id or ""
+
+    dispatcher = ctx.workflow_dispatcher
+    if dispatcher is None:
+        logger.error("workflow_dispatcher not initialized; cannot run admin retry")
+        return
+    await dispatcher.dispatch_preparation(
+        job_id=job_id,
+        thread_id=thread_id,
+        initial_state=initial_state,
+        user_id=job.user_id or "",
     )
-    try:
-        await ctx.prep_workflow.ainvoke(initial_state, config)
-        logger.info("Admin retry workflow completed for job %s", job_id)
-    except Exception as exc:
-        logger.exception("Admin retry workflow failed for job %s", job_id)
-        # Only force-FAILED if the job is still in a non-terminal state.
-        # If the workflow already wrote a terminal state (e.g. CV_READY),
-        # transitioning to FAILED would raise InvalidStateTransitionError.
-        try:
-            current = await ctx.repository.get(job_id)
-            if current is not None and str(current.status) not in {
-                BusinessState.CV_READY.value,
-                BusinessState.PENDING_REVIEW.value,
-                BusinessState.APPLIED.value,
-                BusinessState.DECLINED.value,
-                BusinessState.FILTERED_OUT.value,
-                BusinessState.SCRAPE_FAILED.value,
-            }:
-                await ctx.repository.update(
-                    job_id,
-                    {
-                        "status": BusinessState.FAILED,
-                        "error_message": f"Admin retry failed: {exc}",
-                    },
-                )
-        except Exception:
-            logger.warning("Could not mark job %s FAILED after admin retry", job_id)
-    finally:
-        await ctx.unregister_workflow(job_id)
 
 
 @app.delete("/api/admin/jobs/{job_id}")

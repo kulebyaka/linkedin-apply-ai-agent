@@ -132,6 +132,7 @@ async def process_queue(
     delay_between_jobs: float = 2.0,
     stop_event: asyncio.Event | None = None,
     on_job_processed: Any | None = None,
+    dispatcher: Any | None = None,
 ) -> int:
     """Consume jobs from *queue* and run the preparation workflow for each.
 
@@ -264,20 +265,44 @@ async def process_queue(
                 "user_id": user_id or "",
             }
 
-            config = {"configurable": {"thread_id": f"linkedin-{scoped_job_id}", "repository": job_repository, "user_repository": user_repository}}
-            await workflow.ainvoke(initial_state, config=config)
-            logger.info("Workflow completed for job %s", scoped_job_id)
-            processed += 1
+            thread_id = f"linkedin-{scoped_job_id}"
 
-            if on_job_processed is not None:
-                try:
-                    on_job_processed(scoped_job_id, config["configurable"]["thread_id"], user_id or "")
-                except Exception:
-                    logger.warning("on_job_processed callback failed for %s", scoped_job_id, exc_info=True)
+            if dispatcher is not None:
+                # Use WorkflowDispatcher for tracking + canonical failure recovery.
+                await dispatcher.dispatch_preparation(
+                    job_id=scoped_job_id,
+                    thread_id=thread_id,
+                    initial_state=initial_state,
+                    user_id=user_id or "",
+                    create_failure_record=True,
+                )
+                logger.info("Workflow completed for job %s", scoped_job_id)
+                processed += 1
+
+                if on_job_processed is not None:
+                    try:
+                        on_job_processed(scoped_job_id, thread_id, user_id or "")
+                    except Exception:
+                        logger.warning("on_job_processed callback failed for %s", scoped_job_id, exc_info=True)
+            else:
+                # Legacy inline path (used by unit tests that don't pass a dispatcher).
+                config = {"configurable": {"thread_id": thread_id, "repository": job_repository, "user_repository": user_repository}}
+                await workflow.ainvoke(initial_state, config=config)
+                logger.info("Workflow completed for job %s", scoped_job_id)
+                processed += 1
+
+                if on_job_processed is not None:
+                    try:
+                        on_job_processed(scoped_job_id, thread_id, user_id or "")
+                    except Exception:
+                        logger.warning("on_job_processed callback failed for %s", scoped_job_id, exc_info=True)
 
         except Exception:
             logger.exception("Workflow failed for queued job %s", job.job_id)
-            # Persist a failure record so the failure is traceable
+            # Persist a failure record so the failure is traceable.
+            # When the dispatcher path is taken, dispatch_preparation already
+            # handled this internally — exceptions here come from master CV
+            # loading or state construction.
             try:
                 existing = await job_repository.get(scoped_job_id)
                 if existing is not None:
@@ -449,11 +474,6 @@ class ConsumerManager:
             else:
                 self.restart_count = 0
 
-        def _register_linkedin_job(job_id: str, thread_id: str, user_id: str = "") -> None:
-            ctx.create_background_task(
-                ctx.register_workflow(job_id, thread_id, "preparation", user_id=user_id)
-            )
-
         from src.agents._shared import load_master_cv
 
         task = asyncio.create_task(
@@ -464,7 +484,8 @@ class ConsumerManager:
                 user_repository=ctx.user_repository,
                 job_repository=ctx.repository,
                 delay_between_jobs=2.0,
-                on_job_processed=self._on_job_processed or _register_linkedin_job,
+                on_job_processed=self._on_job_processed,
+                dispatcher=ctx.workflow_dispatcher,
             )
         )
         task.add_done_callback(_on_done)

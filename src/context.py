@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
 
+    from src.agents.dispatcher import WorkflowDispatcher
     from src.services.alerts import AdminAlertService
     from src.services.auth.auth import AuthService
     from src.services.auth.user_repository import UserRepository
@@ -52,6 +53,7 @@ class AppContext:
     hitl_processor: HITLProcessor | None = None
     cv_extraction_registry: CVExtractionRegistry | None = None
     consumer_manager: ConsumerManager | None = None
+    workflow_dispatcher: WorkflowDispatcher | None = None
 
     # Lock for LinkedIn search/browser initialization (manual trigger path).
     linkedin_init_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
@@ -115,6 +117,7 @@ def create_app_context(
     Returns:
         AppContext with repository, workflows, and queue wired up.
     """
+    from src.agents.dispatcher import WorkflowDispatcher
     from src.agents.preparation_workflow import create_preparation_workflow
     from src.agents.retry_workflow import create_retry_workflow
     from src.services.alerts import AdminAlertService
@@ -156,6 +159,7 @@ def create_app_context(
     )
 
     # Wire domain services (they need the full context)
+    ctx.workflow_dispatcher = WorkflowDispatcher(ctx)
     ctx.orchestrator = JobOrchestrator(ctx)
     ctx.hitl_processor = HITLProcessor(ctx)
 
