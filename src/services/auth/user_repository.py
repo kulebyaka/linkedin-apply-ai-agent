@@ -48,44 +48,11 @@ class UserRepository:
             await UserTable.create_table(if_not_exists=True).run()
             await MagicLinkTable.create_table(if_not_exists=True).run()
 
-        # Run schema migrations every startup regardless of how the engine
-        # was configured — older databases may be missing columns added by
-        # later versions.
-        engine = UserTable._meta._db
-        conn = await engine.get_connection()
-        try:
-            cursor = await conn.execute("PRAGMA table_info(user)")
-            rows = await cursor.fetchall()
-            user_columns = {row["name"] for row in rows}
-            migrated = False
-            if "filter_preferences" not in user_columns:
-                logger.info("Migrating: adding filter_preferences column to user table")
-                await conn.execute(
-                    "ALTER TABLE user ADD COLUMN filter_preferences JSON NULL"
-                )
-                migrated = True
-            if "model_preferences" not in user_columns:
-                logger.info("Migrating: adding model_preferences column to user table")
-                await conn.execute(
-                    "ALTER TABLE user ADD COLUMN model_preferences JSON NULL"
-                )
-                migrated = True
-            if "role" not in user_columns:
-                logger.info("Migrating: adding role column to user table")
-                await conn.execute(
-                    "ALTER TABLE user ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'trial'"
-                )
-                migrated = True
-            await conn.commit()
+        # Apply pending schema migrations. Idempotent via schema_migrations table —
+        # safe even when SQLiteJobRepository.initialize already ran them.
+        from src.services.db.migrations import apply_migrations
 
-            # SQLite lets CREATE INDEX reference a not-yet-existing column,
-            # so pre-existing rows are missing from the index until REINDEX.
-            if migrated:
-                logger.info("Rebuilding indexes on user table after migration")
-                await conn.execute('REINDEX "user"')
-                await conn.commit()
-        finally:
-            await conn.close()
+        await apply_migrations(UserTable._meta._db)
 
         logger.info("UserRepository initialized with engine at %s", db_path)
 
