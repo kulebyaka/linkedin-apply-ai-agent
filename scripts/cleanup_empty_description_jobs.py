@@ -37,8 +37,8 @@ logger = logging.getLogger(__name__)
 # retry-eligible by design, so we don't sweep it. FILTERED_OUT is intentionally
 # excluded — its empty description is expected (no detail-page fetch).
 CLEANABLE_STATUSES = (
-    BusinessState.PENDING_REVIEW,
-    BusinessState.CV_READY,
+    BusinessState.PENDING,
+    BusinessState.COMPLETED,
     BusinessState.FAILED,
     BusinessState.APPROVED,
     BusinessState.DECLINED,

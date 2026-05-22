@@ -336,7 +336,7 @@ class SQLiteJobRepository(SQLiteAdminQueriesMixin, JobRepository):
 
         rows = (
             await Job.select()
-            .where(Job.status == BusinessState.PENDING_REVIEW)
+            .where(Job.status == BusinessState.PENDING)
             .where(Job.user_id == user_id)
             .order_by(Job.created_at, ascending=False)
             .run()

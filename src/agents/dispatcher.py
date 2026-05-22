@@ -10,7 +10,7 @@ Responsibilities:
 - Build the ``config["configurable"]`` dict (thread_id + repositories).
 - Register/unregister the workflow thread on ``AppContext``.
 - On exception: persist a FAILED record, respecting ``ALLOWED_TRANSITIONS``
-  so the workflow's own terminal writes (CV_READY, PENDING_REVIEW, etc.)
+  so the workflow's own terminal writes (COMPLETED, PENDING, etc.)
   aren't clobbered.
 """
 
@@ -157,7 +157,7 @@ class WorkflowDispatcher:
         """Persist FAILED for a preparation workflow exception.
 
         Respects ALLOWED_TRANSITIONS: if the workflow already wrote a terminal
-        status (e.g. CV_READY), we don't clobber it. If the record never got
+        status (e.g. COMPLETED), we don't clobber it. If the record never got
         created (workflow blew up before save_to_db_node) we optionally
         synthesize one so the failure isn't silently lost.
         """

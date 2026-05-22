@@ -18,6 +18,7 @@ from unittest.mock import AsyncMock, patch  # noqa: E402
 import pytest  # noqa: E402
 
 from src.agents.preparation_workflow import extract_job_node, save_to_db_node  # noqa: E402
+from src.models.state_machine import BusinessState  # noqa: E402
 from src.agents.retry_workflow import (  # noqa: E402
     load_from_db_node as retry_load_from_db_node,
 )
@@ -58,7 +59,7 @@ async def test_extract_job_url_not_implemented_fails():
     ):
         result = await extract_job_node(state)
 
-    assert result["current_step"] == "failed"
+    assert result["target_status"] == BusinessState.FAILED
     assert "not yet implemented" in result["error_message"]
     assert "source='manual'" in result["error_message"]
     # Must NOT have fabricated a job_posting
@@ -90,7 +91,7 @@ async def test_extract_job_linkedin_not_implemented_fails():
     ):
         result = await extract_job_node(state)
 
-    assert result["current_step"] == "failed"
+    assert result["target_status"] == BusinessState.FAILED
     assert "not yet implemented" in result["error_message"]
 
 
@@ -123,7 +124,7 @@ async def test_save_to_db_repo_not_implemented_fails():
 
     result = await save_to_db_node(state, config=config)
 
-    assert result["current_step"] == "failed"
+    assert result["target_status"] == BusinessState.FAILED
     assert result["error_message"] is not None
     assert "not implemented" in result["error_message"].lower()
 

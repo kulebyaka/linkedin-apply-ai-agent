@@ -148,7 +148,7 @@ class InMemoryJobRepository(JobRepository):
     async def get_pending(self, user_id: str) -> list[JobRecord]:
         jobs = [
             j for j in self._jobs.values()
-            if j.status == BusinessState.PENDING_REVIEW and j.user_id == user_id
+            if j.status == BusinessState.PENDING and j.user_id == user_id
         ]
         jobs.sort(key=lambda j: j.created_at, reverse=True)
         return jobs

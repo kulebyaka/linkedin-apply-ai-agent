@@ -219,7 +219,7 @@ async def cleanup_jobs(
     deletable_statuses = {
         BusinessState.DECLINED,
         BusinessState.FAILED,
-        BusinessState.CV_READY,
+        BusinessState.COMPLETED,
         BusinessState.FILTERED_OUT,
     }
     try:
@@ -283,8 +283,8 @@ async def download_job_pdf(job_id: str, request: Request, user: CurrentUser):
             raise HTTPException(400, f"Job failed: {status.error_message}")
 
         pdf_ready_statuses = {
-            BusinessState.CV_READY,
-            BusinessState.PENDING_REVIEW,
+            BusinessState.COMPLETED,
+            BusinessState.PENDING,
             BusinessState.APPROVED,
             BusinessState.RETRYING,
             BusinessState.APPLIED,
@@ -331,8 +331,8 @@ async def get_job_cv_html(
             raise HTTPException(400, f"Job failed: {status.error_message}")
 
         cv_ready_statuses = {
-            BusinessState.CV_READY,
-            BusinessState.PENDING_REVIEW,
+            BusinessState.COMPLETED,
+            BusinessState.PENDING,
             BusinessState.APPROVED,
             BusinessState.RETRYING,
             BusinessState.APPLIED,

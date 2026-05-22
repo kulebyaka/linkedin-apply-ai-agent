@@ -10,7 +10,7 @@ from enum import StrEnum
 class WorkflowStep(StrEnum):
     """Tracks which workflow step is currently executing.
 
-    These are transient values used in workflow state (current_step field),
+    These are transient values used in workflow state (``current_step`` field),
     NOT stored in the database status field.
     """
 
@@ -34,13 +34,17 @@ class BusinessState(StrEnum):
     """Job lifecycle business states.
 
     These are the canonical states stored in the database status field.
-    String values are backward-compatible with existing data and UI.
+    String values are kept stable for backward compatibility with existing
+    data and frontend code — historic mismatches between the Python member
+    name and the stored value (notably ``COMPLETED = "completed"`` which
+    represents "CV is ready / MVP mode complete", and ``PENDING = "pending"``
+    which means "pending HITL review") are preserved by design.
     """
 
     QUEUED = "queued"
     PROCESSING = "processing"
-    CV_READY = "completed"  # MVP mode: PDF ready for download
-    PENDING_REVIEW = "pending"  # Full mode: awaiting HITL review
+    COMPLETED = "completed"  # MVP mode: CV PDF ready for download
+    PENDING = "pending"  # Full mode: awaiting HITL review
     APPROVED = "approved"
     DECLINED = "declined"
     RETRYING = "retrying"
@@ -49,6 +53,10 @@ class BusinessState(StrEnum):
     FAILED = "failed"
     FILTERED_OUT = "filtered_out"
     SCRAPE_FAILED = "scrape_failed"  # Description missing/empty — retry-eligible
+
+    def is_terminal(self) -> bool:
+        """True if no further transitions are allowed from this state."""
+        return self in TERMINAL_STATES
 
 
 class InvalidStateTransitionError(Exception):
@@ -72,21 +80,21 @@ class InvalidStateTransitionError(Exception):
 ALLOWED_TRANSITIONS: dict[BusinessState, set[BusinessState]] = {
     BusinessState.QUEUED: {
         BusinessState.PROCESSING,
-        BusinessState.CV_READY,
-        BusinessState.PENDING_REVIEW,
+        BusinessState.COMPLETED,
+        BusinessState.PENDING,
         BusinessState.FAILED,
         BusinessState.FILTERED_OUT,
         BusinessState.SCRAPE_FAILED,
     },
     BusinessState.PROCESSING: {
-        BusinessState.CV_READY,
-        BusinessState.PENDING_REVIEW,
+        BusinessState.COMPLETED,
+        BusinessState.PENDING,
         BusinessState.FAILED,
         BusinessState.FILTERED_OUT,
         BusinessState.SCRAPE_FAILED,
     },
-    BusinessState.CV_READY: set(),  # Terminal (MVP mode)
-    BusinessState.PENDING_REVIEW: {
+    BusinessState.COMPLETED: set(),  # Terminal (MVP mode)
+    BusinessState.PENDING: {
         BusinessState.APPROVED,
         BusinessState.DECLINED,
         BusinessState.RETRYING,
@@ -98,7 +106,7 @@ ALLOWED_TRANSITIONS: dict[BusinessState, set[BusinessState]] = {
     },
     BusinessState.DECLINED: set(),  # Terminal
     BusinessState.RETRYING: {
-        BusinessState.PENDING_REVIEW,
+        BusinessState.PENDING,
         BusinessState.FAILED,
     },
     BusinessState.APPLYING: {
@@ -115,12 +123,17 @@ ALLOWED_TRANSITIONS: dict[BusinessState, set[BusinessState]] = {
         BusinessState.QUEUED,
         BusinessState.PROCESSING,
         BusinessState.SCRAPE_FAILED,  # Idempotent re-attempts increment counter
-        BusinessState.CV_READY,
-        BusinessState.PENDING_REVIEW,
+        BusinessState.COMPLETED,
+        BusinessState.PENDING,
         BusinessState.FAILED,  # Cap exhausted
         BusinessState.FILTERED_OUT,
     },
 }
+
+
+TERMINAL_STATES: frozenset[BusinessState] = frozenset(
+    state for state, targets in ALLOWED_TRANSITIONS.items() if not targets
+)
 
 
 def validate_transition(

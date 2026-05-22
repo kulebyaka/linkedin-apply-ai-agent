@@ -64,7 +64,12 @@ class PreparationWorkflowState(TypedDict):
     filter_result: dict | None
 
     # Status
+    # `current_step` is a transient WorkflowStep (string-valued) — never a
+    # BusinessState. Business outcomes go into `target_status` and the
+    # routing functions inspect that field instead. Setting current_step to a
+    # BusinessState mixed two enums and was the source of routing bugs.
     current_step: str
+    target_status: BusinessState | None
     error_message: str | None
 
 
@@ -131,7 +136,7 @@ def route_after_extract(state: PreparationWorkflowState) -> str:
     - If LinkedIn source, go to filter_job
     - Otherwise, go directly to compose_cv
     """
-    if state.get("current_step") == BusinessState.SCRAPE_FAILED:
+    if state.get("target_status") == BusinessState.SCRAPE_FAILED:
         return "scrape_failed"
     if state.get("error_message"):
         return "error"
@@ -146,7 +151,7 @@ def route_after_filter(state: PreparationWorkflowState) -> str:
     - If the job was filtered out, go to save_filtered_out
     - Otherwise, continue to compose_cv
     """
-    if state.get("current_step") == BusinessState.FILTERED_OUT:
+    if state.get("target_status") == BusinessState.FILTERED_OUT:
         return "filtered_out"
     return "compose"
 
@@ -224,23 +229,23 @@ async def extract_job_node(state: PreparationWorkflowState) -> PreparationWorkfl
                     f"Description too short ({len(description)} chars, "
                     f"required {min_chars})"
                 )
-                state["current_step"] = BusinessState.SCRAPE_FAILED
+                state["target_status"] = BusinessState.SCRAPE_FAILED
 
     except JobExtractionError as e:
         logger.error(f"Job extraction failed for {job_id}: {e}")
         state["error_message"] = f"Job extraction failed: {e.message}"
-        state["current_step"] = BusinessState.FAILED
+        state["target_status"] = BusinessState.FAILED
     except NotImplementedError as e:
         logger.error(f"Job extraction not implemented for source '{source}': {e}")
         state["error_message"] = (
             f"Job extraction for source '{source}' is not yet implemented. "
             f"Use source='manual' instead."
         )
-        state["current_step"] = BusinessState.FAILED
+        state["target_status"] = BusinessState.FAILED
     except Exception as e:
         logger.error(f"Job extraction failed for {job_id}: {e}", exc_info=True)
         state["error_message"] = f"Job extraction failed: {str(e)}"
-        state["current_step"] = BusinessState.FAILED
+        state["target_status"] = BusinessState.FAILED
 
     elapsed = time.time() - start_time
     logger.info(f"[TIMING] extract_job_node completed in {elapsed:.2f}s")
@@ -333,7 +338,7 @@ async def filter_job_node(
                 f"disqualified={filter_result.disqualified}, "
                 f"reason={filter_result.disqualifier_reason}"
             )
-            state["current_step"] = BusinessState.FILTERED_OUT
+            state["target_status"] = BusinessState.FILTERED_OUT
         else:
             if job_filter.should_warn(filter_result, warning_threshold, reject_threshold):
                 logger.info(
@@ -568,7 +573,7 @@ async def generate_pdf_node(state: PreparationWorkflowState) -> PreparationWorkf
     if result["error_message"]:
         state["error_message"] = result["error_message"]
         if not result["tailored_cv_pdf_path"]:
-            state["current_step"] = BusinessState.FAILED
+            state["target_status"] = BusinessState.FAILED
     else:
         state["current_step"] = WorkflowStep.PDF_GENERATED
 
@@ -599,9 +604,10 @@ async def save_to_db_node(state: PreparationWorkflowState, config: RunnableConfi
     if state.get("error_message") and not state.get("tailored_cv_pdf_path"):
         final_status = BusinessState.FAILED
     elif mode == "mvp":
-        final_status = BusinessState.CV_READY
+        final_status = BusinessState.COMPLETED
     else:
-        final_status = BusinessState.PENDING_REVIEW
+        final_status = BusinessState.PENDING
+    state["target_status"] = final_status
 
     try:
         cv_json = state.get("tailored_cv_json")
@@ -659,14 +665,12 @@ async def save_to_db_node(state: PreparationWorkflowState, config: RunnableConfi
             await repo.create_cv_attempt(attempt)
             logger.info(f"CV attempt #1 saved for job {job_id}")
 
-        # Update state
-        state["current_step"] = final_status
         logger.info(f"Preparation workflow completed for job {job_id}: {final_status}")
 
     except Exception as e:
         logger.error(f"Failed to save job {job_id}: {e}", exc_info=True)
         state["error_message"] = f"Failed to save job: {str(e)}"
-        state["current_step"] = BusinessState.FAILED
+        state["target_status"] = BusinessState.FAILED
 
     return state
 

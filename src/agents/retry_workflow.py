@@ -217,7 +217,7 @@ async def update_db_node(state: RetryWorkflowState, config: RunnableConfig | Non
     if state.get("error_message") and not state.get("tailored_cv_pdf_path"):
         final_status = BusinessState.FAILED
     else:
-        final_status = BusinessState.PENDING_REVIEW  # Back to HITL queue
+        final_status = BusinessState.PENDING  # Back to HITL queue
 
     try:
         repo = get_repository_from_config(config or {})

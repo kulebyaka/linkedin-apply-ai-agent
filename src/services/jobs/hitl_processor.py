@@ -36,7 +36,7 @@ class HITLProcessor:
     - Querying application history
 
     Uses per-job locks to prevent concurrent decisions on the same job
-    (e.g., two retry requests racing past the PENDING_REVIEW check).
+    (e.g., two retry requests racing past the PENDING check).
     """
 
     def __init__(self, ctx: AppContext) -> None:
@@ -100,7 +100,7 @@ class HITLProcessor:
             if job_record is None:
                 raise KeyError(f"Job {job_id} not found")
 
-            if job_record.status != BusinessState.PENDING_REVIEW:
+            if job_record.status != BusinessState.PENDING:
                 raise RuntimeError(
                     f"Job {job_id} is not pending review (status: {job_record.status})"
                 )
@@ -270,7 +270,7 @@ class HITLProcessor:
             )
             try:
                 await self._ctx.repository.update(
-                    job_id, {"status": BusinessState.PENDING_REVIEW}
+                    job_id, {"status": BusinessState.PENDING}
                 )
             except Exception:
                 # Rollback to pending failed; try marking as failed so the job
