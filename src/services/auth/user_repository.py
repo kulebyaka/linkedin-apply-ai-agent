@@ -226,6 +226,58 @@ class UserRepository:
 
         return await self.get_by_id(user_id)
 
+    class LastAdminError(Exception):
+        """Raised by set_role_with_admin_guard when demoting the last admin."""
+
+    async def set_role_with_admin_guard(
+        self, user_id: str, role: UserRole
+    ) -> User:
+        """Atomically update a user's role, refusing to demote the last admin.
+
+        Runs the role read, admin count, and write inside a single SQLite
+        transaction. Because SQLite serializes writers at the file level,
+        this guard holds even when the API is run with multiple worker
+        processes — the asyncio.Lock in the route handler only serializes
+        within one event loop.
+
+        Raises:
+            KeyError: If user not found.
+            UserRepository.LastAdminError: If the change would demote the
+                last remaining admin.
+        """
+        from src.services.db.tables import UserTable
+
+        async with UserTable._meta.db.transaction():
+            existing = (
+                await UserTable.select().where(UserTable.id == user_id).first().run()
+            )
+            if not existing:
+                raise KeyError(f"User {user_id} not found")
+
+            current_role = (existing.get("role") or UserRole.TRIAL.value)
+            if (
+                current_role == UserRole.ADMIN.value
+                and role != UserRole.ADMIN
+            ):
+                admin_rows = (
+                    await UserTable.select(UserTable.id)
+                    .where(UserTable.role == UserRole.ADMIN.value)
+                    .run()
+                )
+                if len(admin_rows) <= 1:
+                    raise UserRepository.LastAdminError(
+                        "Cannot demote the last remaining admin"
+                    )
+
+            await UserTable.update(
+                {
+                    "role": role.value,
+                    "updated_at": datetime.now(tz=timezone.utc),
+                }
+            ).where(UserTable.id == user_id).run()
+
+        return await self.get_by_id(user_id)
+
     async def count_admins(self) -> int:
         """Return the total number of users with role == admin.
 

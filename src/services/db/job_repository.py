@@ -164,6 +164,18 @@ class JobRepository(ABC):
         pass
 
     @abstractmethod
+    async def try_claim_failed_for_retry(self, job_id: str) -> "JobRecord | None":
+        """Atomically transition status FAILED → QUEUED for an admin retry.
+
+        Returns the updated record on success, or None if the job is missing,
+        not in FAILED state, or another caller already claimed it. The
+        atomicity holds across multiple worker processes because the
+        underlying SQL is a single transaction protected by SQLite's
+        single-writer lock.
+        """
+        pass
+
+    @abstractmethod
     async def delete_cascade(self, job_id: str) -> bool:
         """Cascade-delete a job record without ownership check (admin path).
 
@@ -595,6 +607,20 @@ class InMemoryJobRepository(JobRepository):
                 del self._jobs[job_id]
                 return True
             return False
+
+    async def try_claim_failed_for_retry(self, job_id: str) -> JobRecord | None:
+        """Atomically transition FAILED → QUEUED (in-memory)."""
+        async with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                return None
+            if str(job.status) != BusinessState.FAILED.value:
+                return None
+            job.status = BusinessState.QUEUED
+            job.error_message = None
+            job.last_scrape_error = None
+            job.updated_at = datetime.now(tz=timezone.utc)
+            return job
 
     async def delete_for_user(self, job_id: str, user_id: str) -> bool:
         """Cascade-delete a job owned by the given user (in-memory)."""
@@ -1279,6 +1305,37 @@ class SQLiteJobRepository(JobRepository):
         logger.debug(f"Deleted job {job_id}")
         return True
 
+    async def try_claim_failed_for_retry(self, job_id: str) -> JobRecord | None:
+        """Atomically transition FAILED → QUEUED (SQLite).
+
+        Performs the read-and-conditional-update inside a single transaction
+        so it is safe across multiple worker processes.
+        """
+        self._ensure_initialized()
+        from .tables import Job
+
+        async with Job._meta.db.transaction():
+            existing = await Job.select().where(Job.job_id == job_id).first().run()
+            if not existing:
+                return None
+            if existing.get("status") != BusinessState.FAILED.value:
+                return None
+            await (
+                Job.update(
+                    {
+                        Job.status: BusinessState.QUEUED.value,
+                        Job.error_message: None,
+                        Job.last_scrape_error: None,
+                        Job.updated_at: datetime.now(tz=timezone.utc),
+                    }
+                )
+                .where(Job.job_id == job_id)
+                .where(Job.status == BusinessState.FAILED.value)
+                .run()
+            )
+
+        return await self.get(job_id)
+
     async def delete_for_user(self, job_id: str, user_id: str) -> bool:
         """Cascade-delete a job owned by the given user (SQLite).
 
@@ -1330,10 +1387,14 @@ class SQLiteJobRepository(JobRepository):
             if row.get("pdf_path"):
                 pdf_paths.append(row["pdf_path"])
 
-        await CVAttemptTable.delete().where(CVAttemptTable.job_id == job_id).run()
-        await Job.delete().where(Job.job_id == job_id).run()
+        # Wrap both DELETEs in a single SQLite transaction so a mid-step
+        # failure does not leave the job row orphaned of its CV history.
+        async with Job._meta.db.transaction():
+            await CVAttemptTable.delete().where(CVAttemptTable.job_id == job_id).run()
+            await Job.delete().where(Job.job_id == job_id).run()
         logger.info("Cascade-deleted job %s (%d pdfs)", job_id, len(pdf_paths))
 
+        # PDF unlinking is best-effort and intentionally outside the txn.
         _unlink_pdfs(pdf_paths, job_id)
         return True
 
@@ -1731,13 +1792,13 @@ class SQLiteJobRepository(JobRepository):
 
         if count > 0:
             job_ids = [row["job_id"] for row in to_delete]
-            await (
-                CVAttemptTable.delete()
-                .where(CVAttemptTable.job_id.is_in(job_ids))
-                .run()
-            )
-            delete_query = Job.delete().where(Job.job_id.is_in(job_ids))
-            await delete_query.run()
+            async with Job._meta.db.transaction():
+                await (
+                    CVAttemptTable.delete()
+                    .where(CVAttemptTable.job_id.is_in(job_ids))
+                    .run()
+                )
+                await Job.delete().where(Job.job_id.is_in(job_ids)).run()
 
         logger.info(f"Cleanup: deleted {count} jobs older than {older_than_days} days")
         return count

@@ -85,6 +85,7 @@ def _make_mock_ctx() -> MagicMock:
     repo.update = AsyncMock()
     repo.delete = AsyncMock(return_value=True)
     repo.delete_cascade = AsyncMock(return_value=True)
+    repo.try_claim_failed_for_retry = AsyncMock(return_value=None)
 
     user_repo = AsyncMock()
     user_repo.initialize = AsyncMock()
@@ -93,6 +94,7 @@ def _make_mock_ctx() -> MagicMock:
     user_repo.count_admins = AsyncMock(return_value=0)
     user_repo.get_by_id = AsyncMock(return_value=None)
     user_repo.set_role = AsyncMock()
+    user_repo.set_role_with_admin_guard = AsyncMock()
 
     ctx = MagicMock()
     ctx.repository = repo
@@ -250,16 +252,13 @@ class TestAdminRetryJob:
             raw_input={"url": "https://example.com"},
         )
         queued_job = _make_job("j1", status=BusinessState.QUEUED.value)
-        mock_ctx.repository.get.side_effect = [failed_job, queued_job]
+        mock_ctx.repository.get.return_value = failed_job
+        mock_ctx.repository.try_claim_failed_for_retry.return_value = queued_job
         with _patched_client(admin_user, mock_ctx) as client:
             resp = client.post("/api/admin/jobs/j1/retry")
         assert resp.status_code == 200
-        mock_ctx.repository.update.assert_called_once()
-        args, _ = mock_ctx.repository.update.call_args
-        assert args[0] == "j1"
-        assert args[1]["status"] == BusinessState.QUEUED
-        assert args[1]["error_message"] is None
-        assert args[1]["last_scrape_error"] is None
+        mock_ctx.repository.try_claim_failed_for_retry.assert_called_once_with("j1")
+        assert resp.json()["status"] == BusinessState.QUEUED.value
 
     def test_retry_409_when_no_raw_input(self, admin_user, mock_ctx):
         mock_ctx.repository.get.return_value = _make_job(
@@ -375,6 +374,7 @@ class TestAdminRunScheduler:
     def test_started_when_scheduler_present(self, admin_user, mock_ctx):
         scheduler = MagicMock()
         scheduler.run_search = AsyncMock(return_value=3)
+        scheduler.search_in_progress = False
         mock_ctx.scheduler = scheduler
         target_user = _make_user(UserRole.TRIAL, user_id="user-1", email="u1@example.com")
         target_user.search_preferences = UserSearchPreferences(keywords="engineer")
@@ -383,6 +383,17 @@ class TestAdminRunScheduler:
             resp = client.post("/api/admin/scheduler/run/user-1")
         assert resp.status_code == 200
         assert resp.json()["status"] == "started"
+
+    def test_409_when_search_already_in_progress(self, admin_user, mock_ctx):
+        scheduler = MagicMock()
+        scheduler.search_in_progress = True
+        mock_ctx.scheduler = scheduler
+        target_user = _make_user(UserRole.TRIAL, user_id="user-1", email="u1@example.com")
+        target_user.search_preferences = UserSearchPreferences(keywords="engineer")
+        mock_ctx.user_repository.get_by_id.return_value = target_user
+        with _patched_client(admin_user, mock_ctx) as client:
+            resp = client.post("/api/admin/scheduler/run/user-1")
+        assert resp.status_code == 409
 
     def test_404_when_user_missing(self, admin_user, mock_ctx):
         mock_ctx.scheduler = MagicMock()
@@ -448,17 +459,15 @@ class TestAdminListUsers:
 
 class TestAdminSetUserRole:
     def test_sets_role(self, admin_user, mock_ctx):
-        target = _make_user(UserRole.TRIAL, user_id="u1", email="u1@example.com")
         promoted = _make_user(UserRole.ADMIN, user_id="u1", email="u1@example.com")
-        mock_ctx.user_repository.get_by_id.return_value = target
-        mock_ctx.user_repository.set_role.return_value = promoted
+        mock_ctx.user_repository.set_role_with_admin_guard.return_value = promoted
         with _patched_client(admin_user, mock_ctx) as client:
             resp = client.put(
                 "/api/admin/users/u1/role", json={"role": "admin"}
             )
         assert resp.status_code == 200
         assert resp.json()["role"] == "admin"
-        mock_ctx.user_repository.set_role.assert_called_once_with(
+        mock_ctx.user_repository.set_role_with_admin_guard.assert_called_once_with(
             "u1", UserRole.ADMIN
         )
 
@@ -470,7 +479,10 @@ class TestAdminSetUserRole:
         assert resp.status_code == 400
 
     def test_404_when_user_missing(self, admin_user, mock_ctx):
-        mock_ctx.user_repository.get_by_id.return_value = None
+        from src.services.auth.user_repository import UserRepository
+        mock_ctx.user_repository.set_role_with_admin_guard.side_effect = KeyError(
+            "missing"
+        )
         with _patched_client(admin_user, mock_ctx) as client:
             resp = client.put(
                 "/api/admin/users/missing/role", json={"role": "premium"}
@@ -478,46 +490,43 @@ class TestAdminSetUserRole:
         assert resp.status_code == 404
 
     def test_409_last_admin_demotion_blocked(self, admin_user, mock_ctx):
-        # admin demoting self when sole admin
-        mock_ctx.user_repository.get_by_id.return_value = admin_user
-        mock_ctx.user_repository.count_admins.return_value = 1
+        from src.services.auth.user_repository import UserRepository
+        # The DB-side guard raises LastAdminError when the demotion would
+        # leave zero admins.
+        mock_ctx.user_repository.set_role_with_admin_guard.side_effect = (
+            UserRepository.LastAdminError("Cannot demote the last remaining admin")
+        )
         with _patched_client(admin_user, mock_ctx) as client:
             resp = client.put(
                 f"/api/admin/users/{admin_user.id}/role",
                 json={"role": "trial"},
             )
         assert resp.status_code == 409
-        mock_ctx.user_repository.set_role.assert_not_called()
 
     def test_409_blocks_demoting_other_last_admin(self, admin_user, mock_ctx):
-        # admin A demoting admin B when B is the sole remaining admin
-        target = _make_user(
-            UserRole.ADMIN, user_id="solo-admin", email="solo@example.com"
+        from src.services.auth.user_repository import UserRepository
+        mock_ctx.user_repository.set_role_with_admin_guard.side_effect = (
+            UserRepository.LastAdminError("Cannot demote the last remaining admin")
         )
-        mock_ctx.user_repository.get_by_id.return_value = target
-        mock_ctx.user_repository.count_admins.return_value = 1
         with _patched_client(admin_user, mock_ctx) as client:
             resp = client.put(
                 "/api/admin/users/solo-admin/role",
                 json={"role": "trial"},
             )
         assert resp.status_code == 409
-        mock_ctx.user_repository.set_role.assert_not_called()
 
     def test_admin_can_demote_self_if_other_admin_exists(self, admin_user, mock_ctx):
-        mock_ctx.user_repository.get_by_id.return_value = admin_user
-        mock_ctx.user_repository.count_admins.return_value = 2
         demoted = _make_user(
             UserRole.TRIAL, user_id=admin_user.id, email=admin_user.email
         )
-        mock_ctx.user_repository.set_role.return_value = demoted
+        mock_ctx.user_repository.set_role_with_admin_guard.return_value = demoted
         with _patched_client(admin_user, mock_ctx) as client:
             resp = client.put(
                 f"/api/admin/users/{admin_user.id}/role",
                 json={"role": "trial"},
             )
         assert resp.status_code == 200
-        mock_ctx.user_repository.set_role.assert_called_once()
+        mock_ctx.user_repository.set_role_with_admin_guard.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

@@ -8,7 +8,7 @@ import logging
 import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated
 
@@ -54,6 +54,7 @@ from src.models.user import (
     UserSearchPreferences,
     UserUpdateRequest,
 )
+from src.services.auth.user_repository import UserRepository
 from src.services.jobs.hitl_processor import HITLProcessor
 from src.services.jobs.job_orchestrator import JobOrchestrator
 from src.services.jobs.job_queue import ConsumerManager
@@ -80,6 +81,21 @@ _linkedin_init_lock = asyncio.Lock()
 _admin_role_lock = asyncio.Lock()
 # Serializes admin retry start so the status check + re-queue + schedule are atomic.
 _admin_retry_lock = asyncio.Lock()
+
+
+def _normalize_query_datetime(value: datetime | None) -> datetime | None:
+    """Coerce a FastAPI Query(datetime) value to a tz-aware UTC datetime.
+
+    FastAPI parses bare date strings like ``2026-01-01`` into tz-naive
+    datetimes, which cannot be compared against the tz-aware ``created_at``
+    stored on JobRecord. Attach UTC when no offset is present.
+    """
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
 
 def _get_ctx(request: Request) -> AppContext:
     """Helper to retrieve AppContext from request."""
@@ -1286,6 +1302,8 @@ async def admin_list_jobs(
 ) -> dict:
     """List jobs across all users with optional filters."""
     ctx = _get_ctx(request)
+    created_from = _normalize_query_datetime(created_from)
+    created_to = _normalize_query_datetime(created_to)
     items = await ctx.repository.list_all_jobs(
         user_ids=user_id,
         statuses=status,
@@ -1335,36 +1353,31 @@ async def admin_retry_job(
     would skip the just-requeued row.
     """
     ctx = _get_ctx(request)
-    # Serialize retry starts so two concurrent requests cannot both observe
-    # status=failed and both schedule a workflow. A self-transition
-    # queued→queued is allowed by the state machine, so without this lock
-    # both updates succeed and duplicate workflows fight over the same job.
-    async with _admin_retry_lock:
-        job = await ctx.repository.get(job_id)
-        if job is None:
-            raise HTTPException(404, f"Job {job_id} not found")
+    # Pre-check existence so we can return a clean 404 instead of a generic
+    # "not retriable" message when the job_id is bogus.
+    existing = await ctx.repository.get(job_id)
+    if existing is None:
+        raise HTTPException(404, f"Job {job_id} not found")
+    if not existing.raw_input:
+        raise HTTPException(409, "Job has no raw_input — cannot retry")
 
-        if str(job.status) != BusinessState.FAILED.value:
+    # Asyncio.Lock is a fast-path optimisation for single-worker deployments;
+    # the real cross-worker guard is the conditional UPDATE inside
+    # try_claim_failed_for_retry, which only succeeds if status is still
+    # FAILED. Only the winning request schedules the workflow.
+    async with _admin_retry_lock:
+        updated = await ctx.repository.try_claim_failed_for_retry(job_id)
+        if updated is None:
+            # Re-fetch to give the caller an accurate reason (already retried
+            # vs. wrong starting state).
+            current = await ctx.repository.get(job_id)
+            current_status = current.status if current else "missing"
             raise HTTPException(
                 409,
-                f"Job not retriable in status '{job.status}' (must be 'failed')",
+                f"Job not retriable in status '{current_status}' (must be 'failed')",
             )
 
-        if not job.raw_input:
-            raise HTTPException(409, "Job has no raw_input — cannot retry")
-
-        await ctx.repository.update(
-            job_id,
-            {
-                "status": BusinessState.QUEUED,
-                "error_message": None,
-                "last_scrape_error": None,
-            },
-        )
-
         ctx.create_background_task(_run_admin_retry(ctx, job_id))
-
-        updated = await ctx.repository.get(job_id)
     return updated.model_dump(mode="json")
 
 
@@ -1452,9 +1465,11 @@ async def _run_admin_retry(ctx: AppContext, job_id: str) -> None:
             current = await ctx.repository.get(job_id)
             if current is not None and str(current.status) not in {
                 BusinessState.CV_READY.value,
+                BusinessState.PENDING_REVIEW.value,
                 BusinessState.APPLIED.value,
                 BusinessState.DECLINED.value,
                 BusinessState.FILTERED_OUT.value,
+                BusinessState.SCRAPE_FAILED.value,
             }:
                 await ctx.repository.update(
                     job_id,
@@ -1559,6 +1574,15 @@ async def admin_run_scheduler(
             409, f"User {user_id} has no LinkedIn search preferences configured"
         )
 
+    # scheduler.run_search short-circuits to a no-op when its lock is already
+    # held. Surface that to the caller as 409 instead of returning a misleading
+    # "started" response.
+    if ctx.scheduler.search_in_progress:
+        raise HTTPException(
+            409,
+            "Another LinkedIn search is already in progress — try again shortly",
+        )
+
     async def _run() -> None:
         try:
             count = await ctx.scheduler.run_search(user_id=user_id)
@@ -1584,6 +1608,7 @@ async def admin_list_errors(
 ) -> dict:
     """List jobs with non-null error_message or last_scrape_error."""
     ctx = _get_ctx(request)
+    since = _normalize_query_datetime(since)
     items = await ctx.repository.list_jobs_with_errors(
         limit=limit, offset=offset, since=since
     )
@@ -1649,25 +1674,18 @@ async def admin_set_user_role(
     if ctx.user_repository is None:
         raise HTTPException(500, "User repository not initialized")
 
-    # Serialize concurrent role changes so the last-admin count and the write
-    # cannot interleave (two demotions could otherwise both observe count > 1).
+    # Serialize within this worker as a fast-path, but the real guarantee
+    # against demoting the last admin comes from the DB-side transaction in
+    # set_role_with_admin_guard — that holds across multiple workers too.
     async with _admin_role_lock:
-        target = await ctx.user_repository.get_by_id(user_id)
-        if target is None:
-            raise HTTPException(404, f"User {user_id} not found")
-
-        # Refuse any demotion that would leave the system with zero admins.
-        if target.role == UserRole.ADMIN and target_role != UserRole.ADMIN:
-            admin_count = await ctx.user_repository.count_admins()
-            if admin_count <= 1:
-                raise HTTPException(
-                    409, "Cannot demote the last remaining admin",
-                )
-
         try:
-            updated = await ctx.user_repository.set_role(user_id, target_role)
+            updated = await ctx.user_repository.set_role_with_admin_guard(
+                user_id, target_role
+            )
         except KeyError:
             raise HTTPException(404, f"User {user_id} not found") from None
+        except UserRepository.LastAdminError as exc:
+            raise HTTPException(409, str(exc)) from None
     return _serialize_user_summary(updated)
 
 

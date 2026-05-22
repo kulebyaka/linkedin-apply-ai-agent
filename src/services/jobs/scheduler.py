@@ -76,6 +76,11 @@ class LinkedInSearchScheduler:
         self._last_run_per_user: dict[str, UserLastRun] = {}
         self._running = False
 
+    @property
+    def search_in_progress(self) -> bool:
+        """True if a search is currently holding the lock."""
+        return self._search_lock.locked()
+
     async def run_search(self, user_id: str | None = None) -> int:
         """Execute one search cycle: authenticate, scrape, enqueue.
 

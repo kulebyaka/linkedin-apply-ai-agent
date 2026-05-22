@@ -52,11 +52,16 @@
 		if (userIds.length > 0) f.user_id = userIds;
 		if (statuses.length > 0) f.status = statuses;
 		if (sources.length > 0) f.source = sources;
-		if (createdFrom) f.created_from = new Date(createdFrom).toISOString();
+		// Parse YYYY-MM-DD as LOCAL midnight, not UTC midnight, so the
+		// filter window matches the admin's wall-clock day rather than
+		// shifting by their timezone offset.
+		if (createdFrom) {
+			const [y, m, d] = createdFrom.split('-').map(Number);
+			f.created_from = new Date(y, m - 1, d, 0, 0, 0, 0).toISOString();
+		}
 		if (createdTo) {
-			const d = new Date(createdTo);
-			d.setHours(23, 59, 59, 999);
-			f.created_to = d.toISOString();
+			const [y, m, d] = createdTo.split('-').map(Number);
+			f.created_to = new Date(y, m - 1, d, 23, 59, 59, 999).toISOString();
 		}
 		if (search.trim()) f.search = search.trim();
 		return f;
