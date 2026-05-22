@@ -9,11 +9,23 @@ This module contains models for:
 
 import re
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
 from .job_filter import UserFilterPreferences
+
+
+class UserRole(str, Enum):
+    """User role / access tier.
+
+    Used to gate admin endpoints and (later) feature flags.
+    """
+
+    TRIAL = "trial"
+    PREMIUM = "premium"
+    ADMIN = "admin"
 
 
 class ModelChoice(BaseModel):
@@ -53,6 +65,7 @@ class User(BaseModel):
     id: str
     email: str
     display_name: str
+    role: UserRole = UserRole.TRIAL
     master_cv_json: dict | None = None
     search_preferences: UserSearchPreferences | None = None
     filter_preferences: UserFilterPreferences | None = None

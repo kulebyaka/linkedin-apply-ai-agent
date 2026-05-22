@@ -9,7 +9,7 @@ import logging
 from datetime import datetime, timezone
 
 from src.models.job_filter import UserFilterPreferences
-from src.models.user import User, UserModelPreferences, UserSearchPreferences
+from src.models.user import User, UserModelPreferences, UserRole, UserSearchPreferences
 
 logger = logging.getLogger(__name__)
 
@@ -57,17 +57,33 @@ class UserRepository:
             cursor = await conn.execute("PRAGMA table_info(user)")
             rows = await cursor.fetchall()
             user_columns = {row["name"] for row in rows}
+            migrated = False
             if "filter_preferences" not in user_columns:
                 logger.info("Migrating: adding filter_preferences column to user table")
                 await conn.execute(
                     "ALTER TABLE user ADD COLUMN filter_preferences JSON NULL"
                 )
+                migrated = True
             if "model_preferences" not in user_columns:
                 logger.info("Migrating: adding model_preferences column to user table")
                 await conn.execute(
                     "ALTER TABLE user ADD COLUMN model_preferences JSON NULL"
                 )
+                migrated = True
+            if "role" not in user_columns:
+                logger.info("Migrating: adding role column to user table")
+                await conn.execute(
+                    "ALTER TABLE user ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'trial'"
+                )
+                migrated = True
             await conn.commit()
+
+            # SQLite lets CREATE INDEX reference a not-yet-existing column,
+            # so pre-existing rows are missing from the index until REINDEX.
+            if migrated:
+                logger.info("Rebuilding indexes on user table after migration")
+                await conn.execute('REINDEX "user"')
+                await conn.commit()
         finally:
             await conn.close()
 
@@ -98,6 +114,7 @@ class UserRepository:
                 id=user_id,
                 email=email,
                 display_name=display_name,
+                role=UserRole.TRIAL.value,
                 master_cv_json=None,
                 search_preferences=None,
                 created_at=now,
@@ -110,6 +127,7 @@ class UserRepository:
             id=user_id,
             email=email,
             display_name=display_name,
+            role=UserRole.TRIAL,
             created_at=now,
             updated_at=now,
         )
@@ -190,6 +208,125 @@ class UserRepository:
         await UserTable.update(db_updates).where(UserTable.id == user_id).run()
 
         return await self.get_by_id(user_id)
+
+    async def set_role(self, user_id: str, role: UserRole) -> User:
+        """Set a user's role.
+
+        Args:
+            user_id: User ID.
+            role: New role value.
+
+        Returns:
+            The updated User.
+
+        Raises:
+            KeyError: If user not found.
+        """
+        from src.services.db.tables import UserTable
+
+        existing = await UserTable.select().where(UserTable.id == user_id).first().run()
+        if not existing:
+            raise KeyError(f"User {user_id} not found")
+
+        await UserTable.update(
+            {
+                "role": role.value,
+                "updated_at": datetime.now(tz=timezone.utc),
+            }
+        ).where(UserTable.id == user_id).run()
+
+        return await self.get_by_id(user_id)
+
+    class LastAdminError(Exception):
+        """Raised by set_role_with_admin_guard when demoting the last admin."""
+
+    async def set_role_with_admin_guard(
+        self, user_id: str, role: UserRole
+    ) -> User:
+        """Set role atomically; raise LastAdminError if it would leave zero admins.
+
+        SQLite's single-writer lock makes the transaction multi-worker safe.
+        Raises KeyError if the user is missing.
+        """
+        from src.services.db.tables import UserTable
+
+        async with UserTable._meta.db.transaction():
+            existing = (
+                await UserTable.select().where(UserTable.id == user_id).first().run()
+            )
+            if not existing:
+                raise KeyError(f"User {user_id} not found")
+
+            current_role = (existing.get("role") or UserRole.TRIAL.value)
+            if (
+                current_role == UserRole.ADMIN.value
+                and role != UserRole.ADMIN
+            ):
+                admin_rows = (
+                    await UserTable.select(UserTable.id)
+                    .where(UserTable.role == UserRole.ADMIN.value)
+                    .run()
+                )
+                if len(admin_rows) <= 1:
+                    raise UserRepository.LastAdminError(
+                        "Cannot demote the last remaining admin"
+                    )
+
+            await UserTable.update(
+                {
+                    "role": role.value,
+                    "updated_at": datetime.now(tz=timezone.utc),
+                }
+            ).where(UserTable.id == user_id).run()
+
+        return await self.get_by_id(user_id)
+
+    async def count_admins(self) -> int:
+        """Return the total number of users with role == admin.
+
+        Used by the last-admin demotion guard, which must not depend on a
+        paginated user listing — otherwise a deployment with more users than
+        the page size could undercount and false-409.
+        """
+        from src.services.db.tables import UserTable
+
+        rows = (
+            await UserTable.select(UserTable.id)
+            .where(UserTable.role == UserRole.ADMIN.value)
+            .run()
+        )
+        return len(rows)
+
+    async def list_all_users(self, limit: int = 200, offset: int = 0) -> list[User]:
+        """List all users ordered by created_at descending.
+
+        Args:
+            limit: Max number of users to return.
+            offset: Number of users to skip.
+
+        Returns:
+            List of Users.
+        """
+        from src.services.db.tables import UserTable
+
+        rows = (
+            await UserTable.select()
+            .order_by(UserTable.created_at, ascending=False)
+            .limit(limit)
+            .offset(offset)
+            .run()
+        )
+        users: list[User] = []
+        for row in rows:
+            try:
+                users.append(self._row_to_user(row))
+            except Exception:
+                logger.warning(
+                    "Failed to parse user row (id=%s), skipping",
+                    row.get("id"),
+                    exc_info=True,
+                )
+        return users
 
     async def get_all_with_search_prefs(self) -> list[User]:
         """Get all users that have non-null search preferences configured.
@@ -402,10 +539,22 @@ class UserRepository:
         if updated_at and updated_at.tzinfo is None:
             updated_at = updated_at.replace(tzinfo=timezone.utc)
 
+        role_raw = row.get("role") or UserRole.TRIAL.value
+        try:
+            role = UserRole(role_raw)
+        except ValueError:
+            logger.warning(
+                "Unknown role '%s' for user %s; defaulting to trial",
+                role_raw,
+                row.get("id"),
+            )
+            role = UserRole.TRIAL
+
         return User(
             id=row["id"],
             email=row["email"],
             display_name=row.get("display_name", ""),
+            role=role,
             master_cv_json=cv_json,
             search_preferences=search_prefs,
             filter_preferences=filter_prefs,

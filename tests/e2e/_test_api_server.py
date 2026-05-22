@@ -133,12 +133,45 @@ def main():
     )
     p1.start()
 
-    # Override auth dependency to return a test user for e2e tests
+    # Override auth dependency to return a test user for e2e tests.
+    # Granting admin role so admin UI/API tests can authenticate; non-admin
+    # tests are unaffected because they don't gate on role.
     from src.api.main import app, get_current_user
-    from src.models.user import User
+    from src.models.user import User, UserRole
 
-    _test_user = User(id="e2e-test-user", email="e2e@test.com", display_name="E2E Test")
+    _test_user = User(
+        id="e2e-test-user",
+        email="e2e@test.com",
+        display_name="E2E Test",
+        role=UserRole.ADMIN,
+    )
     app.dependency_overrides[get_current_user] = lambda: _test_user
+
+    # Test-only endpoint to seed an extra user into the repo so admin UI tests
+    # can exercise the /admin/users flow (toggle role on a non-self user).
+    # We register the route then move it to the front of app.routes so it wins
+    # over a possible StaticFiles mount at "/" from a prior `npm run build`.
+    from fastapi import Request as _FastApiRequest
+
+    @app.post("/__test__/seed-user")
+    async def _seed_user(req: _FastApiRequest) -> dict:
+        body = await req.json()
+        ctx = req.app.state.ctx
+        existing = await ctx.user_repository.get_by_email(body["email"])
+        if existing is not None:
+            return {
+                "id": existing.id,
+                "email": existing.email,
+                "role": existing.role.value,
+            }
+        u = await ctx.user_repository.create_user(body["email"])
+        return {"id": u.id, "email": u.email, "role": u.role.value}
+
+    # Pop the freshly added route and re-insert it at index 0 so it precedes
+    # any StaticFiles mount registered at module import time.
+    if app.router.routes:
+        seed_route = app.router.routes.pop()
+        app.router.routes.insert(0, seed_route)
 
     # Replace the CORS middleware to allow any localhost/127.0.0.1 origin.
     # The default cors_origins setting uses specific ports, but e2e tests use

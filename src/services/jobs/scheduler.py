@@ -19,13 +19,14 @@ from typing import TYPE_CHECKING, Literal
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from src.config.settings import Settings
-from .job_queue import JobQueue
 from src.services.linkedin.linkedin_search import LinkedInSearchParams, LinkedInSearchURLBuilder
+
+from .job_queue import JobQueue
 
 if TYPE_CHECKING:
     from src.services.alerts import AdminAlertService
-    from src.services.linkedin.linkedin_scraper import LinkedInJobScraper
     from src.services.auth.user_repository import UserRepository
+    from src.services.linkedin.linkedin_scraper import LinkedInJobScraper
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,11 @@ class LinkedInSearchScheduler:
         self._last_run_jobs: int = 0
         self._last_run_per_user: dict[str, UserLastRun] = {}
         self._running = False
+
+    @property
+    def search_in_progress(self) -> bool:
+        """True if a search is currently holding the lock."""
+        return self._search_lock.locked()
 
     async def run_search(self, user_id: str | None = None) -> int:
         """Execute one search cycle: authenticate, scrape, enqueue.
@@ -325,3 +331,25 @@ class LinkedInSearchScheduler:
     def get_last_run_for_user(self, user_id: str) -> UserLastRun | None:
         """Return the most recent run outcome for a specific user, if any."""
         return self._last_run_per_user.get(user_id)
+
+    def get_jobs_state(self) -> list[dict]:
+        """Return per-user scheduler state for the admin dashboard.
+
+        For each user with a recorded run, returns the user_id, last run time,
+        the global next scheduled run, and the last status reason.
+        """
+        next_run = self.next_run_time
+        out: list[dict] = []
+        for user_id, run in self._last_run_per_user.items():
+            out.append(
+                {
+                    "user_id": user_id,
+                    "last_run_at": run.time.isoformat() if run.time else None,
+                    "next_run_at": next_run.isoformat() if next_run else None,
+                    "last_status": run.reason,
+                    "jobs_found": run.jobs_found,
+                    "message": run.message,
+                    "search_url": run.search_url,
+                }
+            )
+        return out

@@ -8,10 +8,12 @@ import logging
 import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated
 
 from fastapi import (
+    Body,
     Cookie,
     Depends,
     FastAPI,
@@ -29,6 +31,10 @@ from fastapi.staticfiles import StaticFiles
 from src.config.settings import get_settings
 from src.context import AppContext, create_app_context
 from src.models.job_filter import GeneratePromptRequest, UserFilterPreferences
+from src.models.pdf_extraction import (
+    CVExtractionStartResponse,
+    CVExtractionStatusResponse,
+)
 from src.models.state_machine import BusinessState, WorkflowStep
 from src.models.unified import (
     ApplicationHistoryItem,
@@ -39,18 +45,16 @@ from src.models.unified import (
     JobSubmitResponse,
     PendingApproval,
 )
-from src.models.pdf_extraction import (
-    CVExtractionStartResponse,
-    CVExtractionStatusResponse,
-)
 from src.models.user import (
     AuthResponse,
     LoginRequest,
     LoginResponse,
     User,
+    UserRole,
     UserSearchPreferences,
     UserUpdateRequest,
 )
+from src.services.auth.user_repository import UserRepository
 from src.services.jobs.hitl_processor import HITLProcessor
 from src.services.jobs.job_orchestrator import JobOrchestrator
 from src.services.jobs.job_queue import ConsumerManager
@@ -73,6 +77,20 @@ if not _src_logger.handlers:
 # Module-level state for consumer management (not business state)
 _consumer_manager = ConsumerManager()
 _linkedin_init_lock = asyncio.Lock()
+# Serializes admin role changes so the last-admin guard is atomic with set_role.
+_admin_role_lock = asyncio.Lock()
+# Serializes admin retry start so the status check + re-queue + schedule are atomic.
+_admin_retry_lock = asyncio.Lock()
+
+
+def _normalize_query_datetime(value: datetime | None) -> datetime | None:
+    """FastAPI parses bare YYYY-MM-DD as naive; JobRecord.created_at is UTC-aware."""
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
 
 def _get_ctx(request: Request) -> AppContext:
     """Helper to retrieve AppContext from request."""
@@ -137,6 +155,20 @@ async def get_optional_user(
 # Type aliases for dependency injection (avoids B008 ruff error)
 CurrentUser = Annotated[User, Depends(get_current_user)]
 OptionalUser = Annotated[User | None, Depends(get_optional_user)]
+
+
+async def get_admin_user(user: CurrentUser) -> User:
+    """FastAPI dependency: require an authenticated user with role == admin.
+
+    Layers on top of get_current_user. Raises 403 when the authenticated
+    user is not an admin.
+    """
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(403, "Admin role required")
+    return user
+
+
+AdminUser = Annotated[User, Depends(get_admin_user)]
 
 
 @asynccontextmanager
@@ -207,9 +239,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             _consumer_manager.start(ctx)
     elif settings.linkedin_search_schedule_enabled:
         try:
+            from src.services.jobs.scheduler import LinkedInSearchScheduler
             from src.services.linkedin.browser_automation import LinkedInAutomation
             from src.services.linkedin.linkedin_scraper import LinkedInJobScraper
-            from src.services.jobs.scheduler import LinkedInSearchScheduler
 
             browser = LinkedInAutomation(settings)
             await browser.initialize()
@@ -309,12 +341,12 @@ async def list_llm_models(
     Public endpoint (no auth) — exposes only model names, display names, and
     pricing. Never exposes API keys or user data.
     """
-    from src.llm.provider import LLMProvider
     from src.llm.model_catalog import (
         OPERATIONS,
         build_label,
         get_catalog_for_operation,
     )
+    from src.llm.provider import LLMProvider
 
     if operation is not None and operation not in OPERATIONS:
         raise HTTPException(
@@ -512,7 +544,7 @@ def _resolve_cv_model_choice(user: User) -> tuple[str, str | None]:
 async def start_cv_extraction(
     request: Request,
     user: CurrentUser,
-    file: UploadFile = File(...),
+    file: Annotated[UploadFile, File(...)],
 ) -> CVExtractionStartResponse:
     """Kick off background AI extraction of a CV from an uploaded PDF.
 
@@ -826,9 +858,9 @@ async def trigger_linkedin_search(request: Request, user: CurrentUser):
         if ctx.scheduler is None:
             # Create a temporary scheduler for one-off search
             try:
+                from src.services.jobs.scheduler import LinkedInSearchScheduler
                 from src.services.linkedin.browser_automation import LinkedInAutomation
                 from src.services.linkedin.linkedin_scraper import LinkedInJobScraper
-                from src.services.jobs.scheduler import LinkedInSearchScheduler
 
                 if ctx.browser is None:
                     browser = LinkedInAutomation(settings)
@@ -1231,6 +1263,416 @@ async def delete_job(
     except Exception as e:
         logger.error(f"Failed to delete job {job_id}: {e}", exc_info=True)
         raise HTTPException(500, "Failed to delete job") from None
+
+
+# =============================================================================
+# Admin Endpoints (admin role required)
+# =============================================================================
+
+
+def _serialize_user_summary(u: User) -> dict:
+    """Compact user dict for admin endpoints."""
+    return {
+        "id": u.id,
+        "email": u.email,
+        "display_name": u.display_name,
+        "role": u.role.value if hasattr(u.role, "value") else str(u.role),
+        "created_at": u.created_at.isoformat() if u.created_at else None,
+        "updated_at": u.updated_at.isoformat() if u.updated_at else None,
+    }
+
+
+@app.get("/api/admin/jobs")
+async def admin_list_jobs(
+    request: Request,
+    admin: AdminUser,
+    user_id: Annotated[list[str] | None, Query()] = None,
+    status: Annotated[list[str] | None, Query()] = None,
+    source: Annotated[list[str] | None, Query()] = None,
+    created_from: Annotated[datetime | None, Query()] = None,
+    created_to: Annotated[datetime | None, Query()] = None,
+    search: Annotated[str | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> dict:
+    """List jobs across all users with optional filters."""
+    ctx = _get_ctx(request)
+    created_from = _normalize_query_datetime(created_from)
+    created_to = _normalize_query_datetime(created_to)
+    items = await ctx.repository.list_all_jobs(
+        user_ids=user_id,
+        statuses=status,
+        sources=source,
+        created_from=created_from,
+        created_to=created_to,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
+    total = await ctx.repository.count_all_jobs(
+        user_ids=user_id,
+        statuses=status,
+        sources=source,
+        created_from=created_from,
+        created_to=created_to,
+        search=search,
+    )
+    return {
+        "items": [item.model_dump(mode="json") for item in items],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@app.get("/api/admin/jobs/{job_id}")
+async def admin_get_job(
+    job_id: str, request: Request, admin: AdminUser
+) -> dict:
+    """Return full job detail for any user. 404 if missing."""
+    ctx = _get_ctx(request)
+    job = await ctx.repository.get(job_id)
+    if job is None:
+        raise HTTPException(404, f"Job {job_id} not found")
+    return job.model_dump(mode="json")
+
+
+@app.post("/api/admin/jobs/{job_id}/retry")
+async def admin_retry_job(
+    job_id: str, request: Request, admin: AdminUser
+) -> dict:
+    """Retry a failed job: transitions to queued and re-runs the workflow.
+
+    Re-invokes the preparation workflow directly rather than re-enqueueing
+    on the LinkedIn queue, because the queue consumer's cross-cycle dedup
+    would skip the just-requeued row.
+    """
+    ctx = _get_ctx(request)
+    existing = await ctx.repository.get(job_id)
+    if existing is None:
+        raise HTTPException(404, f"Job {job_id} not found")
+    if not existing.raw_input:
+        raise HTTPException(409, "Job has no raw_input — cannot retry")
+
+    # try_claim_failed_for_retry is the cross-worker guard; the lock is a
+    # single-worker fast-path so duplicate retries don't both enqueue.
+    async with _admin_retry_lock:
+        updated = await ctx.repository.try_claim_failed_for_retry(job_id)
+        if updated is None:
+            current = await ctx.repository.get(job_id)
+            current_status = current.status if current else "missing"
+            raise HTTPException(
+                409,
+                f"Job not retriable in status '{current_status}' (must be 'failed')",
+            )
+
+        ctx.create_background_task(_run_admin_retry(ctx, job_id))
+    return updated.model_dump(mode="json")
+
+
+async def _run_admin_retry(ctx: AppContext, job_id: str) -> None:
+    """Re-invoke the preparation workflow for an admin-retried job."""
+    import time as _time
+
+    job = await ctx.repository.get(job_id)
+    if job is None:
+        return
+
+    master_cv = None
+    cv_provider: str | None = None
+    cv_model: str | None = None
+    if job.user_id and ctx.user_repository is not None:
+        try:
+            user = await ctx.user_repository.get_by_id(job.user_id)
+            if user and user.master_cv_json:
+                master_cv = user.master_cv_json
+            if user and user.model_preferences and user.model_preferences.cv_generation:
+                cv_provider = user.model_preferences.cv_generation.provider
+                cv_model = user.model_preferences.cv_generation.model
+        except Exception:
+            logger.warning("Failed to load user %s for admin retry", job.user_id)
+
+    if master_cv is None:
+        # Do not fall back to the global filesystem CV — that would silently
+        # tailor a CV for user X using whoever's master_cv.json happens to be
+        # on the server. Fail the retry explicitly instead.
+        logger.error(
+            "Admin retry for job %s: no master CV available for user %s",
+            job_id, job.user_id,
+        )
+        try:
+            await ctx.repository.update(
+                job_id,
+                {
+                    "status": BusinessState.FAILED,
+                    "error_message": "Admin retry failed: user has no master CV",
+                },
+            )
+        except Exception:
+            logger.warning("Could not mark job %s FAILED for missing master CV", job_id)
+        return
+
+    raw_input = dict(job.raw_input or {})
+    if cv_provider:
+        raw_input["llm_provider"] = cv_provider
+    if cv_model:
+        raw_input["llm_model"] = cv_model
+
+    initial_state = {
+        "job_id": job_id,
+        "user_id": job.user_id or "",
+        "source": job.source,
+        "mode": job.mode,
+        "raw_input": raw_input,
+        "master_cv": master_cv,
+        "current_step": BusinessState.QUEUED,
+        "retry_count": 0,
+        "filter_result": None,
+        "user_feedback": None,
+        "error_message": None,
+    }
+    thread_id = f"admin-retry-{job_id}-{int(_time.time())}"
+    config = {
+        "configurable": {
+            "thread_id": thread_id,
+            "repository": ctx.repository,
+            "user_repository": ctx.user_repository,
+        }
+    }
+    await ctx.register_workflow(
+        job_id, thread_id, "preparation", user_id=job.user_id or ""
+    )
+    try:
+        await ctx.prep_workflow.ainvoke(initial_state, config)
+        logger.info("Admin retry workflow completed for job %s", job_id)
+    except Exception as exc:
+        logger.exception("Admin retry workflow failed for job %s", job_id)
+        # Only force-FAILED if the job is still in a non-terminal state.
+        # If the workflow already wrote a terminal state (e.g. CV_READY),
+        # transitioning to FAILED would raise InvalidStateTransitionError.
+        try:
+            current = await ctx.repository.get(job_id)
+            if current is not None and str(current.status) not in {
+                BusinessState.CV_READY.value,
+                BusinessState.PENDING_REVIEW.value,
+                BusinessState.APPLIED.value,
+                BusinessState.DECLINED.value,
+                BusinessState.FILTERED_OUT.value,
+                BusinessState.SCRAPE_FAILED.value,
+            }:
+                await ctx.repository.update(
+                    job_id,
+                    {
+                        "status": BusinessState.FAILED,
+                        "error_message": f"Admin retry failed: {exc}",
+                    },
+                )
+        except Exception:
+            logger.warning("Could not mark job %s FAILED after admin retry", job_id)
+    finally:
+        await ctx.unregister_workflow(job_id)
+
+
+@app.delete("/api/admin/jobs/{job_id}")
+async def admin_delete_job(
+    job_id: str, request: Request, admin: AdminUser
+) -> dict:
+    """Cascade-delete any job and unlink its PDFs."""
+    ctx = _get_ctx(request)
+    deleted = await ctx.repository.delete_cascade(job_id)
+    if not deleted:
+        raise HTTPException(404, f"Job {job_id} not found")
+    return {"deleted": True, "job_id": job_id}
+
+
+@app.post("/api/admin/jobs/bulk-delete")
+async def admin_bulk_delete_jobs(
+    request: Request,
+    admin: AdminUser,
+    body: Annotated[dict, Body(...)],
+) -> dict:
+    """Bulk-delete up to 100 jobs by ID. Returns counts + failures."""
+    job_ids = body.get("job_ids")
+    if not isinstance(job_ids, list) or not job_ids:
+        raise HTTPException(400, "job_ids must be a non-empty list")
+    if len(job_ids) > 100:
+        raise HTTPException(400, "Cannot delete more than 100 jobs at once")
+    if not all(isinstance(j, str) and j for j in job_ids):
+        raise HTTPException(400, "job_ids must be a list of non-empty strings")
+
+    ctx = _get_ctx(request)
+    deleted = 0
+    failed: list[str] = []
+    for jid in job_ids:
+        try:
+            ok = await ctx.repository.delete_cascade(jid)
+            if ok:
+                deleted += 1
+            else:
+                failed.append(jid)
+        except Exception:
+            logger.warning("Failed to delete job %s in bulk-delete", jid, exc_info=True)
+            failed.append(jid)
+    return {"deleted": deleted, "failed": failed}
+
+
+@app.get("/api/admin/queue")
+async def admin_get_queue(request: Request, admin: AdminUser) -> dict:
+    """Return queue, consumer, and scheduler state for the admin dashboard."""
+    ctx = _get_ctx(request)
+    consumer_manager = getattr(request.app.state, "consumer_manager", _consumer_manager)
+
+    snapshot = consumer_manager.snapshot()
+    scheduler_state: list[dict] = []
+    if ctx.scheduler is not None:
+        try:
+            scheduler_state = ctx.scheduler.get_jobs_state()
+        except Exception:
+            logger.warning("Failed to read scheduler state", exc_info=True)
+
+    counts_24h = await ctx.repository.count_by_status_global(window_hours=24)
+    counts_7d = await ctx.repository.count_by_status_global(window_hours=168)
+    counts_all = await ctx.repository.count_by_status_global()
+    return {
+        "consumer": snapshot,
+        "scheduler": scheduler_state,
+        "counts": {
+            "last_24h": counts_24h,
+            "last_7d": counts_7d,
+            "all_time": counts_all,
+        },
+    }
+
+
+@app.post("/api/admin/scheduler/run/{user_id}")
+async def admin_run_scheduler(
+    user_id: str, request: Request, admin: AdminUser
+) -> dict:
+    """Manually fire a LinkedIn search for the given user."""
+    ctx = _get_ctx(request)
+    if ctx.scheduler is None:
+        raise HTTPException(503, "Scheduler not initialized")
+    if ctx.user_repository is None:
+        raise HTTPException(500, "User repository not initialized")
+
+    target_user = await ctx.user_repository.get_by_id(user_id)
+    if target_user is None:
+        raise HTTPException(404, f"User {user_id} not found")
+    if not target_user.search_preferences:
+        raise HTTPException(
+            409, f"User {user_id} has no LinkedIn search preferences configured"
+        )
+
+    # run_search silently returns 0 when its lock is held; surface as 409.
+    if ctx.scheduler.search_in_progress:
+        raise HTTPException(
+            409,
+            "Another LinkedIn search is already in progress — try again shortly",
+        )
+
+    async def _run() -> None:
+        try:
+            count = await ctx.scheduler.run_search(user_id=user_id)
+            logger.info(
+                "Admin-triggered LinkedIn search for user=%s: %d jobs", user_id, count
+            )
+        except Exception:
+            logger.exception(
+                "Admin-triggered LinkedIn search failed for user=%s", user_id
+            )
+
+    ctx.create_background_task(_run())
+    return {"status": "started", "user_id": user_id}
+
+
+@app.get("/api/admin/errors")
+async def admin_list_errors(
+    request: Request,
+    admin: AdminUser,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    since: Annotated[datetime | None, Query()] = None,
+) -> dict:
+    """List jobs with non-null error_message or last_scrape_error."""
+    ctx = _get_ctx(request)
+    since = _normalize_query_datetime(since)
+    items = await ctx.repository.list_jobs_with_errors(
+        limit=limit, offset=offset, since=since
+    )
+    return {
+        "items": [item.model_dump(mode="json") for item in items],
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@app.get("/api/admin/users")
+async def admin_list_users(
+    request: Request,
+    admin: AdminUser,
+    limit: Annotated[int, Query(ge=1, le=500)] = 200,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> dict:
+    """List users with per-user job counts and last_job_at."""
+    ctx = _get_ctx(request)
+    if ctx.user_repository is None:
+        raise HTTPException(500, "User repository not initialized")
+
+    users = await ctx.user_repository.list_all_users(limit=limit, offset=offset)
+
+    async def _per_user(u):
+        last_job_task = ctx.repository.list_all_jobs(
+            user_ids=[u.id], limit=1, offset=0
+        )
+        counts_task = ctx.repository.get_status_counts(u.id)
+        all_jobs, counts = await asyncio.gather(
+            last_job_task, counts_task, return_exceptions=True,
+        )
+        if isinstance(counts, BaseException):
+            counts = {}
+        if isinstance(all_jobs, BaseException):
+            all_jobs = []
+        last_job_at = all_jobs[0].created_at if all_jobs else None
+        return {
+            "user": _serialize_user_summary(u),
+            "job_counts": counts,
+            "last_job_at": last_job_at.isoformat() if last_job_at else None,
+        }
+
+    out = await asyncio.gather(*(_per_user(u) for u in users)) if users else []
+    return {"items": list(out), "limit": limit, "offset": offset}
+
+
+@app.put("/api/admin/users/{user_id}/role")
+async def admin_set_user_role(
+    user_id: str,
+    request: Request,
+    admin: AdminUser,
+    body: Annotated[dict, Body(...)],
+) -> dict:
+    """Change a user's role. Refuses to demote the last remaining admin."""
+    role_raw = body.get("role")
+    try:
+        target_role = UserRole(role_raw)
+    except (ValueError, TypeError):
+        raise HTTPException(400, f"Invalid role: {role_raw!r}") from None
+
+    ctx = _get_ctx(request)
+    if ctx.user_repository is None:
+        raise HTTPException(500, "User repository not initialized")
+
+    # DB-side transaction in set_role_with_admin_guard is the cross-worker
+    # guard; the lock is a single-worker fast-path.
+    async with _admin_role_lock:
+        try:
+            updated = await ctx.user_repository.set_role_with_admin_guard(
+                user_id, target_role
+            )
+        except KeyError:
+            raise HTTPException(404, f"User {user_id} not found") from None
+        except UserRepository.LastAdminError as exc:
+            raise HTTPException(409, str(exc)) from None
+    return _serialize_user_summary(updated)
 
 
 # =============================================================================

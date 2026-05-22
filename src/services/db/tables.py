@@ -24,6 +24,7 @@ class UserTable(Table, tablename="user"):
     id = Varchar(length=36, primary_key=True)  # UUID
     email = Varchar(length=255, unique=True, index=True)
     display_name = Varchar(length=100)
+    role = Varchar(length=20, default="trial", index=True)
     master_cv_json = JSON(null=True)
     search_preferences = JSON(null=True)  # Serialized LinkedInSearchParams
     filter_preferences = JSON(null=True)  # Serialized UserFilterPreferences

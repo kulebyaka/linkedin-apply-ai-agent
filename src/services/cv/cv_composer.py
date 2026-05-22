@@ -13,6 +13,7 @@ from src.models.cv import (
     CVLLMOutput,
     JobSummary,
 )
+
 from .cv_prompts import CVPromptManager
 
 if TYPE_CHECKING:

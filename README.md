@@ -110,6 +110,16 @@ black src/          # Format code
 mypy src/           # Type check
 ```
 
+### First admin
+
+Users sign up via magic-link login and default to the `trial` role. To bootstrap the first admin (and unlock the `/admin` dashboard), run the promotion CLI against the local DB:
+
+```bash
+uv run python scripts/promote_user.py --email you@example.com --role admin
+```
+
+The script also accepts `--role trial|premium` and `--list-admins`.
+
 ## License
 
 All Rights Reserved. This code is provided for viewing purposes only. No permission is granted to use, copy, modify, or distribute this software.

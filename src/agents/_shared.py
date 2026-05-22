@@ -15,12 +15,13 @@ import logging
 import time
 from pathlib import Path
 
-from ..config.settings import get_settings
-from ..llm.provider import LLMClientFactory, LLMProvider
 from src.services.cv.cv_composer import CVComposer
 from src.services.cv.cv_validator import CVValidator, HallucinationPolicy
-from src.services.db.job_repository import JobRepository
 from src.services.cv.pdf_generator import PDFGenerator
+from src.services.db.job_repository import JobRepository
+
+from ..config.settings import get_settings
+from ..llm.provider import LLMClientFactory, LLMProvider
 
 logger = logging.getLogger(__name__)
 settings = get_settings()

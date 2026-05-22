@@ -1,9 +1,12 @@
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
 
+export type UserRole = 'trial' | 'premium' | 'admin';
+
 export interface User {
 	id: string;
 	email: string;
 	display_name: string;
+	role: UserRole;
 	master_cv_json: Record<string, unknown> | null;
 	search_preferences: UserSearchPreferences | null;
 	model_preferences: UserModelPreferences | null;

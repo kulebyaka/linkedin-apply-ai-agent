@@ -108,6 +108,7 @@ ALLOWED_TRANSITIONS: dict[BusinessState, set[BusinessState]] = {
     BusinessState.APPLIED: set(),  # Terminal
     BusinessState.FAILED: {
         BusinessState.RETRYING,
+        BusinessState.QUEUED,  # Admin-initiated retry re-enqueues the job
     },
     BusinessState.FILTERED_OUT: set(),  # Terminal
     BusinessState.SCRAPE_FAILED: {

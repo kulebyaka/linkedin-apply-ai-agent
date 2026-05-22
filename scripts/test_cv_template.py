@@ -150,7 +150,7 @@ def main():
         print(f"Loading CV from: {cv_path}")
 
     try:
-        with open(cv_path, "r", encoding="utf-8") as f:
+        with open(cv_path, encoding="utf-8") as f:
             cv_json = json.load(f)
     except FileNotFoundError:
         print(f"[ERROR] CV file not found: {cv_path}")

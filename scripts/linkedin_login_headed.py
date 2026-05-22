@@ -104,7 +104,7 @@ async def main() -> int:
                 while not disconnected.is_set():
                     try:
                         await asyncio.wait_for(disconnected.wait(), timeout=10)
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         await snapshot_cookies("periodic")
 
             snapshot_task = asyncio.create_task(periodic_snapshot())

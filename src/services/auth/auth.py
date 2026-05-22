@@ -14,6 +14,7 @@ import jwt
 
 from src.config.settings import Settings
 from src.models.user import User
+
 from .user_repository import UserRepository
 
 logger = logging.getLogger(__name__)
