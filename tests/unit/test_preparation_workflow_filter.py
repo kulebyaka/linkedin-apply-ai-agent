@@ -126,7 +126,7 @@ def _make_config(repo=None, user_repo=None) -> dict:
 
 class TestRouteAfterFilter:
     def test_routes_to_filtered_out_when_step_is_filtered_out(self):
-        state = _make_state(current_step=BusinessState.FILTERED_OUT)
+        state = _make_state(target_status=BusinessState.FILTERED_OUT)
         assert route_after_filter(state) == "filtered_out"
 
     def test_routes_to_compose_when_step_is_job_filtered(self):
@@ -310,7 +310,7 @@ class TestFilterJobNodeOutcomes:
 
             result = await filter_job_node(state, _make_config(user_repo=user_repo))
 
-        assert result["current_step"] == BusinessState.FILTERED_OUT
+        assert result["target_status"] == BusinessState.FILTERED_OUT
         assert result["filter_result"]["score"] == 20
 
     async def test_reject_by_disqualifier(self):
@@ -333,7 +333,7 @@ class TestFilterJobNodeOutcomes:
 
             result = await filter_job_node(state, _make_config(user_repo=user_repo))
 
-        assert result["current_step"] == BusinessState.FILTERED_OUT
+        assert result["target_status"] == BusinessState.FILTERED_OUT
         assert result["filter_result"]["disqualified"] is True
 
     async def test_uses_user_thresholds_from_prefs(self):
@@ -452,7 +452,7 @@ class TestHITLProcessorFilterResult:
             user_id="user-1",
             source="linkedin",
             mode="full",
-            status=BusinessState.PENDING_REVIEW,
+            status=BusinessState.PENDING,
             job_posting={"title": "Engineer", "company": "Acme"},
             current_cv_json={"name": "Test"},
             filter_result=filter_data,
@@ -486,7 +486,7 @@ class TestHITLProcessorFilterResult:
             user_id="user-1",
             source="manual",
             mode="full",
-            status=BusinessState.PENDING_REVIEW,
+            status=BusinessState.PENDING,
             job_posting={"title": "Engineer", "company": "Acme"},
             current_cv_json={"name": "Test"},
             filter_result=None,

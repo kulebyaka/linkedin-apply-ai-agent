@@ -10,6 +10,7 @@ import pytest
 import pytest_asyncio
 
 from src.models.user import UserSearchPreferences
+from src.services.auth.magic_link_repository import MagicLinkRepository
 from src.services.auth.user_repository import UserRepository
 
 
@@ -31,6 +32,27 @@ async def db_and_repo(tmp_path):
 
     repo = UserRepository()
     yield repo
+
+    await engine.close_connection_pool()
+
+
+@pytest_asyncio.fixture
+async def magic_link_repo(tmp_path):
+    """Set up a temporary SQLite database and return a MagicLinkRepository."""
+    from piccolo.engine.sqlite import SQLiteEngine
+
+    from src.services.db.tables import MagicLinkTable, UserTable
+
+    db_path = tmp_path / "test_magic.db"
+    engine = SQLiteEngine(path=str(db_path))
+
+    UserTable._meta._db = engine
+    MagicLinkTable._meta._db = engine
+
+    await UserTable.create_table(if_not_exists=True).run()
+    await MagicLinkTable.create_table(if_not_exists=True).run()
+
+    yield MagicLinkRepository()
 
     await engine.close_connection_pool()
 
@@ -192,71 +214,65 @@ async def test_get_all_with_search_prefs_multiple_users(db_and_repo):
 
 
 @pytest.mark.asyncio
-async def test_create_and_verify_magic_link(db_and_repo):
-    repo = db_and_repo
+async def test_create_and_verify_magic_link(magic_link_repo):
     token = "test-token-123"
     expires = datetime.now(tz=timezone.utc) + timedelta(minutes=15)
 
-    await repo.create_magic_link("magic@example.com", token, expires)
+    await magic_link_repo.create_magic_link("magic@example.com", token, expires)
 
-    email = await repo.verify_magic_link(token)
+    email = await magic_link_repo.verify_magic_link(token)
     assert email == "magic@example.com"
 
 
 @pytest.mark.asyncio
-async def test_verify_magic_link_marks_as_used(db_and_repo):
-    repo = db_and_repo
+async def test_verify_magic_link_marks_as_used(magic_link_repo):
     token = "use-once-token"
     expires = datetime.now(tz=timezone.utc) + timedelta(minutes=15)
 
-    await repo.create_magic_link("once@example.com", token, expires)
+    await magic_link_repo.create_magic_link("once@example.com", token, expires)
 
     # First verification succeeds
-    email = await repo.verify_magic_link(token)
+    email = await magic_link_repo.verify_magic_link(token)
     assert email == "once@example.com"
 
     # Second verification fails (already used)
-    email2 = await repo.verify_magic_link(token)
+    email2 = await magic_link_repo.verify_magic_link(token)
     assert email2 is None
 
 
 @pytest.mark.asyncio
-async def test_verify_expired_magic_link(db_and_repo):
-    repo = db_and_repo
+async def test_verify_expired_magic_link(magic_link_repo):
     token = "expired-token"
     expires = datetime.now(tz=timezone.utc) - timedelta(minutes=1)
 
-    await repo.create_magic_link("expired@example.com", token, expires)
+    await magic_link_repo.create_magic_link("expired@example.com", token, expires)
 
-    email = await repo.verify_magic_link(token)
+    email = await magic_link_repo.verify_magic_link(token)
     assert email is None
 
 
 @pytest.mark.asyncio
-async def test_verify_nonexistent_token(db_and_repo):
-    repo = db_and_repo
-    email = await repo.verify_magic_link("does-not-exist")
+async def test_verify_nonexistent_token(magic_link_repo):
+    email = await magic_link_repo.verify_magic_link("does-not-exist")
     assert email is None
 
 
 @pytest.mark.asyncio
-async def test_cleanup_expired_magic_links(db_and_repo):
-    repo = db_and_repo
-
+async def test_cleanup_expired_magic_links(magic_link_repo):
     # Create one expired and one valid token
     expired_time = datetime.now(tz=timezone.utc) - timedelta(hours=1)
     valid_time = datetime.now(tz=timezone.utc) + timedelta(hours=1)
 
-    await repo.create_magic_link("old@example.com", "old-token", expired_time)
-    await repo.create_magic_link("new@example.com", "new-token", valid_time)
+    await magic_link_repo.create_magic_link("old@example.com", "old-token", expired_time)
+    await magic_link_repo.create_magic_link("new@example.com", "new-token", valid_time)
 
-    deleted = await repo.cleanup_expired_magic_links()
+    deleted = await magic_link_repo.cleanup_expired_magic_links()
     assert deleted == 1
 
     # Valid token should still work
-    email = await repo.verify_magic_link("new-token")
+    email = await magic_link_repo.verify_magic_link("new-token")
     assert email == "new@example.com"
 
     # Expired token is gone
-    email_old = await repo.verify_magic_link("old-token")
+    email_old = await magic_link_repo.verify_magic_link("old-token")
     assert email_old is None

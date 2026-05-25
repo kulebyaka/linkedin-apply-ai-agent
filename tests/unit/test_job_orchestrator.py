@@ -19,13 +19,17 @@ def _make_ctx(**overrides) -> AppContext:
     repo = AsyncMock()
     repo.get = AsyncMock(return_value=None)
     repo.get_for_user = AsyncMock(return_value=None)
+    prep_workflow = MagicMock()
+    prep_workflow.ainvoke = AsyncMock(return_value={"current_step": "completed"})
     ctx = AppContext(
         repository=repo,
         settings=MagicMock(),
-        prep_workflow=MagicMock(),
+        prep_workflow=prep_workflow,
         retry_workflow=MagicMock(),
         job_queue=MagicMock(),
     )
+    from src.agents.dispatcher import WorkflowDispatcher
+    ctx.workflow_dispatcher = WorkflowDispatcher(ctx)
     for k, v in overrides.items():
         setattr(ctx, k, v)
     return ctx

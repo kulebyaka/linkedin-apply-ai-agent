@@ -367,7 +367,7 @@ class TestLinkedInSearchAPI:
         raise_server_exceptions=False the lifespan failure is swallowed,
         leaving app.state.ctx as we set it beforehand.
 
-        The module-level _consumer_manager is also mocked to prevent
+        The consumer_manager on AppContext is also mocked to prevent
         the trigger-search endpoint from importing the WeasyPrint chain
         (via job_queue -> _shared -> pdf_generator).
         """
@@ -405,16 +405,14 @@ class TestLinkedInSearchAPI:
             main_module.settings = test_settings
 
             # Mock the consumer manager to avoid WeasyPrint import chain
-            original_cm = main_module._consumer_manager
             mock_cm = MagicMock()
             mock_cm.task = MagicMock()
             mock_cm.task.done.return_value = False  # pretend consumer is running
-            main_module._consumer_manager = mock_cm
+            ctx.consumer_manager = mock_cm
 
             yield TestClient(main_module.app, raise_server_exceptions=False), ctx
 
             main_module.settings = original_settings
-            main_module._consumer_manager = original_cm
             main_module.app.dependency_overrides.pop(main_module.get_current_user, None)
         except OSError:
             pytest.skip("WeasyPrint system libraries not available")

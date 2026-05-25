@@ -14,14 +14,17 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
 
+    from src.agents.dispatcher import WorkflowDispatcher
     from src.services.alerts import AdminAlertService
     from src.services.auth.auth import AuthService
+    from src.services.auth.magic_link_repository import MagicLinkRepository
     from src.services.auth.user_repository import UserRepository
+    from src.services.auth.user_service import UserService
     from src.services.cv.pdf_extraction import CVExtractionRegistry
     from src.services.db.job_repository import JobRepository
     from src.services.jobs.hitl_processor import HITLProcessor
     from src.services.jobs.job_orchestrator import JobOrchestrator
-    from src.services.jobs.job_queue import JobQueue
+    from src.services.jobs.job_queue import ConsumerManager, JobQueue
     from src.services.jobs.scheduler import LinkedInSearchScheduler
     from src.services.linkedin.browser_automation import LinkedInAutomation
 
@@ -43,6 +46,8 @@ class AppContext:
     prep_workflow: CompiledStateGraph
     retry_workflow: CompiledStateGraph
     user_repository: UserRepository | None = None
+    magic_link_repository: MagicLinkRepository | None = None
+    user_service: UserService | None = None
     auth_service: AuthService | None = None
     admin_alert_service: AdminAlertService | None = None
     job_queue: JobQueue | None = None
@@ -51,6 +56,15 @@ class AppContext:
     orchestrator: JobOrchestrator | None = None
     hitl_processor: HITLProcessor | None = None
     cv_extraction_registry: CVExtractionRegistry | None = None
+    consumer_manager: ConsumerManager | None = None
+    workflow_dispatcher: WorkflowDispatcher | None = None
+
+    # Lock for LinkedIn search/browser initialization (manual trigger path).
+    linkedin_init_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    # Serializes admin role changes so the last-admin guard is atomic with set_role.
+    admin_role_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    # Serializes admin retry start so the status check + re-queue + schedule are atomic.
+    admin_retry_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     # Thread-safe tracking for in-progress workflows
     _tracking_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
@@ -107,16 +121,19 @@ def create_app_context(
     Returns:
         AppContext with repository, workflows, and queue wired up.
     """
+    from src.agents.dispatcher import WorkflowDispatcher
     from src.agents.preparation_workflow import create_preparation_workflow
     from src.agents.retry_workflow import create_retry_workflow
     from src.services.alerts import AdminAlertService
     from src.services.auth.auth import AuthService
+    from src.services.auth.magic_link_repository import MagicLinkRepository
     from src.services.auth.user_repository import UserRepository
+    from src.services.auth.user_service import UserService
     from src.services.cv.pdf_extraction import CVExtractionRegistry
     from src.services.db.job_repository import get_repository
     from src.services.jobs.hitl_processor import HITLProcessor
     from src.services.jobs.job_orchestrator import JobOrchestrator
-    from src.services.jobs.job_queue import JobQueue
+    from src.services.jobs.job_queue import ConsumerManager, JobQueue
 
     if settings is None:
         settings = get_settings()
@@ -131,7 +148,9 @@ def create_app_context(
     job_queue = JobQueue()
 
     user_repository = UserRepository()
-    auth_service = AuthService(settings, user_repository)
+    magic_link_repository = MagicLinkRepository()
+    user_service = UserService(user_repository)
+    auth_service = AuthService(settings, user_repository, magic_link_repository)
     admin_alert_service = AdminAlertService(settings)
 
     ctx = AppContext(
@@ -140,13 +159,17 @@ def create_app_context(
         prep_workflow=prep_workflow,
         retry_workflow=retry_workflow,
         user_repository=user_repository,
+        magic_link_repository=magic_link_repository,
+        user_service=user_service,
         auth_service=auth_service,
         admin_alert_service=admin_alert_service,
         job_queue=job_queue,
         cv_extraction_registry=CVExtractionRegistry(),
+        consumer_manager=ConsumerManager(),
     )
 
     # Wire domain services (they need the full context)
+    ctx.workflow_dispatcher = WorkflowDispatcher(ctx)
     ctx.orchestrator = JobOrchestrator(ctx)
     ctx.hitl_processor = HITLProcessor(ctx)
 

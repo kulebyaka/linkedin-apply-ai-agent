@@ -21,8 +21,8 @@ class TestBusinessStateEnum:
     def test_enum_values_are_strings(self):
         assert BusinessState.QUEUED == "queued"
         assert BusinessState.PROCESSING == "processing"
-        assert BusinessState.CV_READY == "completed"
-        assert BusinessState.PENDING_REVIEW == "pending"
+        assert BusinessState.COMPLETED == "completed"
+        assert BusinessState.PENDING == "pending"
         assert BusinessState.APPROVED == "approved"
         assert BusinessState.DECLINED == "declined"
         assert BusinessState.RETRYING == "retrying"
@@ -32,8 +32,8 @@ class TestBusinessStateEnum:
 
     def test_enum_from_string(self):
         assert BusinessState("queued") == BusinessState.QUEUED
-        assert BusinessState("pending") == BusinessState.PENDING_REVIEW
-        assert BusinessState("completed") == BusinessState.CV_READY
+        assert BusinessState("pending") == BusinessState.PENDING
+        assert BusinessState("completed") == BusinessState.COMPLETED
 
     def test_invalid_string_raises(self):
         with pytest.raises(ValueError):
@@ -43,7 +43,7 @@ class TestBusinessStateEnum:
         """BusinessState values should compare equal to plain strings."""
         assert BusinessState.QUEUED == "queued"
         assert "queued" == BusinessState.QUEUED
-        assert BusinessState.PENDING_REVIEW == "pending"
+        assert BusinessState.PENDING == "pending"
 
 
 class TestWorkflowStepEnum:
@@ -66,19 +66,19 @@ class TestValidTransitions:
         "current,target",
         [
             (BusinessState.QUEUED, BusinessState.PROCESSING),
-            (BusinessState.QUEUED, BusinessState.CV_READY),
-            (BusinessState.QUEUED, BusinessState.PENDING_REVIEW),
+            (BusinessState.QUEUED, BusinessState.COMPLETED),
+            (BusinessState.QUEUED, BusinessState.PENDING),
             (BusinessState.QUEUED, BusinessState.FAILED),
-            (BusinessState.PROCESSING, BusinessState.CV_READY),
-            (BusinessState.PROCESSING, BusinessState.PENDING_REVIEW),
+            (BusinessState.PROCESSING, BusinessState.COMPLETED),
+            (BusinessState.PROCESSING, BusinessState.PENDING),
             (BusinessState.PROCESSING, BusinessState.FAILED),
-            (BusinessState.PENDING_REVIEW, BusinessState.APPROVED),
-            (BusinessState.PENDING_REVIEW, BusinessState.DECLINED),
-            (BusinessState.PENDING_REVIEW, BusinessState.RETRYING),
+            (BusinessState.PENDING, BusinessState.APPROVED),
+            (BusinessState.PENDING, BusinessState.DECLINED),
+            (BusinessState.PENDING, BusinessState.RETRYING),
             (BusinessState.APPROVED, BusinessState.APPLYING),
             (BusinessState.APPROVED, BusinessState.APPLIED),
             (BusinessState.APPROVED, BusinessState.FAILED),
-            (BusinessState.RETRYING, BusinessState.PENDING_REVIEW),
+            (BusinessState.RETRYING, BusinessState.PENDING),
             (BusinessState.RETRYING, BusinessState.FAILED),
             (BusinessState.APPLYING, BusinessState.APPLIED),
             (BusinessState.APPLYING, BusinessState.FAILED),
@@ -101,23 +101,23 @@ class TestInvalidTransitions:
         "current,target",
         [
             # Terminal states have no successors
-            (BusinessState.CV_READY, BusinessState.PENDING_REVIEW),
-            (BusinessState.CV_READY, BusinessState.FAILED),
+            (BusinessState.COMPLETED, BusinessState.PENDING),
+            (BusinessState.COMPLETED, BusinessState.FAILED),
             (BusinessState.DECLINED, BusinessState.APPROVED),
             (BusinessState.DECLINED, BusinessState.RETRYING),
             (BusinessState.APPLIED, BusinessState.FAILED),
             (BusinessState.APPLIED, BusinessState.QUEUED),
             # Backward transitions
-            (BusinessState.APPROVED, BusinessState.PENDING_REVIEW),
+            (BusinessState.APPROVED, BusinessState.PENDING),
             (BusinessState.APPROVED, BusinessState.QUEUED),
             (BusinessState.PROCESSING, BusinessState.QUEUED),
             # Skip-ahead transitions
             (BusinessState.QUEUED, BusinessState.APPLIED),
             (BusinessState.QUEUED, BusinessState.APPROVED),
-            (BusinessState.PENDING_REVIEW, BusinessState.APPLIED),
+            (BusinessState.PENDING, BusinessState.APPLIED),
             # Failed can only go to retrying or queued (admin retry)
             (BusinessState.FAILED, BusinessState.APPROVED),
-            (BusinessState.FAILED, BusinessState.PENDING_REVIEW),
+            (BusinessState.FAILED, BusinessState.PENDING),
         ],
     )
     def test_invalid_transition_raises(self, current, target):
@@ -150,7 +150,7 @@ class TestTerminalStates:
     """Test that terminal states have no successors (except failed -> retrying)."""
 
     def test_cv_ready_is_terminal(self):
-        assert ALLOWED_TRANSITIONS[BusinessState.CV_READY] == set()
+        assert ALLOWED_TRANSITIONS[BusinessState.COMPLETED] == set()
 
     def test_declined_is_terminal(self):
         assert ALLOWED_TRANSITIONS[BusinessState.DECLINED] == set()
@@ -176,24 +176,24 @@ class TestTransitionMapCompleteness:
 
     def test_preparation_workflow_mvp_path(self):
         """queued -> cv_ready (MVP mode)."""
-        validate_transition(BusinessState.QUEUED, BusinessState.CV_READY)
+        validate_transition(BusinessState.QUEUED, BusinessState.COMPLETED)
 
     def test_preparation_workflow_full_path(self):
         """queued -> pending_review (full mode)."""
-        validate_transition(BusinessState.QUEUED, BusinessState.PENDING_REVIEW)
+        validate_transition(BusinessState.QUEUED, BusinessState.PENDING)
 
     def test_hitl_approve_path(self):
         """pending_review -> approved."""
-        validate_transition(BusinessState.PENDING_REVIEW, BusinessState.APPROVED)
+        validate_transition(BusinessState.PENDING, BusinessState.APPROVED)
 
     def test_hitl_decline_path(self):
         """pending_review -> declined."""
-        validate_transition(BusinessState.PENDING_REVIEW, BusinessState.DECLINED)
+        validate_transition(BusinessState.PENDING, BusinessState.DECLINED)
 
     def test_hitl_retry_path(self):
         """pending_review -> retrying -> pending_review."""
-        validate_transition(BusinessState.PENDING_REVIEW, BusinessState.RETRYING)
-        validate_transition(BusinessState.RETRYING, BusinessState.PENDING_REVIEW)
+        validate_transition(BusinessState.PENDING, BusinessState.RETRYING)
+        validate_transition(BusinessState.RETRYING, BusinessState.PENDING)
 
     def test_application_path(self):
         """approved -> applying -> applied."""
@@ -203,4 +203,4 @@ class TestTransitionMapCompleteness:
     def test_failed_retry_path(self):
         """failed -> retrying -> pending_review."""
         validate_transition(BusinessState.FAILED, BusinessState.RETRYING)
-        validate_transition(BusinessState.RETRYING, BusinessState.PENDING_REVIEW)
+        validate_transition(BusinessState.RETRYING, BusinessState.PENDING)

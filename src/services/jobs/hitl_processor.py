@@ -36,7 +36,7 @@ class HITLProcessor:
     - Querying application history
 
     Uses per-job locks to prevent concurrent decisions on the same job
-    (e.g., two retry requests racing past the PENDING_REVIEW check).
+    (e.g., two retry requests racing past the PENDING check).
     """
 
     def __init__(self, ctx: AppContext) -> None:
@@ -100,7 +100,7 @@ class HITLProcessor:
             if job_record is None:
                 raise KeyError(f"Job {job_id} not found")
 
-            if job_record.status != BusinessState.PENDING_REVIEW:
+            if job_record.status != BusinessState.PENDING:
                 raise RuntimeError(
                     f"Job {job_id} is not pending review (status: {job_record.status})"
                 )
@@ -250,10 +250,17 @@ class HITLProcessor:
                 "error_message": None,
             }
 
-            await self._ctx.register_workflow(job_id, retry_thread_id, "retry", user_id=user_id)
+            dispatcher = self._ctx.workflow_dispatcher
+            if dispatcher is None:
+                raise RuntimeError("workflow_dispatcher not initialized on AppContext")
 
             self._ctx.create_background_task(
-                self._run_retry_workflow(job_id, retry_thread_id, retry_state)
+                dispatcher.dispatch_retry(
+                    job_id=job_id,
+                    thread_id=retry_thread_id,
+                    initial_state=retry_state,
+                    user_id=user_id,
+                )
             )
         except Exception as e:
             # Rollback status to pending_review so the job isn't stuck in retrying
@@ -263,7 +270,7 @@ class HITLProcessor:
             )
             try:
                 await self._ctx.repository.update(
-                    job_id, {"status": BusinessState.PENDING_REVIEW}
+                    job_id, {"status": BusinessState.PENDING}
                 )
             except Exception:
                 # Rollback to pending failed; try marking as failed so the job
@@ -289,33 +296,4 @@ class HITLProcessor:
             message="CV regeneration started with your feedback.",
         )
 
-    async def _run_retry_workflow(
-        self, job_id: str, thread_id: str, initial_state: dict
-    ) -> None:
-        """Execute retry workflow asynchronously."""
-        try:
-            config = {
-                "configurable": {
-                    "thread_id": thread_id,
-                    "repository": self._ctx.repository,
-                }
-            }
-            result = await self._ctx.retry_workflow.ainvoke(initial_state, config)
-            logger.info(
-                "Retry workflow for job %s completed: %s",
-                job_id,
-                result.get("current_step"),
-            )
-        except Exception as e:
-            logger.error(
-                "Retry workflow for job %s failed: %s", job_id, e, exc_info=True
-            )
-            try:
-                await self._ctx.repository.update(
-                    job_id, {"status": BusinessState.FAILED, "error_message": str(e)}
-                )
-            except Exception:
-                logger.warning("Failed to mark job %s as FAILED in repository", job_id)
-        finally:
-            await self._ctx.unregister_workflow(job_id)
 

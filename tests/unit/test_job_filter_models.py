@@ -202,7 +202,7 @@ class TestFilteredOutState:
 
     def test_filtered_out_not_reachable_from_terminal_states(self):
         terminal_states = [
-            BusinessState.CV_READY,
+            BusinessState.COMPLETED,
             BusinessState.DECLINED,
             BusinessState.APPLIED,
         ]
