@@ -419,10 +419,11 @@ class TestPromptConstruction:
         prompt = mock_llm.generate_json_calls[0]["prompt"]
         assert "User Preferences" not in prompt
 
-    def test_custom_prompt_overrides_default_template(
+    def test_custom_prompt_takes_precedence_over_natural_language_prefs(
         self, job_filter, mock_llm, job_posting
     ):
-        """When custom_prompt is set, the default template text should NOT appear."""
+        """When custom_prompt is set, it is injected as the user-criteria section
+        of the default template; natural_language_prefs is ignored."""
         mock_llm.set_generate_json_response({
             "score": 80, "red_flags": [], "disqualified": False,
             "disqualifier_reason": None, "reasoning": "Good."
@@ -434,7 +435,11 @@ class TestPromptConstruction:
         job_filter.evaluate_job(job_posting, user_filter_prefs=prefs)
 
         prompt = mock_llm.generate_json_calls[0]["prompt"]
-        # Custom prompt should be used
+        # Custom prompt is injected
         assert "Only check if it's a Python role." in prompt
-        # Default template markers should NOT be present
-        assert "FAKE REMOTE" not in prompt
+        # natural_language_prefs is NOT used when custom_prompt is set
+        assert "I also have prefs here" not in prompt
+        # custom_prompt is prefixed with the user-criteria header (not the
+        # natural-language header)
+        assert "User-Specific Criteria" in prompt
+        assert "User Preferences" not in prompt

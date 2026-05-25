@@ -310,6 +310,37 @@
 		{/if}
 	</div>
 
+	{#if extracting}
+		{@const statusLabel = extractionStatus === 'uploading'
+			? 'Uploading PDF…'
+			: extractionStatus === 'pending'
+				? 'Queued — waiting for worker…'
+				: extractionStatus === 'running'
+					? 'Extracting CV with LLM (this can take 30–60s)…'
+					: 'Working…'}
+		<div class="mb-4 border-2 border-[var(--color-foreground)] bg-[var(--color-background)] px-3 py-3">
+			<div class="mb-2 flex items-center gap-2 font-mono text-xs uppercase tracking-wider text-[var(--color-foreground)]">
+				<svg
+					class="-ml-0.5 h-4 w-4 animate-spin text-[var(--color-foreground)]"
+					xmlns="http://www.w3.org/2000/svg"
+					fill="none"
+					viewBox="0 0 24 24"
+				>
+					<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+					<path
+						class="opacity-75"
+						fill="currentColor"
+						d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+					></path>
+				</svg>
+				<span>{statusLabel}</span>
+			</div>
+			<div class="h-2 w-full overflow-hidden border-2 border-[var(--color-foreground)] bg-white">
+				<div class="cv-progress-bar h-full bg-[var(--color-primary)]"></div>
+			</div>
+		</div>
+	{/if}
+
 	<div class="mb-4 flex flex-wrap items-center gap-2">
 		<input
 			bind:this={fileInput}
@@ -392,3 +423,19 @@
 		onClose={() => (toastMessage = null)}
 	/>
 {/if}
+
+<style>
+	.cv-progress-bar {
+		width: 40%;
+		animation: cv-progress-slide 1.4s ease-in-out infinite;
+	}
+
+	@keyframes cv-progress-slide {
+		0% {
+			margin-left: -40%;
+		}
+		100% {
+			margin-left: 100%;
+		}
+	}
+</style>

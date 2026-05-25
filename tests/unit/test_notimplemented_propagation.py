@@ -117,6 +117,8 @@ async def test_save_to_db_repo_not_implemented_fails():
     }
 
     mock_repo = AsyncMock()
+    # No pre-existing record — code path goes to create()
+    mock_repo.get = AsyncMock(return_value=None)
     mock_repo.create = AsyncMock(
         side_effect=NotImplementedError("create() not implemented")
     )

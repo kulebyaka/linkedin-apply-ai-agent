@@ -384,6 +384,7 @@ class TestFilterJobNodeOutcomes:
 class TestSaveFilteredOutNode:
     async def test_saves_minimal_job_record(self):
         repo = AsyncMock()
+        repo.get = AsyncMock(return_value=None)
         repo.create = AsyncMock()
 
         state = _make_state(
@@ -406,6 +407,7 @@ class TestSaveFilteredOutNode:
 
     async def test_saves_with_correct_user_id(self):
         repo = AsyncMock()
+        repo.get = AsyncMock(return_value=None)
         state = _make_state(user_id="user-xyz", current_step=BusinessState.FILTERED_OUT)
         await save_filtered_out_node(state, _make_config(repo=repo))
         saved_record = repo.create.call_args[0][0]
@@ -413,6 +415,7 @@ class TestSaveFilteredOutNode:
 
     async def test_raises_on_save_error(self):
         repo = AsyncMock()
+        repo.get = AsyncMock(return_value=None)
         repo.create = AsyncMock(side_effect=RuntimeError("DB write failed"))
 
         state = _make_state(current_step=BusinessState.FILTERED_OUT)
@@ -421,6 +424,7 @@ class TestSaveFilteredOutNode:
 
     async def test_saves_source_and_mode(self):
         repo = AsyncMock()
+        repo.get = AsyncMock(return_value=None)
         state = _make_state(source="linkedin", mode="full")
         await save_filtered_out_node(state, _make_config(repo=repo))
 

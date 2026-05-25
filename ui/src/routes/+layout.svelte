@@ -60,10 +60,10 @@
 	{:else}
 		<nav class="border-b-4 border-[var(--color-foreground)] bg-[var(--color-background)]">
 			<div class="container mx-auto flex items-center justify-between px-4 py-3">
-				<span class="flex items-center gap-2 font-heading text-lg font-bold">
+				<a href="/" class="flex items-center gap-2 font-heading text-lg font-bold hover:underline">
 					Job Application Agent
 					<WIPBadge label={WIP.V1_BETA.label} tooltip={WIP.V1_BETA.tooltip} />
-				</span>
+				</a>
 
 				{#if auth.isAuthenticated}
 					<!-- Desktop nav -->

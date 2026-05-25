@@ -124,9 +124,11 @@ Requirements:
 			></textarea>
 
 			<!-- Character count -->
-			<div class="mt-3 font-mono text-xs tracking-wider text-[var(--color-muted-foreground)]">
-				{jobDescription.length} / 50 characters minimum
-			</div>
+			{#if jobDescription.trim().length < 50}
+				<div class="mt-3 font-mono text-xs tracking-wider text-[var(--color-muted-foreground)]">
+					50 characters minimum
+				</div>
+			{/if}
 
 			<!-- Validation error -->
 			{#if validationError}
