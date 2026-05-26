@@ -35,6 +35,21 @@
 			return 'Good Match';
 		}
 	}
+
+	function formatScrapedAt(iso: string): { label: string; title: string } {
+		const d = new Date(iso);
+		if (Number.isNaN(d.getTime())) return { label: iso, title: iso };
+		const label = d.toLocaleString(undefined, {
+			year: 'numeric',
+			month: 'short',
+			day: '2-digit',
+			hour: '2-digit',
+			minute: '2-digit',
+		});
+		return { label, title: d.toISOString() };
+	}
+
+	const scrapedAt = $derived(formatScrapedAt(job.created_at));
 </script>
 
 <div
@@ -71,6 +86,13 @@
 			<span class="h-1 w-1 bg-[var(--color-muted-foreground)]"></span>
 			<span class="font-mono text-xs uppercase tracking-wider text-[var(--color-muted-foreground)]">
 				Source: {job.source}
+			</span>
+			<span class="h-1 w-1 bg-[var(--color-muted-foreground)]"></span>
+			<span
+				class="font-mono text-xs uppercase tracking-wider text-[var(--color-muted-foreground)]"
+				title={scrapedAt.title}
+			>
+				Scraped: {scrapedAt.label}
 			</span>
 			{#if job.filter_result}
 				<span class="h-1 w-1 bg-[var(--color-muted-foreground)]"></span>
