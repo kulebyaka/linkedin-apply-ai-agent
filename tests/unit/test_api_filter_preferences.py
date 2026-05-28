@@ -312,9 +312,11 @@ class TestGenerateFilterPrompt:
                 json={"natural_language_prefs": "No visa sponsorship, no clearance"},
             )
 
-        mock_filter_instance.generate_prompt_from_preferences.assert_called_once_with(
-            "No visa sponsorship, no clearance"
-        )
+        mock_filter_instance.generate_prompt_from_preferences.assert_called_once()
+        args, _kwargs = mock_filter_instance.generate_prompt_from_preferences.call_args
+        assert args[0] == "No visa sponsorship, no clearance"
+        # user_id is positional arg #2 — value comes from the auth dependency
+        assert len(args) == 2
 
     def test_503_when_llm_not_configured(self, api_client):
         client, _ = api_client

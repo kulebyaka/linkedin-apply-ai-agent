@@ -61,7 +61,7 @@
 	<!-- Panel Content -->
 	<div class="border-t-2 border-[var(--color-foreground)]">
 		{#if currentPanel === 'job'}
-			<JobDescriptionPanel job={job.job_posting} applicationUrl={job.application_url} />
+			<JobDescriptionPanel job={job.job_posting} applicationUrl={job.application_url} {scrapedAt} />
 		{:else}
 			<CVPreviewPanel jobId={job.job_id} />
 		{/if}
@@ -86,13 +86,6 @@
 			<span class="h-1 w-1 bg-[var(--color-muted-foreground)]"></span>
 			<span class="font-mono text-xs uppercase tracking-wider text-[var(--color-muted-foreground)]">
 				Source: {job.source}
-			</span>
-			<span class="h-1 w-1 bg-[var(--color-muted-foreground)]"></span>
-			<span
-				class="font-mono text-xs uppercase tracking-wider text-[var(--color-muted-foreground)]"
-				title={scrapedAt.title}
-			>
-				Scraped: {scrapedAt.label}
 			</span>
 			{#if job.filter_result}
 				<span class="h-1 w-1 bg-[var(--color-muted-foreground)]"></span>

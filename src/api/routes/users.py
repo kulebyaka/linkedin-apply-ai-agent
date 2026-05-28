@@ -271,6 +271,7 @@ async def generate_filter_prompt(
         prompt = await asyncio.to_thread(
             job_filter.generate_prompt_from_preferences,
             body.natural_language_prefs,
+            user.id,
         )
         return {"prompt": prompt}
     except JobFilterError as e:

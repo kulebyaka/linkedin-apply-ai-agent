@@ -146,6 +146,7 @@ async def compose_cv(
     llm_provider: str | None = None,
     llm_model: str | None = None,
     user_feedback: str | None = None,
+    user_id: str = "",
 ) -> dict:
     """Compose a tailored CV using LLM.
 
@@ -190,6 +191,7 @@ async def compose_cv(
             job_posting=job_posting,
             user_feedback=user_feedback,
             validator=validator,
+            user_id=user_id,
         )
 
         elapsed = time.time() - start_time

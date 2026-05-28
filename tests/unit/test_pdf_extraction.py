@@ -43,10 +43,10 @@ class TestProviderCapabilities:
 
     def test_base_default_raises_not_implemented(self):
         class Dummy(BaseLLMClient):
-            def generate(self, prompt, temperature=0.7, **kwargs):  # pragma: no cover
+            def generate(self, spec, temperature=0.7, **kwargs):  # pragma: no cover
                 return ""
 
-            def generate_json(self, prompt, schema=None, temperature=0.4, max_retries=3, **kwargs):  # pragma: no cover
+            def generate_json(self, spec, schema=None, temperature=0.4, max_retries=3, **kwargs):  # pragma: no cover
                 return {}
 
         d = Dummy(api_key="x", model="dummy")

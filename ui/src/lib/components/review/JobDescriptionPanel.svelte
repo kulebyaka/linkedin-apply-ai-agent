@@ -4,20 +4,31 @@
 	interface Props {
 		job: JobPosting;
 		applicationUrl: string;
+		scrapedAt?: { label: string; title: string };
 	}
 
-	let { job, applicationUrl }: Props = $props();
+	let { job, applicationUrl, scrapedAt }: Props = $props();
 </script>
 
 <div class="h-[500px] overflow-y-auto px-6 py-6 sm:px-8">
 	<!-- Header -->
 	<div class="mb-6">
-		<div
-			class="mb-2 inline-block border-2 border-[var(--color-foreground)] bg-[var(--color-muted)] px-3 py-1"
-		>
-			<span class="font-mono text-xs uppercase tracking-wider text-[var(--color-muted-foreground)]">
-				{job.company}
-			</span>
+		<div class="mb-2 flex items-center justify-between gap-3">
+			<div
+				class="inline-block border-2 border-[var(--color-foreground)] bg-[var(--color-muted)] px-3 py-1"
+			>
+				<span class="font-mono text-xs uppercase tracking-wider text-[var(--color-muted-foreground)]">
+					{job.company}
+				</span>
+			</div>
+			{#if scrapedAt}
+				<span
+					class="font-mono text-xs uppercase tracking-wider text-[var(--color-muted-foreground)]"
+					title={scrapedAt.title}
+				>
+					Scraped: {scrapedAt.label}
+				</span>
+			{/if}
 		</div>
 		<h2 class="font-heading text-xl font-bold sm:text-2xl">{job.title}</h2>
 	</div>

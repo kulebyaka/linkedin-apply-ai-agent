@@ -184,13 +184,25 @@ class TestCVPromptManager:
         assert manager.loader is not None
         assert manager.loader.prompts_dir == temp_prompts_dir
 
-    def test_get_job_summary_prompt(self, temp_prompts_dir):
-        """Test getting job summary prompt"""
+    def test_get_job_summary_spec(self, temp_prompts_dir):
+        """Test cache-aware job summary spec returns split PromptSpec."""
+        # Create the split system/user files the spec loader expects.
+        (temp_prompts_dir / "job_summary.system.txt").write_text(
+            "You are a recruiter."
+        )
+        (temp_prompts_dir / "job_summary.user.txt").write_text(
+            "Job Description:\n$job_description"
+        )
+
         manager = CVPromptManager(temp_prompts_dir)
+        spec = manager.get_job_summary_spec(
+            job_description="Python developer needed",
+            cache_key="cv_summary:user-1",
+        )
 
-        prompt = manager.get_job_summary_prompt("Python developer needed")
-
-        assert "Analyze job: Python developer needed" in prompt
+        assert spec.system == "You are a recruiter."
+        assert "Python developer needed" in spec.user
+        assert spec.cache_key == "cv_summary:user-1"
 
     def test_get_summary_prompt(self, temp_prompts_dir):
         """Test getting summary prompt"""

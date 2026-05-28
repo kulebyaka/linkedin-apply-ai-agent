@@ -78,6 +78,7 @@ class CVComposer:
         job_posting: dict[str, Any],
         user_feedback: str | None = None,
         validator: CVValidator | None = None,
+        user_id: str = "",
     ) -> CVLLMOutput:
         """
         Generate a tailored CV for a specific job posting
@@ -100,11 +101,13 @@ class CVComposer:
         )
 
         # Step 1: Analyze job description to extract requirements
-        job_summary = self._summarize_job(job_posting)
+        job_summary = self._summarize_job(job_posting, user_id=user_id)
         logger.debug("Job analysis completed")
 
         # Step 2: Generate all CV sections in a single LLM call (optimized)
-        generated_sections = self._compose_all_sections(master_cv, job_summary, user_feedback)
+        generated_sections = self._compose_all_sections(
+            master_cv, job_summary, user_feedback, user_id=user_id
+        )
 
         # Step 2.5: Apply length limits to ensure 2-page target
         generated_sections = self._apply_length_limits(generated_sections)
@@ -151,7 +154,9 @@ class CVComposer:
         logger.info("CV composition completed successfully")
         return validated_cv
 
-    def _summarize_job(self, job_posting: dict[str, Any]) -> dict[str, Any]:
+    def _summarize_job(
+        self, job_posting: dict[str, Any], *, user_id: str = ""
+    ) -> dict[str, Any]:
         """
         Analyze job description and extract key requirements
 
@@ -178,15 +183,18 @@ Requirements:
 {job_posting.get("requirements", "")}
         """.strip()
 
-        # Get prompt from external file
-        prompt = self.prompts.get_job_summary_prompt(job_description=job_description)
+        # Cache-aware spec: static instructions in system, JD in user.
+        spec = self.prompts.get_job_summary_spec(
+            job_description=job_description,
+            cache_key=f"cv_summary:{user_id}" if user_id else "",
+        )
 
         # Generate structured summary using LLM
         try:
             logger.info("[TIMING] Starting LLM API call for job summary")
             llm_start = time.time()
             summary = self.llm.generate_json(
-                prompt, schema=JOB_SUMMARY_SCHEMA, temperature=self.TEMPERATURE_ANALYSIS
+                spec, schema=JOB_SUMMARY_SCHEMA, temperature=self.TEMPERATURE_ANALYSIS
             )
             llm_elapsed = time.time() - llm_start
             logger.info(f"[TIMING] LLM API call for job summary completed in {llm_elapsed:.2f}s")
@@ -208,6 +216,8 @@ Requirements:
         master_cv: dict[str, Any],
         job_summary: dict[str, Any],
         user_feedback: str | None = None,
+        *,
+        user_id: str = "",
     ) -> dict[str, Any]:
         """
         Generate complete tailored CV in a single LLM call.
@@ -225,11 +235,13 @@ Requirements:
         """
         logger.debug("Composing all CV sections in single LLM call")
 
-        # Get unified prompt (includes user feedback if provided)
-        prompt = self.prompts.get_full_cv_prompt(
+        # Cache-aware spec: instructions + schema + master CV in system
+        # (per-user cached prefix); job_summary + feedback in user message.
+        spec = self.prompts.get_full_cv_spec(
             master_cv=master_cv,
             job_summary=job_summary,
             user_feedback=user_feedback,
+            cache_key=f"cv_compose:{user_id}" if user_id else "",
         )
 
         # Generate complete tailored CV using unified schema
@@ -237,7 +249,7 @@ Requirements:
             logger.info("[TIMING] Starting LLM API call for full CV generation")
             llm_start = time.time()
             result = self.llm.generate_json(
-                prompt,
+                spec,
                 schema=FULL_CV_SCHEMA,
                 temperature=self.TEMPERATURE_GENERATION,
             )

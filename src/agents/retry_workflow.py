@@ -156,6 +156,7 @@ async def compose_cv_node(state: RetryWorkflowState) -> RetryWorkflowState:
         llm_provider=state.get("llm_provider"),
         llm_model=state.get("llm_model"),
         user_feedback=user_feedback,
+        user_id=state.get("user_id", ""),
     )
 
     state["tailored_cv_json"] = result["tailored_cv_json"]

@@ -328,6 +328,7 @@ async def filter_job_node(
             job_filter.evaluate_job,
             job_posting,
             user_filter_prefs,
+            user_id,
         )
 
         state["filter_result"] = filter_result.model_dump()
@@ -528,6 +529,7 @@ async def compose_cv_node(state: PreparationWorkflowState) -> PreparationWorkflo
         llm_provider=llm_provider,
         llm_model=llm_model,
         user_feedback=user_feedback,
+        user_id=state.get("user_id", ""),
     )
 
     state["tailored_cv_json"] = result["tailored_cv_json"]

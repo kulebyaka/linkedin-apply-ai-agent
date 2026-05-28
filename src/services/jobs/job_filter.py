@@ -12,9 +12,9 @@ BaseLLMClient.generate_json with schema enforcement.
 from __future__ import annotations
 
 import logging
-from string import Template
 from typing import Any
 
+from src.llm.prompt_spec import PromptSpec
 from src.llm.provider import BaseLLMClient
 from src.models.job_filter import FilterResult, UserFilterPreferences
 from src.services.cv.cv_prompts import PromptLoader
@@ -54,6 +54,7 @@ class JobFilter:
         self,
         job_posting: dict[str, Any],
         user_filter_prefs: UserFilterPreferences | None = None,
+        user_id: str = "",
     ) -> FilterResult:
         """Evaluate a job posting for suitability.
 
@@ -65,6 +66,8 @@ class JobFilter:
                          location, description.
             user_filter_prefs: Optional per-user filter preferences containing
                                custom prompt and natural language prefs.
+            user_id: User identifier used to scope the prompt cache key so
+                     per-user ``custom_prompt`` differences do not contend.
 
         Returns:
             FilterResult with score, red flags, and disqualification info.
@@ -76,11 +79,11 @@ class JobFilter:
         company = job_posting.get("company", "N/A")
         logger.info(f"Evaluating job: {job_title} at {company}")
 
-        prompt = self._build_evaluation_prompt(job_posting, user_filter_prefs)
+        spec = self._build_evaluation_spec(job_posting, user_filter_prefs, user_id)
 
         try:
             raw_result = self.llm.generate_json(
-                prompt,
+                spec,
                 schema=FILTER_RESULT_SCHEMA,
                 temperature=self.TEMPERATURE,
             )
@@ -101,7 +104,11 @@ class JobFilter:
         )
         return result
 
-    def generate_prompt_from_preferences(self, natural_language_prefs: str) -> str:
+    def generate_prompt_from_preferences(
+        self,
+        natural_language_prefs: str,
+        user_id: str = "",
+    ) -> str:
         """Generate a structured filter prompt from natural language preferences.
 
         Calls the LLM with a meta-prompt that converts the user's free-text
@@ -110,6 +117,7 @@ class JobFilter:
         Args:
             natural_language_prefs: User's natural language description of
                                     what they want / don't want.
+            user_id: User identifier for the prompt cache key.
 
         Returns:
             Generated prompt string suitable for textarea 2 in the UI.
@@ -119,14 +127,14 @@ class JobFilter:
         """
         logger.info("Generating filter prompt from user preferences")
 
-        template_str = self.prompts.load("generate_prompt_from_prefs")
-        template = Template(template_str)
-        prompt = template.safe_substitute(
-            natural_language_prefs=natural_language_prefs,
+        spec = self.prompts.load_spec(
+            "generate_prompt_from_prefs",
+            cache_key=f"filter_prompt_gen:{user_id}" if user_id else "",
+            user_vars={"natural_language_prefs": natural_language_prefs},
         )
 
         try:
-            generated = self.llm.generate(prompt, temperature=0.4)
+            generated = self.llm.generate(spec, temperature=0.4)
         except Exception as e:
             logger.error(f"Prompt generation failed: {e}")
             raise JobFilterError(f"Prompt generation failed: {e}") from e
@@ -152,35 +160,38 @@ class JobFilter:
         """
         return not self.should_reject(result, reject_threshold) and result.score < warning_threshold
 
-    def _build_evaluation_prompt(
+    def _build_evaluation_spec(
         self,
         job_posting: dict[str, Any],
         user_filter_prefs: UserFilterPreferences | None,
-    ) -> str:
-        """Build evaluation prompt by injecting user criteria into the default template.
+        user_id: str,
+    ) -> PromptSpec:
+        """Build evaluation spec by injecting user criteria into the static
+        block and job posting into the variable block.
 
-        Uses custom_prompt (generated criteria) if set, otherwise falls back
-        to natural_language_prefs as a simple criteria section.
+        Uses ``custom_prompt`` (generated criteria) if set, otherwise falls
+        back to ``natural_language_prefs`` as a simple criteria section.
         """
-        # Build user criteria section
         user_criteria_section = ""
         if user_filter_prefs and user_filter_prefs.custom_prompt:
             user_criteria_section = (
-                f"User-Specific Criteria (apply IN ADDITION to the checks below):\n\n"
+                "User-Specific Criteria (apply IN ADDITION to the checks below):\n\n"
                 f"{user_filter_prefs.custom_prompt}"
             )
         elif user_filter_prefs and user_filter_prefs.natural_language_prefs:
             user_criteria_section = (
-                f"User Preferences (use these to adjust scoring):\n"
+                "User Preferences (use these to adjust scoring):\n"
                 f"{user_filter_prefs.natural_language_prefs}"
             )
 
-        template_str = self.prompts.load("default_filter_prompt")
-        template = Template(template_str)
-        return template.safe_substitute(
-            job_title=job_posting.get("title", "N/A"),
-            company=job_posting.get("company", "N/A"),
-            location=job_posting.get("location", "N/A"),
-            description=job_posting.get("description", "N/A"),
-            user_criteria_section=user_criteria_section,
+        return self.prompts.load_spec(
+            "default_filter_prompt",
+            cache_key=f"filter:{user_id}" if user_id else "",
+            system_vars={"user_criteria_section": user_criteria_section},
+            user_vars={
+                "job_title": job_posting.get("title", "N/A"),
+                "company": job_posting.get("company", "N/A"),
+                "location": job_posting.get("location", "N/A"),
+                "description": job_posting.get("description", "N/A"),
+            },
         )
