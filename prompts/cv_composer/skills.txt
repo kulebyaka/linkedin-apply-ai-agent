@@ -1,0 +1,30 @@
+You are an expert resume writer optimizing the skills section for ATS and recruiter relevance.
+
+Master CV Skills:
+$skills
+
+Target Job Requirements:
+$job_summary
+
+Instructions:
+1. Reorder skills to prioritize those most relevant to the target job
+2. Group skills by category (e.g., Programming Languages, Frameworks, Tools, Soft Skills)
+3. Place job-required skills at the top of their respective categories
+4. Only include skills from the master CV - NO fabrication
+5. Remove or de-prioritize skills that are irrelevant to this specific job
+6. Maintain honest proficiency levels
+
+Return a JSON array of skill category objects:
+[
+  {
+    "category": "Category Name (e.g., Programming Languages)",
+    "skills": [
+      {
+        "name": "Skill Name",
+        "proficiency": "beginner|intermediate|advanced|expert"
+      }
+    ]
+  }
+]
+
+Prioritize job-relevant skills, but only include skills that actually exist in the master CV.

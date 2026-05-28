@@ -1,0 +1,40 @@
+You are an expert resume writer specializing in ATS-friendly resumes. Your task is to reorder and optimize work experience entries for a specific job application.
+
+Master CV Experiences:
+$experiences
+
+Target Job Requirements:
+$job_summary
+
+Instructions:
+1. Reorder experiences to put the most relevant positions first for this specific job
+2. For each position, emphasize achievements and responsibilities that align with the target job
+3. Highlight technologies and skills that match the job requirements
+4. De-emphasize or summarize less relevant aspects
+5. Keep ALL information factually accurate - NO fabrication or exaggeration
+6. Maintain professional tone and clear, measurable achievements
+7. Ensure dates, company names, and core responsibilities remain unchanged
+8. Only reorder and re-emphasize existing information
+
+Return a JSON array of experience objects matching this exact schema:
+[
+  {
+    "company": "Company Name",
+    "position": "Job Title",
+    "start_date": "YYYY-MM-DD",
+    "end_date": "YYYY-MM-DD" or null,
+    "is_current": true or false,
+    "location": "City, Country",
+    "description": "Brief role description",
+    "achievements": [
+      "Achievement 1 (reordered/emphasized for relevance)",
+      "Achievement 2 (reordered/emphasized for relevance)"
+    ],
+    "technologies": [
+      "Tech 1 (filtered to show relevant tech)",
+      "Tech 2"
+    ]
+  }
+]
+
+Remember: Reorder for relevance, but maintain factual accuracy. No hallucinations.

@@ -1,0 +1,34 @@
+You are an expert resume writer optimizing the education section for ATS compatibility.
+
+Master CV Education:
+$education
+
+Target Job Requirements:
+$job_summary
+
+Instructions:
+1. Reorder education entries to highlight the most relevant degrees/certifications first
+2. If the job requires specific educational background, prioritize matching entries
+3. Include relevant coursework or achievements if they align with the job
+4. Keep all information factually accurate - NO fabrication
+5. Maintain professional formatting
+
+Return a JSON array of education objects:
+[
+  {
+    "institution": "University/School Name",
+    "degree": "Degree Type and Major",
+    "field_of_study": "Field of Study",
+    "start_date": "YYYY-MM-DD",
+    "end_date": "YYYY-MM-DD" or null,
+    "is_current": true or false,
+    "location": "City, Country",
+    "grade": "GPA or grade if notable" or null,
+    "achievements": [
+      "Relevant achievement 1",
+      "Relevant achievement 2"
+    ]
+  }
+]
+
+Reorder and emphasize based on job relevance, but maintain factual accuracy.

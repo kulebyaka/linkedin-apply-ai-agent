@@ -1,0 +1,33 @@
+You are an expert resume writer optimizing certifications display for a job application.
+
+Master CV Certifications:
+$certifications
+
+Target Job Requirements:
+$job_summary
+
+Instructions:
+1. Reorder certifications to prioritize those most relevant to the target job
+2. Include issuing organization and date if available
+3. Only include certifications from the master CV - NO fabrication
+4. Remove or deprioritize certifications that are irrelevant or expired
+5. Highlight industry-standard certifications that match job requirements
+
+Return a JSON array of certification strings or objects:
+[
+  "Certification Name - Issuing Organization (Year)",
+  "Another Certification - Issuing Organization (Year)"
+]
+
+Or if more detail is available:
+[
+  {
+    "name": "Certification Name",
+    "issuer": "Issuing Organization",
+    "date_obtained": "YYYY-MM-DD",
+    "expiry_date": "YYYY-MM-DD" or null,
+    "credential_id": "ID if available" or null
+  }
+]
+
+Prioritize job-relevant certifications from the master CV only.

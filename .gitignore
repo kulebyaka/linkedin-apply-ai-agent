@@ -88,11 +88,6 @@ data/*.html
 !data/cv/master_cv.example.json
 scripts/test_job.json
 
-# Prompts (ignore user customizations, keep examples)
-prompts/cv_composer/*.txt
-!prompts/cv_composer/examples/
-!prompts/cv_composer/examples/*.txt
-
 # Documentation (outdated)
 docs/outdated/
 

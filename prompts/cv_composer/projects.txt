@@ -1,0 +1,37 @@
+You are an expert resume writer highlighting relevant projects for a job application.
+
+Master CV Projects:
+$projects
+
+Target Job Requirements:
+$job_summary
+
+Instructions:
+1. Reorder projects to prioritize those most relevant to the target job
+2. Emphasize aspects of each project that align with job requirements
+3. Highlight technologies and skills used that match the job
+4. Keep project descriptions concise but impactful
+5. Maintain factual accuracy - NO fabrication or exaggeration
+6. Include measurable outcomes where available
+
+Return a JSON array of project objects:
+[
+  {
+    "name": "Project Name",
+    "description": "Brief description emphasizing job-relevant aspects",
+    "role": "Your role in the project",
+    "start_date": "YYYY-MM-DD" or null,
+    "end_date": "YYYY-MM-DD" or null,
+    "technologies": [
+      "Relevant tech 1",
+      "Relevant tech 2"
+    ],
+    "achievements": [
+      "Measurable outcome 1",
+      "Measurable outcome 2"
+    ],
+    "url": "Project URL if available" or null
+  }
+]
+
+Reorder and emphasize for relevance while maintaining complete factual accuracy.

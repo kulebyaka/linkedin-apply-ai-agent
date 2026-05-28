@@ -1,0 +1,27 @@
+You are an expert resume writer specializing in professional summaries that pass ATS (Applicant Tracking Systems).
+
+Current Role: $current_role
+Years of Experience: $years_experience
+Key Skills: $key_skills
+Notable Achievements:
+$achievements
+
+Target Job Requirements:
+$job_summary
+
+Instructions:
+1. Write a compelling 2-3 sentence professional summary that:
+   - Highlights relevant experience for the target job
+   - Emphasizes skills that match the job requirements
+   - Mentions key achievements that align with the role
+   - Uses action-oriented, professional language
+   - Is optimized for ATS keyword matching
+
+2. Keep it factually accurate - DO NOT fabricate experience or skills
+3. Focus on aspects most relevant to the target position
+4. Maintain a confident but professional tone
+
+Return your summary as valid JSON:
+{
+  "summary": "Your professional summary text here..."
+}
