@@ -8,6 +8,7 @@ import logging
 import time
 
 from ..base import BaseLLMClient
+from ..prompt_spec import PromptSpec
 
 logger = logging.getLogger(__name__)
 
@@ -32,16 +33,18 @@ class AnthropicClient(BaseLLMClient):
             default_headers={"anthropic-beta": "structured-outputs-2025-11-13"},
         )
 
-    def generate(self, prompt: str, temperature: float = 0.7, **kwargs) -> str:
+    def generate(self, spec: PromptSpec, temperature: float = 0.7, **kwargs) -> str:
         try:
             max_tokens = kwargs.pop("max_tokens", 4096)
-            response = self.client.messages.create(
-                model=self.model,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                messages=[{"role": "user", "content": prompt}],
-                **kwargs,
-            )
+            create_kwargs: dict = {
+                "model": self.model,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "messages": [{"role": "user", "content": spec.user}],
+            }
+            if spec.system:
+                create_kwargs["system"] = spec.system
+            response = self.client.messages.create(**create_kwargs, **kwargs)
             return response.content[0].text
         except Exception as e:
             logger.error(f"Anthropic generation failed: {e}")
@@ -49,7 +52,7 @@ class AnthropicClient(BaseLLMClient):
 
     def generate_json(
         self,
-        prompt: str,
+        spec: PromptSpec,
         schema: dict | None = None,
         temperature: float = 0.4,
         max_retries: int = 3,
@@ -59,31 +62,28 @@ class AnthropicClient(BaseLLMClient):
             try:
                 max_tokens = kwargs.pop("max_tokens", 4096)
 
+                user_text = spec.user
+                if not schema:
+                    user_text = f"{user_text}\n\nYou must respond with valid JSON only."
+
+                create_kwargs: dict = {
+                    "model": self.model,
+                    "max_tokens": max_tokens,
+                    "temperature": temperature,
+                    "messages": [{"role": "user", "content": user_text}],
+                }
+                if spec.system:
+                    create_kwargs["system"] = spec.system
                 if schema:
-                    response = self.client.messages.create(
-                        model=self.model,
-                        max_tokens=max_tokens,
-                        temperature=temperature,
-                        messages=[{"role": "user", "content": prompt}],
-                        output_format={
-                            "type": "json_schema",
-                            "json_schema": {
-                                "name": "response",
-                                "strict": True,
-                                "schema": schema,
-                            },
+                    create_kwargs["output_format"] = {
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": "response",
+                            "strict": True,
+                            "schema": schema,
                         },
-                        **kwargs,
-                    )
-                else:
-                    json_prompt = f"{prompt}\n\nYou must respond with valid JSON only."
-                    response = self.client.messages.create(
-                        model=self.model,
-                        max_tokens=max_tokens,
-                        temperature=temperature,
-                        messages=[{"role": "user", "content": json_prompt}],
-                        **kwargs,
-                    )
+                    }
+                response = self.client.messages.create(**create_kwargs, **kwargs)
 
                 content = response.content[0].text
                 result = json.loads(content)

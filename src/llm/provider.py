@@ -12,6 +12,7 @@ working via the re-exports below.
 
 from .base import BaseLLMClient, LLMProvider, basic_validate_json_schema
 from .factory import LLMClientFactory
+from .prompt_spec import PromptSpec
 from .providers import AnthropicClient, DeepSeekClient, GrokClient, OpenAIClient
 from .schema_strict import make_schema_strict
 
@@ -23,6 +24,7 @@ __all__ = [
     "LLMClientFactory",
     "LLMProvider",
     "OpenAIClient",
+    "PromptSpec",
     "basic_validate_json_schema",
     "make_schema_strict",
 ]

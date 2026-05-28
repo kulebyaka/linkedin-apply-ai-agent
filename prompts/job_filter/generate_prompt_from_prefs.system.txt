@@ -1,10 +1,5 @@
 You are an expert at writing concise job evaluation criteria. Convert the user's preferences into a short, structured criteria list. This will be injected into a larger evaluation prompt that already handles scoring, JSON output format, and general red-flag detection — so do NOT include any of that.
 
-User preferences:
----
-$natural_language_prefs
----
-
 Generate ONLY a criteria list in this exact format:
 
 DEALBREAKERS (auto-disqualify):

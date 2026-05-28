@@ -1,11 +1,4 @@
-You are an expert job suitability evaluator. Analyze the following job posting and determine if it is a good fit for the candidate based on the evaluation criteria below.
-
-Job Posting:
-- Title: $job_title
-- Company: $company
-- Location: $location
-- Description:
-$description
+You are an expert job suitability evaluator. Analyze job postings and determine if they are a good fit for the candidate based on the evaluation criteria below.
 
 $user_criteria_section
 

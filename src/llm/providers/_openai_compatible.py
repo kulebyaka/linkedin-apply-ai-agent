@@ -19,6 +19,7 @@ import time
 from typing import ClassVar
 
 from ..base import BaseLLMClient, basic_validate_json_schema
+from ..prompt_spec import PromptSpec
 from ..schema_strict import make_schema_strict
 
 logger = logging.getLogger(__name__)
@@ -54,16 +55,47 @@ class OpenAICompatibleClient(BaseLLMClient):
             self.model.startswith(prefix) for prefix in self.reasoning_model_prefixes
         )
 
-    def generate(self, prompt: str, temperature: float = 0.7, **kwargs) -> str:
+    def _build_messages(self, spec: PromptSpec) -> list[dict]:
+        messages: list[dict] = []
+        if spec.system:
+            messages.append({"role": "system", "content": spec.system})
+        messages.append({"role": "user", "content": spec.user})
+        return messages
+
+    def _apply_cache_key(self, api_kwargs: dict, spec: PromptSpec) -> None:
+        if spec.cache_key:
+            api_kwargs["prompt_cache_key"] = spec.cache_key
+
+    def _log_usage(self, response, elapsed: float, spec: PromptSpec, kind: str) -> None:
+        usage = getattr(response, "usage", None)
+        details = getattr(usage, "prompt_tokens_details", None) if usage else None
+        cached = getattr(details, "cached_tokens", 0) if details else 0
+        total = getattr(usage, "prompt_tokens", 0) if usage else 0
+        logger.info(
+            "[TIMING] %s %s call completed in %.2fs (cached_tokens=%d/%d key=%s)",
+            self.provider_label,
+            kind,
+            elapsed,
+            cached or 0,
+            total,
+            spec.cache_key or "-",
+        )
+
+    def generate(self, spec: PromptSpec, temperature: float = 0.7, **kwargs) -> str:
         try:
             api_kwargs = dict(kwargs)
             if not self._is_reasoning_model():
                 api_kwargs["temperature"] = temperature
+            self._apply_cache_key(api_kwargs, spec)
+
+            api_start = time.time()
             response = self.client.chat.completions.create(
                 model=self.model,
-                messages=[{"role": "user", "content": prompt}],
+                messages=self._build_messages(spec),
                 **api_kwargs,
             )
+            elapsed = time.time() - api_start
+            self._log_usage(response, elapsed, spec, "text")
             return response.choices[0].message.content
         except Exception as e:
             logger.error(f"{self.provider_label} generation failed: {e}")
@@ -71,7 +103,7 @@ class OpenAICompatibleClient(BaseLLMClient):
 
     def generate_json(
         self,
-        prompt: str,
+        spec: PromptSpec,
         schema: dict | None = None,
         temperature: float = 0.4,
         max_retries: int = 3,
@@ -91,38 +123,42 @@ class OpenAICompatibleClient(BaseLLMClient):
                             "schema": strict_schema,
                         },
                     }
-                    user_prompt = prompt
                     # Strict JSON schema mode on OpenAI/Grok does NOT support
                     # custom temperature — only the default (1.0).
                     api_kwargs = kwargs.copy()
+                    call_spec = spec
                 else:
                     response_format = {"type": "json_object"}
-                    user_prompt = (
-                        f"{prompt}\n\nYou must respond with valid JSON only."
+                    # json_object mode needs an explicit "respond with JSON"
+                    # instruction; append to the user message so the cacheable
+                    # system prefix is unaffected.
+                    call_spec = PromptSpec(
+                        system=spec.system,
+                        user=f"{spec.user}\n\nYou must respond with valid JSON only.",
+                        cache_key=spec.cache_key,
                     )
                     api_kwargs = kwargs.copy()
                     if not self._is_reasoning_model():
                         api_kwargs["temperature"] = temperature
 
+                self._apply_cache_key(api_kwargs, call_spec)
+
                 logger.info(
-                    "[TIMING] Starting %s API call (model=%s, attempt=%d)",
+                    "[TIMING] Starting %s JSON call (model=%s, attempt=%d, key=%s)",
                     self.provider_label,
                     self.model,
                     attempt + 1,
+                    call_spec.cache_key or "-",
                 )
                 api_start = time.time()
                 response = self.client.chat.completions.create(
                     model=self.model,
-                    messages=[{"role": "user", "content": user_prompt}],
+                    messages=self._build_messages(call_spec),
                     response_format=response_format,
                     **api_kwargs,
                 )
-                api_elapsed = time.time() - api_start
-                logger.info(
-                    "[TIMING] %s API call completed in %.2fs",
-                    self.provider_label,
-                    api_elapsed,
-                )
+                elapsed = time.time() - api_start
+                self._log_usage(response, elapsed, call_spec, "JSON")
 
                 content = response.choices[0].message.content
                 result = json.loads(content)

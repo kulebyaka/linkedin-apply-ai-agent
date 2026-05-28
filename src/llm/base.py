@@ -5,6 +5,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from enum import StrEnum
 
+from .prompt_spec import PromptSpec
+
 
 class LLMProvider(StrEnum):
     """Supported LLM providers."""
@@ -45,20 +47,20 @@ class BaseLLMClient(ABC):
         )
 
     @abstractmethod
-    def generate(self, prompt: str, temperature: float = 0.7, **kwargs) -> str:
-        """Generate text completion."""
+    def generate(self, spec: PromptSpec, temperature: float = 0.7, **kwargs) -> str:
+        """Generate text completion from a cache-aware prompt spec."""
         pass
 
     @abstractmethod
     def generate_json(
         self,
-        prompt: str,
+        spec: PromptSpec,
         schema: dict | None = None,
         temperature: float = 0.4,
         max_retries: int = 3,
         **kwargs,
     ) -> dict:
-        """Generate structured JSON output with optional schema validation."""
+        """Generate structured JSON output from a cache-aware prompt spec."""
         pass
 
 

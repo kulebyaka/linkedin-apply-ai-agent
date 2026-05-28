@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from src.llm.prompt_spec import PromptSpec
 from src.llm.provider import BaseLLMClient
 from src.models.job_filter import FilterResult, UserFilterPreferences
 from src.services.jobs.job_filter import JobFilter, JobFilterError
@@ -33,22 +34,31 @@ class MockLLMClient(BaseLLMClient):
     def set_generate_response(self, response: str):
         self._generate_response = response
 
-    def generate(self, prompt: str, temperature: float = 0.7, **kwargs) -> str:
-        self.generate_calls.append({"prompt": prompt, "temperature": temperature})
+    def generate(self, spec: PromptSpec, temperature: float = 0.7, **kwargs) -> str:
+        prompt_text = (spec.system or "") + "\n" + spec.user
+        self.generate_calls.append(
+            {"spec": spec, "prompt": prompt_text, "temperature": temperature}
+        )
         if self._generate_response is not None:
             return self._generate_response
         return "Mock response"
 
     def generate_json(
         self,
-        prompt: str,
+        spec: PromptSpec,
         schema: dict | None = None,
         temperature: float = 0.4,
         max_retries: int = 3,
         **kwargs,
     ) -> dict:
+        prompt_text = (spec.system or "") + "\n" + spec.user
         self.generate_json_calls.append(
-            {"prompt": prompt, "schema": schema, "temperature": temperature}
+            {
+                "spec": spec,
+                "prompt": prompt_text,
+                "schema": schema,
+                "temperature": temperature,
+            }
         )
         if self._generate_json_response is not None:
             return self._generate_json_response

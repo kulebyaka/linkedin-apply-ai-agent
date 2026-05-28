@@ -4,6 +4,8 @@ import logging
 from pathlib import Path
 from string import Template
 
+from src.llm.prompt_spec import PromptSpec
+
 logger = logging.getLogger(__name__)
 
 
@@ -121,6 +123,43 @@ class PromptLoader:
             logger.error(f"Missing template variable in {prompt_name}: {e}")
             raise
 
+    def load_spec(
+        self,
+        prompt_name: str,
+        *,
+        cache_key: str,
+        system_vars: dict | None = None,
+        user_vars: dict | None = None,
+    ) -> PromptSpec:
+        """Load a split prompt template (``<name>.system.txt`` + ``<name>.user.txt``)
+        and substitute variables into each side.
+
+        Returns a ``PromptSpec`` ready to hand to ``BaseLLMClient.generate_json``.
+        """
+        system_template = self._read_file(f"{prompt_name}.system.txt")
+        user_template = self._read_file(f"{prompt_name}.user.txt")
+
+        try:
+            system = Template(system_template).safe_substitute(**(system_vars or {}))
+            user = Template(user_template).safe_substitute(**(user_vars or {}))
+        except KeyError as e:
+            logger.error(f"Missing template variable in {prompt_name} spec: {e}")
+            raise
+
+        return PromptSpec(system=system, user=user, cache_key=cache_key)
+
+    def _read_file(self, filename: str) -> str:
+        path = self.prompts_dir / filename
+        if filename in self._cache:
+            return self._cache[filename]
+        if not path.exists():
+            raise FileNotFoundError(
+                f"Prompt file not found: {path}\nAvailable prompts: {self.list_available()}"
+            )
+        content = path.read_text(encoding="utf-8")
+        self._cache[filename] = content
+        return content
+
 
 class CVPromptManager:
     """High-level prompt management for CV composition"""
@@ -134,9 +173,19 @@ class CVPromptManager:
         """
         self.loader = PromptLoader(prompts_dir or "prompts/cv_composer")
 
-    def get_job_summary_prompt(self, job_description: str) -> str:
-        """Get prompt for job description summarization"""
-        return self.loader.get_template("job_summary", job_description=job_description)
+    def get_job_summary_spec(
+        self, *, job_description: str, cache_key: str
+    ) -> PromptSpec:
+        """Cache-aware spec for job description summarization.
+
+        Static block: instructions + JSON output schema.
+        Variable block: the actual job description.
+        """
+        return self.loader.load_spec(
+            "job_summary",
+            cache_key=cache_key,
+            user_vars={"job_description": job_description},
+        )
 
     def get_summary_prompt(
         self,
@@ -208,36 +257,36 @@ class CVPromptManager:
             job_summary=json.dumps(job_summary, indent=2),
         )
 
-    def get_full_cv_prompt(
-        self, master_cv: dict, job_summary: dict, user_feedback: str | None = None
-    ) -> str:
-        """
-        Get prompt for generating complete tailored CV in a single LLM call.
+    def get_full_cv_spec(
+        self,
+        *,
+        master_cv: dict,
+        job_summary: dict,
+        user_feedback: str | None = None,
+        cache_key: str,
+    ) -> PromptSpec:
+        """Cache-aware spec for full CV composition.
 
-        This combines all section prompts into one unified prompt for better
-        performance (reduces 6 LLM calls to 1).
-
-        Args:
-            master_cv: Complete master CV data
-            job_summary: Structured job requirements from job analysis
-            user_feedback: Optional user feedback for retry/refinement
-
-        Returns:
-            Formatted prompt for full CV generation
+        Static block (cached per user): instructions + JSON output schema +
+        master CV. Variable block: job_summary + optional user_feedback section.
         """
         import json
 
-        # Build user feedback section if provided
         user_feedback_section = ""
         if user_feedback:
-            user_feedback_section = f"""## User Feedback (IMPORTANT - Address these points):
-{user_feedback}
+            user_feedback_section = (
+                "## User Feedback (IMPORTANT - Address these points):\n"
+                f"{user_feedback}\n\n"
+                "Please regenerate the CV addressing the feedback above while "
+                "maintaining all other requirements."
+            )
 
-Please regenerate the CV addressing the feedback above while maintaining all other requirements."""
-
-        return self.loader.get_template(
+        return self.loader.load_spec(
             "full_cv",
-            master_cv=json.dumps(master_cv, indent=2),
-            job_summary=json.dumps(job_summary, indent=2),
-            user_feedback_section=user_feedback_section,
+            cache_key=cache_key,
+            system_vars={"master_cv": json.dumps(master_cv, indent=2)},
+            user_vars={
+                "job_summary": json.dumps(job_summary, indent=2),
+                "user_feedback_section": user_feedback_section,
+            },
         )

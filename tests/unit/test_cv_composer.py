@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
+from src.llm.prompt_spec import PromptSpec
 from src.llm.provider import BaseLLMClient
 from src.models.cv import CVLLMOutput, JobSummary
 from src.services.cv.cv_composer import CVComposer, CVCompositionError
@@ -31,27 +32,26 @@ class MockLLMClient(BaseLLMClient):
         """Set a mock response for prompts containing keyword"""
         self.responses[prompt_keyword] = response
 
-    def generate(self, prompt: str, temperature: float = 0.7, **kwargs) -> str:
+    def generate(self, spec: PromptSpec, temperature: float = 0.7, **kwargs) -> str:
         """Mock generate method"""
         return "Mock response"
 
     def generate_json(
         self,
-        prompt: str,
+        spec: PromptSpec,
         schema: dict = None,
         temperature: float = 0.4,
         max_retries: int = 3,
-        **kwargs
+        **kwargs,
     ) -> dict:
-        """Mock generate_json method"""
+        """Mock generate_json method — matches keywords across system+user."""
         self.call_count += 1
 
-        # Return appropriate response based on prompt content
+        combined = ((spec.system or "") + "\n" + spec.user).lower()
         for keyword, response in self.responses.items():
-            if keyword.lower() in prompt.lower():
+            if keyword.lower() in combined:
                 return response
 
-        # Default response
         return {}
 
 
