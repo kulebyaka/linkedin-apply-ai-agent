@@ -249,6 +249,7 @@ class InMemoryJobRepository(JobRepository):
             if job.job_posting:
                 haystacks.append(str(job.job_posting.get("title", "")))
                 haystacks.append(str(job.job_posting.get("company", "")))
+                haystacks.append(str(job.job_posting.get("description", "")))
             if job.error_message:
                 haystacks.append(job.error_message)
             if not any(needle in h.lower() for h in haystacks):
