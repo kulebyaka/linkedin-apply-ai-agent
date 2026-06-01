@@ -95,7 +95,12 @@ export async function triggerLinkedInSearch(): Promise<{
 
 export type UserLastRun = {
   time: string;
+  /** Raw count scraped from LinkedIn, before dedup. */
   jobs_found: number;
+  /** New jobs actually queued (jobs_found minus already-seen duplicates). */
+  enqueued: number;
+  /** Jobs skipped because we already had them. */
+  deduped: number;
   reason: "ok" | "no_results" | "no_users" | "scrape_failed" | "auth_failed";
   search_url: string | null;
   message: string | null;

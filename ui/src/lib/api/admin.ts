@@ -76,6 +76,25 @@ export interface SchedulerJobState {
 	last_run_at: string | null;
 	next_run_at: string | null;
 	last_status: string | null;
+	/** Raw count scraped from LinkedIn, before dedup. */
+	jobs_found?: number;
+	/** New jobs actually queued. */
+	enqueued?: number;
+	/** Jobs skipped because we already had them. */
+	deduped?: number;
+	message?: string | null;
+	search_url?: string | null;
+}
+
+export interface SchedulerRunHistoryEntry {
+	user_id: string;
+	run_at: string | null;
+	status: string | null;
+	jobs_found: number;
+	enqueued: number;
+	deduped: number;
+	message: string | null;
+	search_url: string | null;
 }
 
 export interface LinkedInAuthState {
@@ -87,6 +106,8 @@ export interface LinkedInAuthState {
 export interface QueueStateResponse {
 	consumer: ConsumerSnapshot;
 	scheduler: SchedulerJobState[];
+	/** Every recorded search run, newest first. In-memory; resets on restart. */
+	run_history: SchedulerRunHistoryEntry[];
 	/** Global LinkedIn session state derived from the most recently scraped job. Null until a job has recorded it. */
 	linkedin_auth: LinkedInAuthState | null;
 	counts: {

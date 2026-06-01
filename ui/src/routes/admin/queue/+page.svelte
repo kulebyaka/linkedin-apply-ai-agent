@@ -6,6 +6,7 @@
 		listUsers,
 		type QueueStateResponse,
 		type SchedulerJobState,
+		type SchedulerRunHistoryEntry,
 	} from '$lib/api/admin';
 	import StatCard from '$lib/components/admin/StatCard.svelte';
 	import ToastNotification from '$lib/components/ToastNotification.svelte';
@@ -159,6 +160,7 @@
 	const consumer = $derived(queueState?.consumer ?? null);
 	const linkedinAuth = $derived(queueState?.linkedin_auth ?? null);
 	const schedulerRows = $derived<SchedulerJobState[]>(queueState?.scheduler ?? []);
+	const runHistory = $derived<SchedulerRunHistoryEntry[]>(queueState?.run_history ?? []);
 	const counts24h = $derived(queueState?.counts?.last_24h);
 	const counts7d = $derived(queueState?.counts?.last_7d);
 </script>
@@ -320,13 +322,14 @@
 							<th class="font-mono px-3 py-2 text-left text-xs uppercase tracking-wider">Last run</th>
 							<th class="font-mono px-3 py-2 text-left text-xs uppercase tracking-wider">Next run</th>
 							<th class="font-mono px-3 py-2 text-left text-xs uppercase tracking-wider">Last status</th>
+							<th class="font-mono px-3 py-2 text-center text-xs uppercase tracking-wider" title="New jobs queued / duplicates skipped / total scraped">New · Dup · Scraped</th>
 							<th class="font-mono px-3 py-2 text-right text-xs uppercase tracking-wider">Actions</th>
 						</tr>
 					</thead>
 					<tbody>
 						{#if schedulerRows.length === 0}
 							<tr>
-								<td colspan="5" class="px-3 py-6 text-center font-mono text-xs text-[var(--color-muted-foreground)]">
+								<td colspan="6" class="px-3 py-6 text-center font-mono text-xs text-[var(--color-muted-foreground)]">
 									No scheduled jobs.
 								</td>
 							</tr>
@@ -343,6 +346,10 @@
 									<td class="px-3 py-2">
 										<span class={lastStatusBadgeClass(row.last_status)}>{row.last_status ?? '—'}</span>
 									</td>
+									<td class="px-3 py-2 text-center font-mono text-xs whitespace-nowrap">
+										<span class="font-bold text-emerald-700">{row.enqueued ?? 0}</span>
+										<span class="text-[var(--color-muted-foreground)]"> · {row.deduped ?? 0} · {row.jobs_found ?? 0}</span>
+									</td>
 									<td class="px-3 py-2 text-right">
 										<button
 											type="button"
@@ -352,6 +359,72 @@
 										>
 											{runningUserIds.has(row.user_id) ? 'Running…' : 'Run now'}
 										</button>
+									</td>
+								</tr>
+							{/each}
+						{/if}
+					</tbody>
+				</table>
+			</div>
+		</section>
+
+		<!-- Full run history — every recorded search run, newest first.
+		     In-memory on the server, so this resets on API restart/deploy. -->
+		<section class="border-4 border-[var(--color-foreground)] bg-white shadow-brutal">
+			<header class="flex items-center justify-between border-b-2 border-[var(--color-foreground)] bg-[var(--color-muted)] px-4 py-2">
+				<h2 class="font-heading text-lg tracking-tight">Run history</h2>
+				<span class="font-mono text-[10px] uppercase tracking-wider text-[var(--color-muted-foreground)]">
+					{runHistory.length} run{runHistory.length === 1 ? '' : 's'} · resets on restart
+				</span>
+			</header>
+			<div class="overflow-x-auto">
+				<table class="w-full border-collapse text-sm">
+					<thead class="border-b-2 border-[var(--color-foreground)] bg-[var(--color-muted)]/40">
+						<tr>
+							<th class="font-mono px-3 py-2 text-left text-xs uppercase tracking-wider">When</th>
+							<th class="font-mono px-3 py-2 text-left text-xs uppercase tracking-wider">User</th>
+							<th class="font-mono px-3 py-2 text-left text-xs uppercase tracking-wider">Status</th>
+							<th class="font-mono px-3 py-2 text-center text-xs uppercase tracking-wider">New</th>
+							<th class="font-mono px-3 py-2 text-center text-xs uppercase tracking-wider">Dup</th>
+							<th class="font-mono px-3 py-2 text-center text-xs uppercase tracking-wider">Scraped</th>
+							<th class="font-mono px-3 py-2 text-left text-xs uppercase tracking-wider">Detail</th>
+						</tr>
+					</thead>
+					<tbody>
+						{#if runHistory.length === 0}
+							<tr>
+								<td colspan="7" class="px-3 py-6 text-center font-mono text-xs text-[var(--color-muted-foreground)]">
+									No runs recorded yet.
+								</td>
+							</tr>
+						{:else}
+							{#each runHistory as run, i (run.run_at + ':' + run.user_id + ':' + i)}
+								<tr class="border-b border-[var(--color-muted)] hover:bg-[var(--color-muted)]/30">
+									<td class="px-3 py-2 font-mono text-xs whitespace-nowrap" title={formatAbsolute(run.run_at)}>
+										{formatRelative(run.run_at)}
+									</td>
+									<td class="px-3 py-2 font-mono text-xs">{userEmail(run.user_id)}</td>
+									<td class="px-3 py-2">
+										<span class={lastStatusBadgeClass(run.status)}>{run.status ?? '—'}</span>
+									</td>
+									<td class="px-3 py-2 text-center font-mono text-xs font-bold text-emerald-700">{run.enqueued}</td>
+									<td class="px-3 py-2 text-center font-mono text-xs text-[var(--color-muted-foreground)]">{run.deduped}</td>
+									<td class="px-3 py-2 text-center font-mono text-xs">{run.jobs_found}</td>
+									<td class="px-3 py-2 font-mono text-xs">
+										{#if run.message}
+											<span class="text-red-900">{run.message}</span>
+										{:else if run.search_url}
+											<a
+												href={run.search_url}
+												target="_blank"
+												rel="noopener noreferrer"
+												class="text-blue-700 underline hover:no-underline"
+											>
+												search ↗
+											</a>
+										{:else}
+											<span class="text-[var(--color-muted-foreground)]">—</span>
+										{/if}
 									</td>
 								</tr>
 							{/each}

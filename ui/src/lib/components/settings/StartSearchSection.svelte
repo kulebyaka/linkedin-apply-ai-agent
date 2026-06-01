@@ -209,7 +209,12 @@
 		{#if lastRun.reason === 'ok'}
 			<div class="mb-4 border-2 border-[var(--color-success)] bg-emerald-50 px-4 py-3">
 				<p class="mb-1 font-mono text-sm text-[var(--color-foreground)]">
-					Last search: <strong>{lastRun.jobs_found}</strong> job{lastRun.jobs_found === 1 ? '' : 's'} found
+					Last search: <strong>{lastRun.enqueued}</strong> new job{lastRun.enqueued === 1 ? '' : 's'}
+					{#if lastRun.deduped > 0}
+						<span class="text-[var(--color-muted-foreground)]">
+							· {lastRun.deduped} already seen · {lastRun.jobs_found} scraped
+						</span>
+					{/if}
 					{#if lastRunRelative}<span class="text-[var(--color-muted-foreground)]"> · {lastRunRelative}</span>{/if}
 				</p>
 				<a

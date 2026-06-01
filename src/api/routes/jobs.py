@@ -147,6 +147,8 @@ async def get_linkedin_search_status(request: Request, user: CurrentUser):
         {
             "time": user_run.time.isoformat(),
             "jobs_found": user_run.jobs_found,
+            "enqueued": user_run.enqueued,
+            "deduped": user_run.deduped,
             "reason": user_run.reason,
             "search_url": user_run.search_url,
             "message": user_run.message,

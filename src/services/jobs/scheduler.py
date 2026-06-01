@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Literal
@@ -48,12 +49,35 @@ class UserLastRun:
 
     search_url lets the user open the exact LinkedIn query in a browser
     to verify whether LinkedIn itself actually returns anything.
+
+    ``jobs_found`` is the raw count scraped from LinkedIn (pre-dedup).
+    ``enqueued`` is how many were actually new and queued for processing;
+    ``deduped`` is how many were skipped because we already had them. So
+    ``jobs_found == enqueued + deduped`` on a successful run.
     """
     time: datetime
     jobs_found: int
     reason: RunReason
     search_url: str | None
     message: str | None = None
+    enqueued: int = 0
+    deduped: int = 0
+
+
+# Cap on retained run-history entries. Searches run hourly per user, so 500
+# entries is ~20 days for a single active user. History is in-memory only and
+# resets on process restart (e.g. on deploy).
+_RUN_HISTORY_MAXLEN = 500
+
+
+@dataclass
+class SearchRun:
+    """One recorded search run, tagged with the user it ran for.
+
+    Backs the admin run-history view (every run, not just the latest per user).
+    """
+    user_id: str
+    run: UserLastRun
 
 
 class LinkedInSearchScheduler:
@@ -79,6 +103,7 @@ class LinkedInSearchScheduler:
         self._last_run_time: datetime | None = None
         self._last_run_jobs: int = 0
         self._last_run_per_user: dict[str, UserLastRun] = {}
+        self._run_history: deque[SearchRun] = deque(maxlen=_RUN_HISTORY_MAXLEN)
         self._running = False
 
     @property
@@ -168,14 +193,14 @@ class LinkedInSearchScheduler:
                 now = datetime.now(tz=timezone.utc)
                 self._last_run_time = now
                 self._last_run_jobs = 0
-                if user_id is not None:
-                    self._last_run_per_user[user_id] = UserLastRun(
-                        time=now,
-                        jobs_found=0,
-                        reason="no_users",
-                        search_url=None,
-                        message="Search preferences not configured.",
-                    )
+                self._record_run(
+                    user_id=user_id,
+                    time=now,
+                    jobs_found=0,
+                    reason="no_users",
+                    search_url=None,
+                    message="Search preferences not configured.",
+                )
                 return 0
 
             # Scraping uses LinkedIn's public Jobs Search page which serves
@@ -188,9 +213,8 @@ class LinkedInSearchScheduler:
                 logger.exception("LinkedIn authentication failed")
                 now = datetime.now(tz=timezone.utc)
                 for plan_user_id, _ in search_plans:
-                    if plan_user_id is None:
-                        continue
-                    self._last_run_per_user[plan_user_id] = UserLastRun(
+                    self._record_run(
+                        user_id=plan_user_id,
                         time=now,
                         jobs_found=0,
                         reason="auth_failed",
@@ -262,26 +286,28 @@ class LinkedInSearchScheduler:
                     )
                     total_enqueued += enqueued
 
-                    if plan_user_id is not None:
-                        self._last_run_per_user[plan_user_id] = UserLastRun(
-                            time=datetime.now(tz=timezone.utc),
-                            jobs_found=len(jobs),
-                            reason="ok" if jobs else "no_results",
-                            search_url=search_url,
-                        )
+                    self._record_run(
+                        user_id=plan_user_id,
+                        time=datetime.now(tz=timezone.utc),
+                        jobs_found=len(jobs),
+                        reason="ok" if jobs else "no_results",
+                        search_url=search_url,
+                        enqueued=enqueued,
+                        deduped=deduped,
+                    )
                 except Exception as exc:
                     logger.exception(
                         "Search failed for user=%s, continuing to next",
                         plan_user_id or "global",
                     )
-                    if plan_user_id is not None:
-                        self._last_run_per_user[plan_user_id] = UserLastRun(
-                            time=datetime.now(tz=timezone.utc),
-                            jobs_found=0,
-                            reason="scrape_failed",
-                            search_url=search_url,
-                            message=str(exc),
-                        )
+                    self._record_run(
+                        user_id=plan_user_id,
+                        time=datetime.now(tz=timezone.utc),
+                        jobs_found=0,
+                        reason="scrape_failed",
+                        search_url=search_url,
+                        message=str(exc),
+                    )
 
             self._last_run_time = datetime.now(tz=timezone.utc)
             self._last_run_jobs = total_enqueued
@@ -418,6 +444,38 @@ class LinkedInSearchScheduler:
             return job.next_run_time
         return None
 
+    def _record_run(
+        self,
+        *,
+        user_id: str | None,
+        time: datetime,
+        jobs_found: int,
+        reason: RunReason,
+        search_url: str | None,
+        message: str | None = None,
+        enqueued: int = 0,
+        deduped: int = 0,
+    ) -> None:
+        """Record a run outcome as the per-user latest and append to history.
+
+        Runs without a user_id (e.g. a scheduled cycle that found no users
+        with preferences) are not recorded — there is no user to attribute
+        them to and they carry no actionable signal.
+        """
+        if user_id is None:
+            return
+        run = UserLastRun(
+            time=time,
+            jobs_found=jobs_found,
+            reason=reason,
+            search_url=search_url,
+            message=message,
+            enqueued=enqueued,
+            deduped=deduped,
+        )
+        self._last_run_per_user[user_id] = run
+        self._run_history.append(SearchRun(user_id=user_id, run=run))
+
     def get_last_run_for_user(self, user_id: str) -> UserLastRun | None:
         """Return the most recent run outcome for a specific user, if any."""
         return self._last_run_per_user.get(user_id)
@@ -438,6 +496,33 @@ class LinkedInSearchScheduler:
                     "next_run_at": next_run.isoformat() if next_run else None,
                     "last_status": run.reason,
                     "jobs_found": run.jobs_found,
+                    "enqueued": run.enqueued,
+                    "deduped": run.deduped,
+                    "message": run.message,
+                    "search_url": run.search_url,
+                }
+            )
+        return out
+
+    def get_run_history(self, limit: int = 100) -> list[dict]:
+        """Return recorded search runs, newest first, for the admin dashboard.
+
+        Unlike ``get_jobs_state`` (latest run per user), this returns every
+        recorded run so admins can see the full scheduling timeline. History
+        is in-memory and resets on restart.
+        """
+        items = list(self._run_history)[-limit:] if limit > 0 else list(self._run_history)
+        out: list[dict] = []
+        for entry in reversed(items):
+            run = entry.run
+            out.append(
+                {
+                    "user_id": entry.user_id,
+                    "run_at": run.time.isoformat() if run.time else None,
+                    "status": run.reason,
+                    "jobs_found": run.jobs_found,
+                    "enqueued": run.enqueued,
+                    "deduped": run.deduped,
                     "message": run.message,
                     "search_url": run.search_url,
                 }

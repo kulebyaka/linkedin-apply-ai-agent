@@ -150,6 +150,87 @@ class TestRunSearch:
 
 
 # ---------------------------------------------------------------------------
+# Run metrics: enqueued / deduped split + run history
+# ---------------------------------------------------------------------------
+
+
+class TestRunMetrics:
+    async def test_records_enqueued_and_deduped_counts(self):
+        """jobs_found is the scraped total; enqueued/deduped split it."""
+        from src.models.state_machine import BusinessState
+        from src.models.unified import JobRecord
+
+        jobs = [_job("1"), _job("2"), _job("3")]
+        scheduler, _, _, _ = _make_scheduler(scrape_result=jobs)
+
+        # Job "2" already exists in a non-retryable state → deduped; the
+        # other two are new → enqueued.
+        existing = JobRecord(
+            job_id="2:default-user",
+            user_id="default-user",
+            source="linkedin",
+            mode="full",
+            status=BusinessState.QUEUED,
+        )
+
+        async def fake_get(scoped_id: str):
+            return existing if scoped_id == "2:default-user" else None
+
+        repo = MagicMock()
+        repo.get = AsyncMock(side_effect=fake_get)
+        repo.create = AsyncMock()
+        scheduler.job_repository = repo
+
+        enqueued = await scheduler.run_search()
+
+        assert enqueued == 2
+        run = scheduler.get_last_run_for_user("default-user")
+        assert run is not None
+        assert run.jobs_found == 3  # scraped total, pre-dedup
+        assert run.enqueued == 2
+        assert run.deduped == 1
+
+    async def test_jobs_state_exposes_enqueued_deduped(self):
+        jobs = [_job("a")]
+        scheduler, _, _, _ = _make_scheduler(scrape_result=jobs)
+
+        await scheduler.run_search()
+
+        state = scheduler.get_jobs_state()
+        assert len(state) == 1
+        row = state[0]
+        assert row["jobs_found"] == 1
+        assert row["enqueued"] == 1
+        assert row["deduped"] == 0
+
+    async def test_run_history_accumulates_newest_first(self):
+        scheduler, _, _, _ = _make_scheduler(scrape_result=[_job("a")])
+
+        await scheduler.run_search()
+        await scheduler.run_search()
+
+        history = scheduler.get_run_history()
+        assert len(history) == 2
+        assert all(h["user_id"] == "default-user" for h in history)
+        assert history[0]["status"] == "ok"
+        assert history[0]["jobs_found"] == 1
+        # Newest first: history[0].run_at >= history[1].run_at
+        assert history[0]["run_at"] >= history[1]["run_at"]
+
+    async def test_run_history_records_failures(self):
+        scheduler, _, _, _ = _make_scheduler(
+            scrape_error=RuntimeError("boom")
+        )
+
+        await scheduler.run_search()
+
+        history = scheduler.get_run_history()
+        assert len(history) == 1
+        assert history[0]["status"] == "scrape_failed"
+        assert history[0]["message"] == "boom"
+
+
+# ---------------------------------------------------------------------------
 # Scheduler start/stop lifecycle
 # ---------------------------------------------------------------------------
 

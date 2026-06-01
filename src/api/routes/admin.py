@@ -241,11 +241,16 @@ async def admin_get_queue(request: Request, admin: AdminUser) -> dict:
 
     snapshot = ctx.consumer_manager.snapshot()
     scheduler_state: list[dict] = []
+    run_history: list[dict] = []
     if ctx.scheduler is not None:
         try:
             scheduler_state = ctx.scheduler.get_jobs_state()
         except Exception:
             logger.warning("Failed to read scheduler state", exc_info=True)
+        try:
+            run_history = ctx.scheduler.get_run_history(limit=100)
+        except Exception:
+            logger.warning("Failed to read scheduler run history", exc_info=True)
 
     counts_24h = await ctx.repository.count_by_status_global(window_hours=24)
     counts_7d = await ctx.repository.count_by_status_global(window_hours=168)
@@ -260,6 +265,7 @@ async def admin_get_queue(request: Request, admin: AdminUser) -> dict:
     return {
         "consumer": snapshot,
         "scheduler": scheduler_state,
+        "run_history": run_history,
         "linkedin_auth": linkedin_auth,
         "counts": {
             "last_24h": counts_24h,
