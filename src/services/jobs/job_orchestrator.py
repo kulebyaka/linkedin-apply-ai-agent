@@ -204,6 +204,47 @@ class JobOrchestrator:
             }
         return {"url": request.url or ""}
 
+    async def list_jobs(
+        self,
+        user_id: str,
+        *,
+        statuses: list[str] | None = None,
+        sources: list[str] | None = None,
+        created_from: datetime | None = None,
+        created_to: datetime | None = None,
+        search: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[JobRecord], int]:
+        """List jobs owned by ``user_id`` with optional filters.
+
+        Scopes every query to the caller by passing ``user_ids=[user_id]`` to
+        the repository's admin-style list/count helpers.
+
+        Returns:
+            ``(items, total)`` where ``total`` is the filtered count ignoring
+            pagination.
+        """
+        items = await self._ctx.repository.list_all_jobs(
+            user_ids=[user_id],
+            statuses=statuses,
+            sources=sources,
+            created_from=created_from,
+            created_to=created_to,
+            search=search,
+            limit=limit,
+            offset=offset,
+        )
+        total = await self._ctx.repository.count_all_jobs(
+            user_ids=[user_id],
+            statuses=statuses,
+            sources=sources,
+            created_from=created_from,
+            created_to=created_to,
+            search=search,
+        )
+        return items, total
+
     async def get_status(self, job_id: str) -> JobStatusResponse:
         """Get job status from repository (authoritative) or workflow threads (in-progress).
 
