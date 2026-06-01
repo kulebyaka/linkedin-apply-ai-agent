@@ -118,7 +118,10 @@ export async function fetchPendingApprovals(
 		return [...mockPendingJobs];
 	}
 
-	const url = new URL(`${API_BASE}/api/hitl/pending`);
+	// API_BASE is an empty string in same-origin prod builds (see ui/Dockerfile),
+	// so `new URL()` needs an explicit base or it throws on the relative path.
+	const base = API_BASE || (typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
+	const url = new URL(`${API_BASE}/api/hitl/pending`, base);
 	if (states && states.length) {
 		url.searchParams.set('states', states.join(','));
 	}
