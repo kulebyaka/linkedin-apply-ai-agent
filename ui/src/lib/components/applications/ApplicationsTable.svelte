@@ -4,16 +4,11 @@
 	interface Props {
 		jobs: AdminJobRecord[];
 		loading?: boolean;
-		onOpenPdf: (jobId: string) => void;
 		onDelete: (jobId: string) => void;
 		onReview: (jobId: string) => void;
 	}
 
-	let { jobs, loading = false, onOpenPdf, onDelete, onReview }: Props = $props();
-
-	// Statuses whose jobs always have a generated CV available, even if
-	// `pdf_path` isn't surfaced on the record.
-	const CV_STATUSES = new Set(['pending', 'approved', 'applied', 'completed']);
+	let { jobs, loading = false, onDelete, onReview }: Props = $props();
 
 	function formatDate(iso: string | null | undefined): string {
 		if (!iso) return '—';
@@ -55,8 +50,9 @@
 		return (j.job_posting?.company as string | undefined) ?? '—';
 	}
 
-	function hasCv(j: AdminJobRecord): boolean {
-		return Boolean(j.pdf_path) || CV_STATUSES.has(j.status);
+	function jobUrl(j: AdminJobRecord): string | null {
+		const url = j.job_posting?.url as string | undefined;
+		return url && url.trim() ? url : null;
 	}
 </script>
 
@@ -106,14 +102,15 @@
 										Review
 									</button>
 								{/if}
-								{#if hasCv(j)}
-									<button
-										type="button"
-										onclick={() => onOpenPdf(j.job_id)}
+								{#if jobUrl(j)}
+									<a
+										href={jobUrl(j)}
+										target="_blank"
+										rel="noopener noreferrer"
 										class="font-mono border-2 border-[var(--color-foreground)] bg-white px-2 py-1 text-[10px] uppercase tracking-wider hover:bg-[var(--color-muted)]"
 									>
-										Open CV
-									</button>
+										Open on LinkedIn
+									</a>
 								{/if}
 								<button
 									type="button"

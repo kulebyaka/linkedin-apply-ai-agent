@@ -2,7 +2,7 @@
 	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { listMyJobs, type MyJobsFilters } from '$lib/api/jobs';
-	import { fetchJobStats, downloadPdf, deleteJob, type JobStatusCounts } from '$lib/api/hitl';
+	import { fetchJobStats, deleteJob, type JobStatusCounts } from '$lib/api/hitl';
 	import type { AdminJobRecord } from '$lib/api/admin';
 	import { POLL_INTERVAL_MS } from '$lib/config';
 	import ApplicationsFilterBar from '$lib/components/applications/ApplicationsFilterBar.svelte';
@@ -123,10 +123,6 @@
 		fetchJobs();
 	}
 
-	async function handleOpenPdf(jobId: string) {
-		downloadPdf(jobId);
-	}
-
 	async function handleDelete(jobId: string) {
 		if (!window.confirm(`Delete job ${jobId.slice(0, 8)}…? This removes the record and its PDF.`)) {
 			return;
@@ -222,7 +218,6 @@
 
 	<ApplicationsTable
 		{jobs}
-		onOpenPdf={handleOpenPdf}
 		onDelete={handleDelete}
 		onReview={handleReview}
 		loading={loading && !initialLoadDone}
