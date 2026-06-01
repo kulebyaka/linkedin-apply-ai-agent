@@ -16,12 +16,24 @@ router = APIRouter()
 
 @router.get("/api/health")
 async def health(request: Request):
-    """Health check endpoint with consumer health status."""
+    """Health check endpoint with consumer health status + in-flight counts."""
     ctx = get_ctx(request)
     consumer_health = ctx.consumer_manager.health_check() if ctx.consumer_manager else {}
+
+    queued_count = 0
+    processing_count = 0
+    try:
+        counts = await ctx.repository.count_by_status_global()
+        queued_count = counts.get("queued", 0)
+        processing_count = counts.get("processing", 0)
+    except Exception:
+        logger.debug("Failed to read status counts for /api/health", exc_info=True)
+
     return {
         "status": "running",
         "message": "LinkedIn Job Application Agent API",
+        "queued_count": queued_count,
+        "processing_count": processing_count,
         **consumer_health,
     }
 

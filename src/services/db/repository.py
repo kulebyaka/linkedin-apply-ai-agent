@@ -43,6 +43,8 @@ UPDATABLE_FIELDS = frozenset({
     "scrape_attempts",
     "last_scrape_error",
     "last_scrape_attempt_at",
+    "recovery_attempts",
+    "last_recovery_attempt_at",
     "updated_at",
 })
 
@@ -154,6 +156,21 @@ class JobRepository(ABC):
 
     @abstractmethod
     async def get_status_counts(self, user_id: str) -> dict[str, int]:
+        pass
+
+    @abstractmethod
+    async def list_by_states(
+        self,
+        states: list[str],
+        *,
+        user_id: str | None = None,
+        limit: int = 200,
+    ) -> list[JobRecord]:
+        """Return jobs whose status is in `states`, optionally scoped to a user.
+
+        Used by the HITL in-flight view (user-scoped) and the startup recovery
+        scan (`user_id=None`).
+        """
         pass
 
     # =========================================================================

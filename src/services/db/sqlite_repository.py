@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from src.models.cv_attempt import CVCompositionAttempt
-from src.models.state_machine import BusinessState, validate_transition
+from src.models.state_machine import BusinessState, WorkflowStep, validate_transition
 from src.models.unified import JobRecord
 
 from .migrations import apply_migrations
@@ -98,6 +98,9 @@ class SQLiteJobRepository(SQLiteAdminQueriesMixin, JobRepository):
             "scrape_attempts": job.scrape_attempts,
             "last_scrape_error": job.last_scrape_error,
             "last_scrape_attempt_at": job.last_scrape_attempt_at,
+            "recovery_attempts": job.recovery_attempts,
+            "last_recovery_attempt_at": job.last_recovery_attempt_at,
+            "workflow_step": job.workflow_step.value if job.workflow_step else None,
             "created_at": job.created_at,
             "updated_at": job.updated_at,
         }
@@ -137,6 +140,9 @@ class SQLiteJobRepository(SQLiteAdminQueriesMixin, JobRepository):
             scrape_attempts=row.get("scrape_attempts") or 0,
             last_scrape_error=row.get("last_scrape_error"),
             last_scrape_attempt_at=self._normalize_datetime(row.get("last_scrape_attempt_at")),
+            recovery_attempts=row.get("recovery_attempts") or 0,
+            last_recovery_attempt_at=self._normalize_datetime(row.get("last_recovery_attempt_at")),
+            workflow_step=WorkflowStep(row["workflow_step"]) if row.get("workflow_step") else None,
             created_at=self._normalize_datetime(row.get("created_at")) or datetime.now(tz=timezone.utc),
             updated_at=self._normalize_datetime(row.get("updated_at")) or datetime.now(tz=timezone.utc),
         )
@@ -403,6 +409,33 @@ class SQLiteJobRepository(SQLiteAdminQueriesMixin, JobRepository):
 
         if statuses:
             query = query.where(Job.status.is_in(statuses))
+
+        rows = await query.run()
+        return [self._row_to_job_record(row) for row in rows]
+
+    async def list_by_states(
+        self,
+        states: list[str],
+        *,
+        user_id: str | None = None,
+        limit: int = 200,
+    ) -> list[JobRecord]:
+        self._ensure_initialized()
+        from .tables import Job
+
+        if not states:
+            return []
+
+        state_values = [str(s) for s in states]
+
+        query = (
+            Job.select()
+            .where(Job.status.is_in(state_values))
+            .order_by(Job.updated_at, ascending=False)
+            .limit(limit)
+        )
+        if user_id is not None:
+            query = query.where(Job.user_id == user_id)
 
         rows = await query.run()
         return [self._row_to_job_record(row) for row in rows]

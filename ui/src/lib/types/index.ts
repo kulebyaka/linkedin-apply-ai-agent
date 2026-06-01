@@ -96,8 +96,24 @@ export interface UserFilterPreferences {
 	enabled: boolean;
 }
 
+export type BusinessState =
+	| 'queued'
+	| 'processing'
+	| 'completed'
+	| 'pending'
+	| 'approved'
+	| 'declined'
+	| 'retrying'
+	| 'applying'
+	| 'applied'
+	| 'failed'
+	| 'filtered_out'
+	| 'scrape_failed';
+
 export interface PendingApproval {
 	job_id: string;
+	status: BusinessState;
+	workflow_step: string | null;
 	job_posting: JobPosting;
 	cv_json: Record<string, unknown>;
 	pdf_path: string;

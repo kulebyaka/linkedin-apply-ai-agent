@@ -137,6 +137,18 @@ MIGRATIONS: tuple[Migration, ...] = (
         _add_column("user", "role", "role VARCHAR(20) NOT NULL DEFAULT 'trial'"),
         post_apply=_reindex_user,
     ),
+    Migration(
+        "add_job_recovery_attempts",
+        _add_column("job", "recovery_attempts", "recovery_attempts INTEGER NOT NULL DEFAULT 0"),
+    ),
+    Migration(
+        "add_job_last_recovery_attempt_at",
+        _add_column("job", "last_recovery_attempt_at", "last_recovery_attempt_at TIMESTAMP NULL"),
+    ),
+    Migration(
+        "add_job_workflow_step",
+        _add_column("job", "workflow_step", "workflow_step VARCHAR(40) NULL"),
+    ),
 )
 
 

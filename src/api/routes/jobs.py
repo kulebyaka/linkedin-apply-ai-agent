@@ -93,6 +93,7 @@ async def trigger_linkedin_search(request: Request, user: CurrentUser):
                     settings, scraper, ctx.job_queue,
                     user_repository=ctx.user_repository,
                     admin_alert_service=ctx.admin_alert_service,
+                    job_repository=ctx.repository,
                 )
             except Exception:
                 logger.exception("Failed to initialize LinkedIn search components")

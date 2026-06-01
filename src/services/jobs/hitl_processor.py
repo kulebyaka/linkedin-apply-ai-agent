@@ -116,10 +116,22 @@ class HITLProcessor:
             else:
                 raise ValueError(f"Invalid decision: {decision.decision}")
 
-    async def get_pending(self, user_id: str) -> list[PendingApproval]:
-        """Get all jobs pending HITL review for a user."""
+    async def get_pending(
+        self, user_id: str, states: list[BusinessState] | None = None
+    ) -> list[PendingApproval]:
+        """Get pending (and optionally in-flight) jobs for a user.
+
+        When `states` is None, defaults to PENDING only — the historical
+        behavior. Pass an explicit state list to include QUEUED / PROCESSING /
+        RETRYING rows for the dashboard's read-only progress cards.
+        """
         try:
-            pending_jobs = await self._ctx.repository.get_pending(user_id)
+            if states is None:
+                pending_jobs = await self._ctx.repository.get_pending(user_id)
+            else:
+                pending_jobs = await self._ctx.repository.list_by_states(
+                    [s.value for s in states], user_id=user_id
+                )
 
             # Load user's filter thresholds once for the whole batch
             reject_threshold = 30
@@ -139,6 +151,10 @@ class HITLProcessor:
                 result.append(
                     PendingApproval(
                         job_id=job.job_id,
+                        status=str(job.status),
+                        workflow_step=(
+                            str(job.workflow_step) if job.workflow_step else None
+                        ),
                         job_posting=job.job_posting or {},
                         cv_json=job.current_cv_json or {},
                         pdf_path=job.current_pdf_path,

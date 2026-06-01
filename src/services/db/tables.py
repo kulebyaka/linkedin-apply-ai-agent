@@ -85,6 +85,13 @@ class Job(Table):
     last_scrape_error = Text(null=True)
     last_scrape_attempt_at = Timestamptz(null=True)
 
+    # Startup-recovery tracking
+    recovery_attempts = Integer(default=0)
+    last_recovery_attempt_at = Timestamptz(null=True)
+
+    # Persisted current workflow step (read by UI for fine-grained progress)
+    workflow_step = Varchar(length=40, null=True)
+
     # Timestamps
     created_at = Timestamptz(index=True)  # Index for sorting
     updated_at = Timestamptz()

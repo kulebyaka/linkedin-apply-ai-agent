@@ -154,6 +154,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 settings, scraper, ctx.job_queue,
                 user_repository=ctx.user_repository,
                 admin_alert_service=ctx.admin_alert_service,
+                job_repository=ctx.repository,
             )
             scheduler.start()
             ctx.scheduler = scheduler
@@ -164,6 +165,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.info("LinkedIn search scheduler started")
         except Exception:
             logger.exception("Failed to start LinkedIn search scheduler")
+
+    # Recover any jobs left in non-terminal states from a prior process.
+    # Best-effort: failures must not block app startup.
+    try:
+        from src.services.jobs.recovery import recover_in_flight_jobs
+        report = await recover_in_flight_jobs(ctx)
+        # If recovery re-enqueued anything but the consumer wasn't started
+        # (e.g. scheduler disabled), spin it up so the recovered work
+        # actually runs.
+        if (
+            report.recovered > 0
+            and ctx.consumer_manager is not None
+            and (ctx.consumer_manager.task is None or ctx.consumer_manager.task.done())
+        ):
+            ctx.consumer_manager.start(ctx)
+            logger.info("Started consumer to process recovered jobs")
+    except Exception:
+        logger.exception("Startup recovery raised — continuing without it")
 
     yield
 

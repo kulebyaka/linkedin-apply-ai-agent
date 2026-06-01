@@ -19,13 +19,16 @@ from typing import TYPE_CHECKING, Literal
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from src.config.settings import Settings
+from src.models.state_machine import BusinessState
+from src.models.unified import JobRecord
 from src.services.linkedin.linkedin_search import LinkedInSearchParams, LinkedInSearchURLBuilder
 
-from .job_queue import JobQueue
+from .job_queue import JobQueue, _scoped_job_id, _should_retry_scrape
 
 if TYPE_CHECKING:
     from src.services.alerts import AdminAlertService
     from src.services.auth.user_repository import UserRepository
+    from src.services.db.job_repository import JobRepository
     from src.services.linkedin.linkedin_scraper import LinkedInJobScraper
 
 logger = logging.getLogger(__name__)
@@ -63,12 +66,14 @@ class LinkedInSearchScheduler:
         queue: JobQueue,
         user_repository: UserRepository | None = None,
         admin_alert_service: AdminAlertService | None = None,
+        job_repository: JobRepository | None = None,
     ) -> None:
         self.settings = settings
         self.scraper = scraper
         self.queue = queue
         self.user_repository = user_repository
         self.admin_alert_service = admin_alert_service
+        self.job_repository = job_repository
         self._scheduler = AsyncIOScheduler()
         self._search_lock = asyncio.Lock()
         self._last_run_time: datetime | None = None
@@ -239,11 +244,19 @@ class LinkedInSearchScheduler:
                                 exc_info=True,
                             )
 
-                    # Enqueue with user_id tag
-                    enqueued = await self.queue.put_batch(jobs, user_id=plan_user_id)
+                    # Persist a QUEUED row per discovered job before enqueueing
+                    # so the work is durable across restarts and visible in
+                    # the UI immediately. Deduped jobs that are already in a
+                    # terminal/in-progress state are not re-enqueued.
+                    enqueued, deduped = await self._persist_and_enqueue(
+                        jobs, plan_user_id,
+                    )
                     logger.info(
-                        "Enqueued %d jobs for user=%s (queue size: %d)",
+                        "jobs_discovered total=%d enqueued=%d deduped=%d "
+                        "user=%s queue_size=%d",
+                        len(jobs),
                         enqueued,
+                        deduped,
                         plan_user_id or "global",
                         self.queue.size(),
                     )
@@ -279,6 +292,82 @@ class LinkedInSearchScheduler:
             self._last_run_time = datetime.now(tz=timezone.utc)
             self._last_run_jobs = 0
             return 0
+
+    async def _persist_and_enqueue(
+        self, jobs: list, plan_user_id: str | None
+    ) -> tuple[int, int]:
+        """Create a QUEUED JobRecord per discovered job, then enqueue.
+
+        Returns (enqueued, deduped) counts. A job is "deduped" when an
+        existing record is present and `_should_retry_scrape` returns False —
+        we leave the row untouched and skip the enqueue.
+
+        If the repository is unavailable (legacy wiring), falls back to a
+        plain put_batch so the consumer still picks the jobs up.
+        """
+        if self.job_repository is None:
+            enqueued = await self.queue.put_batch(jobs, user_id=plan_user_id)
+            return enqueued, 0
+
+        enqueued = 0
+        deduped = 0
+        now = datetime.now(tz=timezone.utc)
+
+        for scraped_job in jobs:
+            scoped_id = _scoped_job_id(scraped_job.job_id, plan_user_id)
+            try:
+                existing = await self.job_repository.get(scoped_id)
+            except Exception:
+                logger.warning(
+                    "Pre-enqueue dedup lookup failed for %s; enqueueing without dedup",
+                    scoped_id,
+                    exc_info=True,
+                )
+                existing = None
+
+            if existing is not None and not _should_retry_scrape(existing):
+                deduped += 1
+                continue
+
+            if existing is None:
+                try:
+                    await self.job_repository.create(
+                        JobRecord(
+                            job_id=scoped_id,
+                            user_id=plan_user_id or "",
+                            source="linkedin",
+                            mode="full",
+                            status=BusinessState.QUEUED,
+                            job_posting={
+                                "title": scraped_job.title,
+                                "company": scraped_job.company,
+                                "url": scraped_job.url,
+                                "location": scraped_job.location,
+                            },
+                            raw_input=scraped_job.model_dump(),
+                            created_at=now,
+                            updated_at=now,
+                        )
+                    )
+                except Exception:
+                    logger.warning(
+                        "Failed to persist QUEUED row for %s; skipping enqueue",
+                        scoped_id,
+                        exc_info=True,
+                    )
+                    continue
+
+            try:
+                await self.queue.put(scraped_job, user_id=plan_user_id)
+                enqueued += 1
+            except Exception:
+                logger.warning(
+                    "Failed to enqueue %s after persisting; will be picked up by recovery",
+                    scoped_id,
+                    exc_info=True,
+                )
+
+        return enqueued, deduped
 
     def start(self) -> None:
         """Add interval job and start the APScheduler."""

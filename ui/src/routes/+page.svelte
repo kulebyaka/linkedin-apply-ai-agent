@@ -1,11 +1,13 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { reviewQueue } from '$lib/stores/reviewQueue.svelte';
+	import { inFlightStore } from '$lib/stores/inFlightJobs.svelte';
 	import JobCard from '$lib/components/review/JobCard.svelte';
 	import DecisionButtons from '$lib/components/review/DecisionButtons.svelte';
 	import NavigationControls from '$lib/components/review/NavigationControls.svelte';
 	import FeedbackModal from '$lib/components/review/FeedbackModal.svelte';
 	import EmptyState from '$lib/components/review/EmptyState.svelte';
+	import InFlightList from '$lib/components/review/InFlightList.svelte';
 	import ToastNotification from '$lib/components/ToastNotification.svelte';
 
 	let modalType = $state<'decline' | 'retry' | null>(null);
@@ -15,10 +17,13 @@
 
 	onMount(() => {
 		reviewQueue.loadPending();
+		inFlightStore.loadInitial();
+		inFlightStore.startPolling();
 		window.addEventListener('keydown', handleKeyDown);
 	});
 
 	onDestroy(() => {
+		inFlightStore.stopPolling();
 		window.removeEventListener('keydown', handleKeyDown);
 	});
 
@@ -155,6 +160,9 @@
 				</div>
 			</div>
 		</header>
+
+		<!-- In-flight (read-only, polled) -->
+		<InFlightList jobs={inFlightStore.jobs} />
 
 		<!-- Main Content -->
 		{#if reviewQueue.isLoading}
