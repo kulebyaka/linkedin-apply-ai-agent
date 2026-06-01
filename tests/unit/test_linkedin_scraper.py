@@ -335,7 +335,10 @@ def _build_auth_locator(
     `_detect_layout` -> 'authenticated'.
     """
     empty = MagicMock(count=AsyncMock(return_value=0))
-    empty.first = MagicMock(text_content=AsyncMock(return_value=""))
+    empty.first = MagicMock(
+        text_content=AsyncMock(return_value=""),
+        inner_text=AsyncMock(return_value=""),
+    )
 
     def side_effect(selector):
         if selector == _AUTH_SHOW_MORE_SELECTOR:
@@ -365,7 +368,10 @@ def _build_guest_locator(
     falls through to 'guest'.
     """
     empty = MagicMock(count=AsyncMock(return_value=0))
-    empty.first = MagicMock(text_content=AsyncMock(return_value=""))
+    empty.first = MagicMock(
+        text_content=AsyncMock(return_value=""),
+        inner_text=AsyncMock(return_value=""),
+    )
 
     def side_effect(selector):
         if selector == _GUEST_SHOW_MORE_SELECTOR:
@@ -390,7 +396,7 @@ class TestParseJobDetailPage:
         desc_loc = MagicMock()
         desc_loc.count = AsyncMock(return_value=1)
         desc_loc.first = MagicMock()
-        desc_loc.first.text_content = AsyncMock(
+        desc_loc.first.inner_text = AsyncMock(
             return_value="  We are looking for a Python developer.  "
         )
 
@@ -413,7 +419,7 @@ class TestParseJobDetailPage:
         desc_loc = MagicMock()
         desc_loc.count = AsyncMock(return_value=1)
         desc_loc.first = MagicMock()
-        desc_loc.first.text_content = AsyncMock(return_value="Full expanded description text.")
+        desc_loc.first.inner_text = AsyncMock(return_value="Full expanded description text.")
 
         page.locator = MagicMock(
             side_effect=_build_auth_locator(show_more_loc=show_more_loc, desc_loc=desc_loc)
@@ -430,7 +436,7 @@ class TestParseJobDetailPage:
         desc_loc = MagicMock()
         desc_loc.count = AsyncMock(return_value=1)
         desc_loc.first = MagicMock()
-        desc_loc.first.text_content = AsyncMock(return_value="Some description text.")
+        desc_loc.first.inner_text = AsyncMock(return_value="Some description text.")
 
         criteria_item_1 = MagicMock()
         criteria_item_1.text_content = AsyncMock(return_value="Mid-Senior level")
@@ -459,7 +465,7 @@ class TestParseJobDetailPage:
         desc_loc = MagicMock()
         desc_loc.count = AsyncMock(return_value=1)
         desc_loc.first = MagicMock()
-        desc_loc.first.text_content = AsyncMock(return_value="Some description.")
+        desc_loc.first.inner_text = AsyncMock(return_value="Some description.")
 
         salary_loc = MagicMock()
         salary_loc.count = AsyncMock(return_value=1)
@@ -485,7 +491,7 @@ class TestParseJobDetailPage:
         desc_loc = MagicMock()
         desc_loc.count = AsyncMock(return_value=1)
         desc_loc.first = MagicMock()
-        desc_loc.first.text_content = AsyncMock(
+        desc_loc.first.inner_text = AsyncMock(
             return_value="About the job\nWe build distributed systems in Rust."
         )
 
@@ -507,7 +513,7 @@ class TestParseJobDetailPage:
         about_h2_loc = MagicMock()
         about_h2_loc.count = AsyncMock(return_value=1)
         container_loc = MagicMock()
-        container_loc.text_content = AsyncMock(
+        container_loc.inner_text = AsyncMock(
             return_value="About the job\nWe are hiring a senior Python developer."
         )
         about_h2_loc.first = MagicMock()
@@ -554,7 +560,7 @@ class TestParseJobDetailPage:
         desc_loc = MagicMock()
         desc_loc.count = AsyncMock(return_value=1)
         desc_loc.first = MagicMock()
-        desc_loc.first.text_content = AsyncMock(
+        desc_loc.first.inner_text = AsyncMock(
             return_value="Hledáme zkušeného AI Developera...Privacy Notice"
         )
 
@@ -581,19 +587,22 @@ class TestParseJobDetailPage:
         auth_desc_loc = MagicMock()
         auth_desc_loc.count = AsyncMock(return_value=1)
         auth_desc_loc.first = MagicMock()
-        auth_desc_loc.first.text_content = AsyncMock(
+        auth_desc_loc.first.inner_text = AsyncMock(
             return_value="Authenticated SDUI description."
         )
 
         guest_desc_loc = MagicMock()
         guest_desc_loc.count = AsyncMock(return_value=1)
         guest_desc_loc.first = MagicMock()
-        guest_desc_loc.first.text_content = AsyncMock(
+        guest_desc_loc.first.inner_text = AsyncMock(
             return_value="Guest markup description (should NOT be used)."
         )
 
         empty = MagicMock(count=AsyncMock(return_value=0))
-        empty.first = MagicMock(text_content=AsyncMock(return_value=""))
+        empty.first = MagicMock(
+            text_content=AsyncMock(return_value=""),
+            inner_text=AsyncMock(return_value=""),
+        )
 
         def side_effect(selector):
             if selector == _AUTH_SHOW_MORE_SELECTOR:

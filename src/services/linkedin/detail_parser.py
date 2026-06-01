@@ -89,7 +89,11 @@ class DetailPageParser:
             for selector in AUTHENTICATED_DESCRIPTION_SELECTORS:
                 if await page.locator(selector).count() == 0:
                     continue
-                text = (await page.locator(selector).first.text_content() or "").strip()
+                # inner_text() returns the *rendered* text, preserving the
+                # newlines between block elements (<p>, <li>, headings). Using
+                # text_content() here collapses the whole section into one line
+                # and glues words across block boundaries ("...teamWe are...").
+                text = (await page.locator(selector).first.inner_text() or "").strip()
                 text = text.removeprefix("About the job").strip()
                 if text:
                     result["description"] = text
@@ -101,7 +105,7 @@ class DetailPageParser:
                 about_h2 = page.locator("h2:has-text('About the job')")
                 if await about_h2.count() > 0:
                     container = about_h2.first.locator("../..")
-                    raw = (await container.text_content() or "").strip()
+                    raw = (await container.inner_text() or "").strip()
                     desc = raw.removeprefix("About the job").strip()
                     if desc:
                         result["description"] = desc
@@ -149,7 +153,9 @@ class DetailPageParser:
         try:
             loc = page.locator(GUEST_DESCRIPTION_SELECTOR)
             if await loc.count() > 0:
-                text = (await loc.first.text_content() or "").strip()
+                # inner_text() preserves block-level newlines; text_content()
+                # would collapse the markup into one unformatted line.
+                text = (await loc.first.inner_text() or "").strip()
                 if text:
                     result["description"] = text
         except Exception as exc:
