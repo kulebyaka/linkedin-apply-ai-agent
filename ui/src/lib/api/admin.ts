@@ -18,6 +18,20 @@ export type JobStatus =
 
 export type JobSource = 'linkedin' | 'url' | 'manual';
 
+/** LLM filter evaluation, stored on the job record. Present on filtered_out jobs. */
+export interface FilterResult {
+	/** Overall suitability score, 0-100. */
+	score: number;
+	/** Detected concerns / warnings. */
+	red_flags: string[];
+	/** True if a hard disqualifier was found. */
+	disqualified: boolean;
+	/** Reason for disqualification, when disqualified. */
+	disqualifier_reason?: string | null;
+	/** LLM's reasoning for the score and flags. */
+	reasoning: string;
+}
+
 export interface AdminJobRecord {
 	job_id: string;
 	user_id: string | null;
@@ -32,8 +46,12 @@ export interface AdminJobRecord {
 		[key: string]: unknown;
 	} | null;
 	pdf_path?: string | null;
+	/** Denormalized path of the generated CV PDF (set once a CV is composed). */
+	current_pdf_path?: string | null;
 	error_message?: string | null;
 	last_scrape_error?: string | null;
+	/** LLM filter evaluation. Populated for filtered_out jobs (and others when filtering ran). */
+	filter_result?: FilterResult | null;
 	/** Whether the LinkedIn session was authenticated when this job was scraped. */
 	session_authenticated?: boolean | null;
 	attempt_count?: number;

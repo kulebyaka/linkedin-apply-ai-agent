@@ -3,6 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { listMyJobs, type MyJobsFilters } from '$lib/api/jobs';
 	import { fetchJobStats, deleteJob, type JobStatusCounts } from '$lib/api/hitl';
+	import { downloadPDF, triggerDownload } from '$lib/api/client';
 	import type { AdminJobRecord } from '$lib/api/admin';
 	import { POLL_INTERVAL_MS } from '$lib/config';
 	import ApplicationsFilterBar from '$lib/components/applications/ApplicationsFilterBar.svelte';
@@ -141,6 +142,20 @@
 		goto('/?job=' + jobId);
 	}
 
+	async function handleDownload(job: AdminJobRecord) {
+		try {
+			const blob = await downloadPDF(job.job_id);
+			const company = (job.job_posting?.company as string | undefined) ?? 'CV';
+			const title = (job.job_posting?.title as string | undefined) ?? job.job_id;
+			const filename = `${company.replace(/[^a-z0-9]/gi, '_')}_${title.replace(/[^a-z0-9]/gi, '_')}_CV.pdf`;
+			if (!triggerDownload(blob, filename)) {
+				showToast('Your browser blocked the download. Please allow downloads and retry.', 'error');
+			}
+		} catch (err) {
+			showToast(err instanceof Error ? err.message : 'Failed to download CV', 'error');
+		}
+	}
+
 	function goPrev() {
 		if (offset === 0) return;
 		offset = Math.max(0, offset - PAGE_SIZE);
@@ -220,6 +235,7 @@
 		{jobs}
 		onDelete={handleDelete}
 		onReview={handleReview}
+		onDownload={handleDownload}
 		loading={loading && !initialLoadDone}
 	/>
 

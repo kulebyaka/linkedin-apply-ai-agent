@@ -1,14 +1,23 @@
 <script lang="ts">
-	import type { AdminJobRecord } from '$lib/api/admin';
+	import type { AdminJobRecord, FilterResult } from '$lib/api/admin';
 
 	interface Props {
 		jobs: AdminJobRecord[];
 		loading?: boolean;
 		onDelete: (jobId: string) => void;
 		onReview: (jobId: string) => void;
+		onDownload: (job: AdminJobRecord) => void;
 	}
 
-	let { jobs, loading = false, onDelete, onReview }: Props = $props();
+	let { jobs, loading = false, onDelete, onReview, onDownload }: Props = $props();
+
+	/** Statuses that have a finished CV but no Review action — offer a download instead. */
+	const CV_DOWNLOAD_STATUSES = new Set(['approved', 'applied', 'completed']);
+
+	/** True when the job has a generated CV PDF available to download. */
+	function hasDownloadableCv(j: AdminJobRecord): boolean {
+		return CV_DOWNLOAD_STATUSES.has(j.status) && Boolean(j.current_pdf_path);
+	}
 
 	function formatDate(iso: string | null | undefined): string {
 		if (!iso) return '—';
@@ -54,6 +63,25 @@
 		const url = j.job_posting?.url as string | undefined;
 		return url && url.trim() ? url : null;
 	}
+
+	/** The LLM filter verdict, when present (always for filtered_out jobs). */
+	function filterResult(j: AdminJobRecord): FilterResult | null {
+		const fr = j.filter_result;
+		return fr && typeof fr === 'object' ? fr : null;
+	}
+
+	/** Plain-text summary of a filter verdict, used as a native title= fallback. */
+	function filterSummary(fr: FilterResult): string {
+		const parts = [`Score ${fr.score}/100`];
+		if (fr.disqualified && fr.disqualifier_reason) {
+			parts.push(`Disqualified: ${fr.disqualifier_reason}`);
+		}
+		if (fr.red_flags?.length) {
+			parts.push(`Red flags: ${fr.red_flags.join('; ')}`);
+		}
+		if (fr.reasoning) parts.push(fr.reasoning);
+		return parts.join('\n');
+	}
 </script>
 
 <div class="overflow-x-auto border-4 border-[var(--color-foreground)] bg-white shadow-brutal">
@@ -86,7 +114,37 @@
 					<tr class="border-b border-[var(--color-muted)] hover:bg-[var(--color-muted)]/40">
 						<td class="px-3 py-2 font-mono text-xs">{formatDate(j.created_at)}</td>
 						<td class="px-3 py-2">
-							<span class={statusBadgeClass(j.status)}>{j.status}</span>
+							{#if j.status === 'filtered_out' && filterResult(j)}
+								{@const fr = filterResult(j)!}
+								<span class="group relative inline-flex items-center">
+									<span class="{statusBadgeClass(j.status)} cursor-help border-dashed" title={filterSummary(fr)}>{j.status}</span>
+									<span
+										role="tooltip"
+										class="pointer-events-none absolute left-0 top-full z-20 mt-2 hidden w-80 border-2 border-[var(--color-foreground)] bg-white px-3 py-2 normal-case shadow-brutal group-hover:block group-focus-within:block"
+									>
+										<span class="font-mono text-[10px] font-bold uppercase tracking-wider text-[var(--color-foreground)]">
+											Filtered out · score {fr.score}/100
+										</span>
+										{#if fr.disqualified && fr.disqualifier_reason}
+											<span class="mt-1.5 block text-xs text-red-900">
+												<span class="font-bold">Disqualified:</span> {fr.disqualifier_reason}
+											</span>
+										{/if}
+										{#if fr.red_flags?.length}
+											<ul class="mt-1.5 list-disc pl-4 text-xs text-[var(--color-foreground)]">
+												{#each fr.red_flags as flag}
+													<li>{flag}</li>
+												{/each}
+											</ul>
+										{/if}
+										{#if fr.reasoning}
+											<span class="mt-1.5 block text-xs text-[var(--color-muted-foreground)]">{fr.reasoning}</span>
+										{/if}
+									</span>
+								</span>
+							{:else}
+								<span class={statusBadgeClass(j.status)}>{j.status}</span>
+							{/if}
 						</td>
 						<td class="px-3 py-2 font-mono text-xs">{j.source}</td>
 						<td class="px-3 py-2 text-sm">{jobTitle(j)}</td>
@@ -100,6 +158,14 @@
 										class="font-mono border-2 border-[var(--color-foreground)] bg-[var(--color-primary)] px-2 py-1 text-[10px] uppercase tracking-wider text-[var(--color-primary-foreground)] hover:-translate-y-0.5"
 									>
 										Review
+									</button>
+								{:else if hasDownloadableCv(j)}
+									<button
+										type="button"
+										onclick={() => onDownload(j)}
+										class="font-mono border-2 border-[var(--color-foreground)] bg-[var(--color-primary)] px-2 py-1 text-[10px] uppercase tracking-wider text-[var(--color-primary-foreground)] hover:-translate-y-0.5"
+									>
+										Download CV
 									</button>
 								{/if}
 								{#if jobUrl(j)}
