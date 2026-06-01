@@ -101,7 +101,7 @@ async def test_extract_job_linkedin_not_implemented_fails():
 
 
 async def test_save_to_db_repo_not_implemented_fails():
-    """If repo.create() raises NotImplementedError, save_to_db_node should fail, not silently skip."""
+    """If repo.update() raises NotImplementedError, save_to_db_node should fail, not silently skip."""
     state = {
         "job_id": "test-3",
         "source": "manual",
@@ -117,10 +117,10 @@ async def test_save_to_db_repo_not_implemented_fails():
     }
 
     mock_repo = AsyncMock()
-    # No pre-existing record — code path goes to create()
-    mock_repo.get = AsyncMock(return_value=None)
-    mock_repo.create = AsyncMock(
-        side_effect=NotImplementedError("create() not implemented")
+    # The row is guaranteed to exist (persisted at discovery); workflow nodes
+    # are update-only. We surface persistence failures by failing the update.
+    mock_repo.update = AsyncMock(
+        side_effect=NotImplementedError("update() not implemented")
     )
     config = {"configurable": {"repository": mock_repo}}
 

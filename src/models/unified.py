@@ -95,13 +95,18 @@ class HITLDecisionResponse(BaseModel):
 
 
 class PendingApproval(BaseModel):
-    """Job pending HITL approval.
+    """Job pending HITL approval (or any in-flight state the caller asks for).
 
-    Returned by GET /api/hitl/pending endpoint for batch review.
+    Returned by GET /api/hitl/pending endpoint. By default this returns only
+    rows whose status == PENDING; callers can pass ?states=... to include
+    in-flight statuses (QUEUED, PROCESSING, RETRYING) for the dashboard's
+    read-only progress cards.
     """
     job_id: str
+    status: str = Field(BusinessState.PENDING, description="Current business state")
+    workflow_step: str | None = Field(None, description="Current workflow step (in-flight only)")
     job_posting: dict = Field(..., description="Normalized job posting data")
-    cv_json: dict = Field(..., description="Generated tailored CV as JSON")
+    cv_json: dict = Field(default_factory=dict, description="Generated tailored CV as JSON (empty when in-flight)")
     pdf_path: str | None = Field(None, description="Path to generated PDF file")
     filter_result: dict | None = Field(None, description="LLM filter evaluation result")
     attempt_count: int = Field(0, description="Number of CV composition attempts")
@@ -152,6 +157,10 @@ class JobRecord(BaseModel):
     scrape_attempts: int = 0
     last_scrape_error: str | None = None
     last_scrape_attempt_at: datetime | None = None
+
+    # Startup-recovery tracking — bounded so a poison row can't loop forever.
+    recovery_attempts: int = 0
+    last_recovery_attempt_at: datetime | None = None
 
     # Timestamps
     created_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))

@@ -1,4 +1,4 @@
-import type { PendingApproval, Decision, DecisionResponse } from '$lib/types';
+import type { PendingApproval, Decision, DecisionResponse, BusinessState } from '$lib/types';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
 const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true';
@@ -27,6 +27,8 @@ As a senior member of the team, you'll mentor junior developers, participate in 
 				'Strong communication and collaboration skills',
 			],
 		},
+		status: 'pending',
+		workflow_step: null,
 		cv_json: {},
 		pdf_path: '/api/jobs/job-001/pdf',
 		attempt_count: 0,
@@ -58,6 +60,8 @@ You'll have the opportunity to work on challenging problems at scale, publish re
 				'Publications in top ML conferences a plus',
 			],
 		},
+		status: 'pending',
+		workflow_step: null,
 		cv_json: {},
 		pdf_path: '/api/jobs/job-002/pdf',
 		attempt_count: 1,
@@ -89,6 +93,8 @@ This role offers the opportunity to work with cutting-edge cloud technologies an
 				'Understanding of security best practices',
 			],
 		},
+		status: 'pending',
+		workflow_step: null,
 		cv_json: {},
 		pdf_path: '/api/jobs/job-003/pdf',
 		attempt_count: 0,
@@ -104,13 +110,20 @@ function delay(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export async function fetchPendingApprovals(): Promise<PendingApproval[]> {
+export async function fetchPendingApprovals(
+	states?: BusinessState[]
+): Promise<PendingApproval[]> {
 	if (USE_MOCK) {
 		await delay(300);
 		return [...mockPendingJobs];
 	}
 
-	const response = await fetch(`${API_BASE}/api/hitl/pending`, {
+	const url = new URL(`${API_BASE}/api/hitl/pending`);
+	if (states && states.length) {
+		url.searchParams.set('states', states.join(','));
+	}
+
+	const response = await fetch(url.toString(), {
 		credentials: 'include',
 	});
 	if (!response.ok) {

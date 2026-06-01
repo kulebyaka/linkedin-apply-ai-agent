@@ -27,7 +27,6 @@ from src.services.jobs.job_source import JobExtractionError, JobSourceFactory
 from ..config.settings import get_settings
 from ..models.cv_attempt import CVCompositionAttempt
 from ..models.state_machine import BusinessState, WorkflowStep
-from ..models.unified import JobRecord
 from ._shared import (
     compose_cv,
     create_llm_client,
@@ -161,11 +160,18 @@ def route_after_filter(state: PreparationWorkflowState) -> str:
 # =============================================================================
 
 
-async def extract_job_node(state: PreparationWorkflowState) -> PreparationWorkflowState:
+async def extract_job_node(
+    state: PreparationWorkflowState, config: RunnableConfig | None = None
+) -> PreparationWorkflowState:
     """Extract job data from source using appropriate adapter.
+
+    First action: flip the persisted row from QUEUED → PROCESSING so the UI
+    reflects that work has started. Self-transitions are allowed, so re-entry
+    after startup recovery is a no-op rather than an error.
 
     Args:
         state: Current workflow state.
+        config: LangGraph RunnableConfig (contains repository).
 
     Returns:
         Updated state with job_posting.
@@ -175,6 +181,28 @@ async def extract_job_node(state: PreparationWorkflowState) -> PreparationWorkfl
     source = state.get("source", "unknown")
     logger.info(f"[TIMING] Starting extract_job_node for {job_id} from source: {source}")
     state["current_step"] = WorkflowStep.EXTRACTING
+
+    # Persist QUEUED → PROCESSING and workflow_step so the in-flight UI updates.
+    try:
+        repo = get_repository_from_config(config or {})
+        existing = await repo.get(job_id)
+        if existing is not None and existing.status in (
+            BusinessState.QUEUED,
+            BusinessState.PROCESSING,
+            BusinessState.SCRAPE_FAILED,
+        ):
+            await repo.update(
+                job_id,
+                {
+                    "status": BusinessState.PROCESSING,
+                    "workflow_step": WorkflowStep.EXTRACTING,
+                },
+            )
+    except Exception:
+        # Best-effort — the workflow can still produce the right terminal state.
+        logger.warning(
+            "Failed to mark job %s as PROCESSING; continuing", job_id, exc_info=True
+        )
 
     try:
         # Extract job data
@@ -364,10 +392,11 @@ async def filter_job_node(
 async def save_filtered_out_node(
     state: PreparationWorkflowState, config: RunnableConfig | None = None
 ) -> PreparationWorkflowState:
-    """Save a filtered-out job record to the repository.
+    """Persist FILTERED_OUT on the pre-existing job record.
 
-    Creates a minimal JobRecord with status=FILTERED_OUT and the filter
-    evaluation result. No CV data is attached since CV generation was skipped.
+    The row is guaranteed to exist (created at discovery). This node only
+    updates status + filter_result; CV data stays unset since CV generation
+    was skipped.
 
     Args:
         state: Current workflow state (must contain filter_result).
@@ -381,32 +410,16 @@ async def save_filtered_out_node(
 
     try:
         repo = get_repository_from_config(config or {})
-        existing = await repo.get(job_id)
-
-        if existing is None:
-            job_record = JobRecord(
-                job_id=job_id,
-                user_id=state.get("user_id", ""),
-                source=state.get("source", "linkedin"),
-                mode=state.get("mode", "full"),
-                status=BusinessState.FILTERED_OUT,
-                job_posting=state.get("job_posting"),
-                raw_input=state.get("raw_input"),
-                filter_result=state.get("filter_result"),
-                created_at=datetime.now(tz=timezone.utc),
-                updated_at=datetime.now(tz=timezone.utc),
-            )
-            await repo.create(job_record)
-        else:
-            await repo.update(
-                job_id,
-                {
-                    "status": BusinessState.FILTERED_OUT,
-                    "job_posting": state.get("job_posting"),
-                    "raw_input": state.get("raw_input"),
-                    "filter_result": state.get("filter_result"),
-                },
-            )
+        await repo.update(
+            job_id,
+            {
+                "status": BusinessState.FILTERED_OUT,
+                "job_posting": state.get("job_posting"),
+                "raw_input": state.get("raw_input"),
+                "filter_result": state.get("filter_result"),
+                "workflow_step": None,
+            },
+        )
         logger.info(f"Filtered-out job {job_id} saved successfully")
 
     except Exception as e:
@@ -421,13 +434,12 @@ async def save_scrape_failed_node(
 ) -> PreparationWorkflowState:
     """Persist a job that failed the scrape quality gate.
 
-    Upserts a JobRecord with status=SCRAPE_FAILED and an incremented
-    scrape_attempts counter. When the counter reaches scraper_max_attempts,
-    the record is instead written as FAILED so cross-cycle dedup locks it
-    out for good.
+    Updates the pre-existing JobRecord to status=SCRAPE_FAILED with an
+    incremented scrape_attempts counter. When the counter reaches
+    scraper_max_attempts, status is FAILED so cross-cycle dedup locks the
+    row out for good.
     """
     job_id = state.get("job_id", "unknown")
-    user_id = state.get("user_id", "")
     error_message = state.get("error_message") or "Description quality gate failed"
     now = datetime.now(tz=timezone.utc)
 
@@ -450,34 +462,17 @@ async def save_scrape_failed_node(
                 job_id, new_attempts, max_attempts,
             )
 
-        if existing is None:
-            record = JobRecord(
-                job_id=job_id,
-                user_id=user_id,
-                source=state.get("source", "linkedin"),
-                mode=state.get("mode", "full"),
-                status=target_status,
-                job_posting=state.get("job_posting"),
-                raw_input=state.get("raw_input"),
-                error_message=error_message,
-                scrape_attempts=new_attempts,
-                last_scrape_error=error_message,
-                last_scrape_attempt_at=now,
-                created_at=now,
-                updated_at=now,
-            )
-            await repo.create(record)
-        else:
-            await repo.update(
-                job_id,
-                {
-                    "status": target_status,
-                    "error_message": error_message,
-                    "scrape_attempts": new_attempts,
-                    "last_scrape_error": error_message,
-                    "last_scrape_attempt_at": now,
-                },
-            )
+        await repo.update(
+            job_id,
+            {
+                "status": target_status,
+                "error_message": error_message,
+                "scrape_attempts": new_attempts,
+                "last_scrape_error": error_message,
+                "last_scrape_attempt_at": now,
+                "workflow_step": None,
+            },
+        )
 
     except Exception as e:
         logger.error("Failed to persist scrape-failed record for %s: %s", job_id, e, exc_info=True)
@@ -486,7 +481,22 @@ async def save_scrape_failed_node(
     return state
 
 
-async def compose_cv_node(state: PreparationWorkflowState) -> PreparationWorkflowState:
+async def _persist_workflow_step(
+    config: RunnableConfig | None, job_id: str, step: WorkflowStep
+) -> None:
+    """Best-effort update of the persisted workflow_step for in-flight UI badges."""
+    try:
+        repo = get_repository_from_config(config or {})
+        await repo.update(job_id, {"workflow_step": step})
+    except Exception:
+        logger.debug(
+            "Failed to persist workflow_step=%s for job %s", step, job_id, exc_info=True
+        )
+
+
+async def compose_cv_node(
+    state: PreparationWorkflowState, config: RunnableConfig | None = None
+) -> PreparationWorkflowState:
     """Compose tailored CV using LLM.
 
     Reuses logic from MVP workflow. Supports user_feedback for retry.
@@ -504,6 +514,7 @@ async def compose_cv_node(state: PreparationWorkflowState) -> PreparationWorkflo
     if user_feedback:
         logger.info(f"Retry with feedback: {user_feedback}")
     state["current_step"] = WorkflowStep.COMPOSING_CV
+    await _persist_workflow_step(config, job_id, WorkflowStep.COMPOSING_CV)
 
     # In fixture replay mode, check LLM response cache first (skip retries)
     if settings.seed_jobs_from_file and not user_feedback:
@@ -548,7 +559,9 @@ async def compose_cv_node(state: PreparationWorkflowState) -> PreparationWorkflo
     return state
 
 
-async def generate_pdf_node(state: PreparationWorkflowState) -> PreparationWorkflowState:
+async def generate_pdf_node(
+    state: PreparationWorkflowState, config: RunnableConfig | None = None
+) -> PreparationWorkflowState:
     """Generate PDF from tailored CV JSON.
 
     Reuses logic from MVP workflow.
@@ -563,6 +576,7 @@ async def generate_pdf_node(state: PreparationWorkflowState) -> PreparationWorkf
     job_id = state.get("job_id", "unknown")
     logger.info(f"[TIMING] Starting generate_pdf_node for job {job_id}")
     state["current_step"] = WorkflowStep.GENERATING_PDF
+    await _persist_workflow_step(config, job_id, WorkflowStep.GENERATING_PDF)
 
     # Get template name from raw_input or fall back to settings
     raw_input = state.get("raw_input", {})
@@ -616,42 +630,20 @@ async def save_to_db_node(state: PreparationWorkflowState, config: RunnableConfi
         pdf_path = state.get("tailored_cv_pdf_path")
 
         repo = get_repository_from_config(config or {})
-        existing = await repo.get(job_id)
-
-        if existing is None:
-            # Build job record
-            job_record = JobRecord(
-                job_id=job_id,
-                user_id=state.get("user_id", ""),
-                source=state.get("source", "manual"),
-                mode=mode,
-                status=final_status,
-                job_posting=state.get("job_posting"),
-                raw_input=state.get("raw_input"),
-                current_cv_json=cv_json,
-                current_pdf_path=pdf_path,
-                filter_result=state.get("filter_result"),
-                application_url=state.get("job_posting", {}).get("url"),
-                error_message=state.get("error_message"),
-                created_at=datetime.now(tz=timezone.utc),
-                updated_at=datetime.now(tz=timezone.utc),
-            )
-            await repo.create(job_record)
-        else:
-            # Retry happy-path: existing SCRAPE_FAILED row gets upgraded.
-            await repo.update(
-                job_id,
-                {
-                    "status": final_status,
-                    "job_posting": state.get("job_posting"),
-                    "raw_input": state.get("raw_input"),
-                    "current_cv_json": cv_json,
-                    "current_pdf_path": pdf_path,
-                    "filter_result": state.get("filter_result"),
-                    "application_url": state.get("job_posting", {}).get("url"),
-                    "error_message": state.get("error_message"),
-                },
-            )
+        await repo.update(
+            job_id,
+            {
+                "status": final_status,
+                "job_posting": state.get("job_posting"),
+                "raw_input": state.get("raw_input"),
+                "current_cv_json": cv_json,
+                "current_pdf_path": pdf_path,
+                "filter_result": state.get("filter_result"),
+                "application_url": state.get("job_posting", {}).get("url"),
+                "error_message": state.get("error_message"),
+                "workflow_step": None,
+            },
+        )
         logger.info(f"Job {job_id} saved to repository with status: {final_status}")
 
         # Create CV composition attempt record if we have CV data

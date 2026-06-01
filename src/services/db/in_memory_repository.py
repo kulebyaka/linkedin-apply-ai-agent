@@ -193,6 +193,22 @@ class InMemoryJobRepository(JobRepository):
         jobs.sort(key=lambda j: j.updated_at, reverse=True)
         return jobs[:limit]
 
+    async def list_by_states(
+        self,
+        states: list[str],
+        *,
+        user_id: str | None = None,
+        limit: int = 200,
+    ) -> list[JobRecord]:
+        state_values = {str(s) for s in states}
+        jobs = [
+            j for j in self._jobs.values()
+            if str(j.status) in state_values
+            and (user_id is None or j.user_id == user_id)
+        ]
+        jobs.sort(key=lambda j: j.updated_at, reverse=True)
+        return jobs[:limit]
+
     async def get_status_counts(self, user_id: str) -> dict[str, int]:
         counts: dict[str, int] = {}
         for j in self._jobs.values():
@@ -233,6 +249,7 @@ class InMemoryJobRepository(JobRepository):
             if job.job_posting:
                 haystacks.append(str(job.job_posting.get("title", "")))
                 haystacks.append(str(job.job_posting.get("company", "")))
+                haystacks.append(str(job.job_posting.get("description", "")))
             if job.error_message:
                 haystacks.append(job.error_message)
             if not any(needle in h.lower() for h in haystacks):

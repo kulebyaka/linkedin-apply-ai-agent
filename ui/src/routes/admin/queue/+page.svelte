@@ -9,8 +9,7 @@
 	} from '$lib/api/admin';
 	import StatCard from '$lib/components/admin/StatCard.svelte';
 	import ToastNotification from '$lib/components/ToastNotification.svelte';
-
-	const POLL_MS = 5_000;
+	import { POLL_INTERVAL_MS } from '$lib/config';
 
 	let queueState = $state<QueueStateResponse | null>(null);
 	let userEmailById = $state<Record<string, string>>({});
@@ -150,7 +149,7 @@
 	onMount(() => {
 		fetchUsers();
 		fetchState();
-		pollTimer = setInterval(() => fetchState({ silent: true }), POLL_MS);
+		pollTimer = setInterval(() => fetchState({ silent: true }), POLL_INTERVAL_MS);
 	});
 
 	onDestroy(() => {

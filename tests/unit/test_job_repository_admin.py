@@ -25,19 +25,23 @@ def _job(
     status: str = "queued",
     title: str = "Engineer",
     company: str = "Acme",
+    description: str | None = None,
     error_message: str | None = None,
     last_scrape_error: str | None = None,
     created_at: datetime | None = None,
     updated_at: datetime | None = None,
 ) -> JobRecord:
     now = datetime.now(tz=timezone.utc)
+    job_posting: dict = {"title": title, "company": company}
+    if description is not None:
+        job_posting["description"] = description
     return JobRecord(
         job_id=job_id,
         user_id=user_id,
         source=source,
         mode="full",
         status=status,
-        job_posting={"title": title, "company": company},
+        job_posting=job_posting,
         error_message=error_message,
         last_scrape_error=last_scrape_error,
         created_at=created_at or now,
@@ -155,6 +159,30 @@ async def test_list_all_jobs_free_text_search_title(repo):
 
     title_hits = await repo.list_all_jobs(search="python")
     assert {j.job_id for j in title_hits} == {"j1", "j3"}
+
+
+@pytest.mark.asyncio
+async def test_list_all_jobs_search_matches_description(repo):
+    await repo.create(
+        _job(
+            "j1",
+            title="Engineer",
+            company="Acme",
+            description="We use Kubernetes and Terraform daily.",
+        )
+    )
+    await repo.create(
+        _job(
+            "j2",
+            title="Engineer",
+            company="Acme",
+            description="A plain backend role.",
+        )
+    )
+
+    # Token only present in the description of j1.
+    desc_hits = await repo.list_all_jobs(search="kubernetes")
+    assert {j.job_id for j in desc_hits} == {"j1"}
 
 
 @pytest.mark.asyncio

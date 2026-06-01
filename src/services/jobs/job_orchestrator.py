@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 
 from src.models.state_machine import BusinessState
 from src.models.unified import (
+    JobRecord,
     JobStatusResponse,
     JobSubmitRequest,
     JobSubmitResponse,
@@ -140,6 +141,33 @@ class JobOrchestrator:
         if dispatcher is None:
             raise RuntimeError("workflow_dispatcher not initialized on AppContext")
 
+        # Persist a QUEUED row before dispatching so the job survives a
+        # restart and is visible in the UI immediately.
+        now = datetime.now(tz=timezone.utc)
+        job_posting_preview = self._build_job_posting_preview(request)
+        try:
+            await self._ctx.repository.create(
+                JobRecord(
+                    job_id=job_id,
+                    user_id=user_id,
+                    source=request.source,
+                    mode=request.mode,
+                    status=BusinessState.QUEUED,
+                    job_posting=job_posting_preview,
+                    raw_input=raw_input,
+                    application_url=request.application_url
+                    or job_posting_preview.get("url"),
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+        except Exception:
+            logger.exception(
+                "Failed to persist QUEUED row for job %s; aborting submission",
+                job_id,
+            )
+            raise
+
         await self._ctx.register_workflow(
             job_id, thread_id, "preparation", user_id=user_id,
         )
@@ -149,7 +177,7 @@ class JobOrchestrator:
                 thread_id=thread_id,
                 initial_state=initial_state,
                 user_id=user_id,
-                create_failure_record=True,
+                create_failure_record=False,
             )
         )
 
@@ -160,6 +188,62 @@ class JobOrchestrator:
             status=BusinessState.QUEUED,
             message=f"Job submitted successfully. Mode: {request.mode}",
         )
+
+    @staticmethod
+    def _build_job_posting_preview(request: JobSubmitRequest) -> dict:
+        """Return a minimal job_posting dict for the QUEUED row.
+
+        Manual submissions already carry title/company/description; URL
+        submissions usually only have the URL until extract_job_node runs.
+        """
+        if request.job_description is not None:
+            return {
+                "title": request.job_description.title,
+                "company": request.job_description.company,
+                "url": request.url or "",
+            }
+        return {"url": request.url or ""}
+
+    async def list_jobs(
+        self,
+        user_id: str,
+        *,
+        statuses: list[str] | None = None,
+        sources: list[str] | None = None,
+        created_from: datetime | None = None,
+        created_to: datetime | None = None,
+        search: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[JobRecord], int]:
+        """List jobs owned by ``user_id`` with optional filters.
+
+        Scopes every query to the caller by passing ``user_ids=[user_id]`` to
+        the repository's admin-style list/count helpers.
+
+        Returns:
+            ``(items, total)`` where ``total`` is the filtered count ignoring
+            pagination.
+        """
+        items = await self._ctx.repository.list_all_jobs(
+            user_ids=[user_id],
+            statuses=statuses,
+            sources=sources,
+            created_from=created_from,
+            created_to=created_to,
+            search=search,
+            limit=limit,
+            offset=offset,
+        )
+        total = await self._ctx.repository.count_all_jobs(
+            user_ids=[user_id],
+            statuses=statuses,
+            sources=sources,
+            created_from=created_from,
+            created_to=created_to,
+            search=search,
+        )
+        return items, total
 
     async def get_status(self, job_id: str) -> JobStatusResponse:
         """Get job status from repository (authoritative) or workflow threads (in-progress).

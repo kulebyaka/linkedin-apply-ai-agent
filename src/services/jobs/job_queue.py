@@ -199,21 +199,24 @@ async def process_queue(
 
         logger.info("Processing queued job %s (user=%s)", scoped_job_id, user_id or "global")
 
-        # Cross-cycle dedup: skip jobs already in the repository, with one
-        # exception — SCRAPE_FAILED rows are retry-eligible up to a cap with
-        # a backoff window so a permanently-broken posting doesn't loop.
+        # Cross-cycle dedup. Since rows are now persisted at discovery time,
+        # QUEUED is the expected entry state — fall through and process it.
+        # Skip only when the row is already in-flight from another consumer or
+        # in a non-retryable terminal state. SCRAPE_FAILED rows are retry-
+        # eligible up to a cap with a backoff window.
         if job_repository is not None:
             try:
                 existing = await job_repository.get(scoped_job_id)
                 if existing is not None:
-                    if _should_retry_scrape(existing):
+                    if existing.status == BusinessState.QUEUED:
+                        pass  # expected discovery state — fall through
+                    elif _should_retry_scrape(existing):
                         logger.info(
                             "Re-attempting previously failed scrape for %s (attempt %d/%d)",
                             scoped_job_id,
                             (existing.scrape_attempts or 0) + 1,
                             get_settings().scraper_max_attempts,
                         )
-                        # Fall through to process the job again.
                     else:
                         logger.info(
                             "Skipping already-processed job %s (status: %s)",
@@ -269,12 +272,14 @@ async def process_queue(
 
             if dispatcher is not None:
                 # Use WorkflowDispatcher for tracking + canonical failure recovery.
+                # The row is guaranteed to exist (scheduler created it pre-enqueue,
+                # or recovery created it), so create_failure_record=False.
                 await dispatcher.dispatch_preparation(
                     job_id=scoped_job_id,
                     thread_id=thread_id,
                     initial_state=initial_state,
                     user_id=user_id or "",
-                    create_failure_record=True,
+                    create_failure_record=False,
                 )
                 logger.info("Workflow completed for job %s", scoped_job_id)
                 processed += 1
@@ -299,32 +304,15 @@ async def process_queue(
 
         except Exception:
             logger.exception("Workflow failed for queued job %s", job.job_id)
-            # Persist a failure record so the failure is traceable.
-            # When the dispatcher path is taken, dispatch_preparation already
-            # handled this internally — exceptions here come from master CV
-            # loading or state construction.
+            # The row exists (scheduler persisted it pre-enqueue). Mark FAILED
+            # only when the transition is allowed; the dispatcher's own
+            # _mark_preparation_failed handles the in-workflow case.
             try:
                 existing = await job_repository.get(scoped_job_id)
-                if existing is not None:
-                    if BusinessState.FAILED in ALLOWED_TRANSITIONS.get(existing.status, set()):
-                        await job_repository.update(
-                            scoped_job_id,
-                            {"status": BusinessState.FAILED, "error_message": "Workflow failed unexpectedly"},
-                        )
-                else:
-                    now = datetime.now(tz=timezone.utc)
-                    await job_repository.create(
-                        JobRecord(
-                            job_id=scoped_job_id,
-                            user_id=user_id or "",
-                            source="linkedin",
-                            mode="full",
-                            status=BusinessState.FAILED,
-                            raw_input=job.model_dump(),
-                            error_message="Workflow failed unexpectedly",
-                            created_at=now,
-                            updated_at=now,
-                        )
+                if existing is not None and BusinessState.FAILED in ALLOWED_TRANSITIONS.get(existing.status, set()):
+                    await job_repository.update(
+                        scoped_job_id,
+                        {"status": BusinessState.FAILED, "error_message": "Workflow failed unexpectedly"},
                     )
             except Exception:
                 logger.warning("Failed to persist failure record for job %s", scoped_job_id, exc_info=True)

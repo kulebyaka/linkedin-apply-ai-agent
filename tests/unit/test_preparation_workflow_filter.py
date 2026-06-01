@@ -382,10 +382,10 @@ class TestFilterJobNodeOutcomes:
 
 
 class TestSaveFilteredOutNode:
-    async def test_saves_minimal_job_record(self):
+    async def test_updates_status_and_filter_result(self):
+        # The row is now persisted at discovery, so the node is update-only.
         repo = AsyncMock()
-        repo.get = AsyncMock(return_value=None)
-        repo.create = AsyncMock()
+        repo.update = AsyncMock()
 
         state = _make_state(
             current_step=BusinessState.FILTERED_OUT,
@@ -395,42 +395,20 @@ class TestSaveFilteredOutNode:
 
         await save_filtered_out_node(state, config)
 
-        repo.create.assert_called_once()
-        saved_record: JobRecord = repo.create.call_args[0][0]
-        assert saved_record.status == BusinessState.FILTERED_OUT
-        assert saved_record.job_id == "job-1"
-        assert saved_record.filter_result is not None
-        assert saved_record.filter_result["score"] == 20
-        # No CV data
-        assert saved_record.current_cv_json is None
-        assert saved_record.current_pdf_path is None
-
-    async def test_saves_with_correct_user_id(self):
-        repo = AsyncMock()
-        repo.get = AsyncMock(return_value=None)
-        state = _make_state(user_id="user-xyz", current_step=BusinessState.FILTERED_OUT)
-        await save_filtered_out_node(state, _make_config(repo=repo))
-        saved_record = repo.create.call_args[0][0]
-        assert saved_record.user_id == "user-xyz"
+        repo.update.assert_called_once()
+        args, _ = repo.update.call_args
+        assert args[0] == "job-1"
+        updates = args[1]
+        assert updates["status"] == BusinessState.FILTERED_OUT
+        assert updates["filter_result"]["score"] == 20
 
     async def test_raises_on_save_error(self):
         repo = AsyncMock()
-        repo.get = AsyncMock(return_value=None)
-        repo.create = AsyncMock(side_effect=RuntimeError("DB write failed"))
+        repo.update = AsyncMock(side_effect=RuntimeError("DB write failed"))
 
         state = _make_state(current_step=BusinessState.FILTERED_OUT)
         with pytest.raises(RuntimeError, match="DB write failed"):
             await save_filtered_out_node(state, _make_config(repo=repo))
-
-    async def test_saves_source_and_mode(self):
-        repo = AsyncMock()
-        repo.get = AsyncMock(return_value=None)
-        state = _make_state(source="linkedin", mode="full")
-        await save_filtered_out_node(state, _make_config(repo=repo))
-
-        saved_record = repo.create.call_args[0][0]
-        assert saved_record.source == "linkedin"
-        assert saved_record.mode == "full"
 
 
 # ---------------------------------------------------------------------------

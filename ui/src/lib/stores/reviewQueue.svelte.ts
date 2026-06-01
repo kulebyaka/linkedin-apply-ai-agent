@@ -34,6 +34,15 @@ function goToPrevious(): void {
 	}
 }
 
+function selectJob(jobId: string): boolean {
+	const index = pendingJobs.findIndex((j) => j.job_id === jobId);
+	if (index !== -1) {
+		currentIndex = index;
+		return true;
+	}
+	return false;
+}
+
 async function loadPending(): Promise<void> {
 	isLoading = true;
 	error = null;
@@ -151,6 +160,7 @@ export const reviewQueue = {
 
 	goToNext,
 	goToPrevious,
+	selectJob,
 	loadPending,
 	refreshStats,
 	submitDecision,

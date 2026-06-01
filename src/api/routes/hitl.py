@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from src.api.deps import CurrentUser, get_hitl_processor
+from src.models.state_machine import BusinessState
 from src.models.unified import (
     ApplicationHistoryItem,
     HITLDecision,
@@ -19,11 +20,33 @@ router = APIRouter()
 
 
 @router.get("/api/hitl/pending", response_model=list[PendingApproval])
-async def get_hitl_pending(request: Request, user: CurrentUser) -> list[PendingApproval]:
-    """Get all jobs pending HITL review for the authenticated user."""
+async def get_hitl_pending(
+    request: Request,
+    user: CurrentUser,
+    states: str | None = Query(
+        None,
+        description=(
+            "Optional comma-separated BusinessState values to broaden the result. "
+            "Default behavior (omit) returns PENDING only."
+        ),
+    ),
+) -> list[PendingApproval]:
+    """Get jobs pending HITL review (and optionally in-flight) for the user."""
+    parsed_states: list[BusinessState] | None = None
+    if states:
+        tokens = [t.strip() for t in states.split(",") if t.strip()]
+        try:
+            parsed_states = [BusinessState(t) for t in tokens]
+        except ValueError as e:
+            raise HTTPException(400, f"Unknown state: {e}") from None
+        if not parsed_states:
+            raise HTTPException(400, "states= must contain at least one value")
+
     try:
         hitl = get_hitl_processor(request)
-        return await hitl.get_pending(user.id)
+        return await hitl.get_pending(user.id, parsed_states)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to get pending jobs: {e}", exc_info=True)
         raise HTTPException(500, "Failed to get pending jobs") from None

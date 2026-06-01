@@ -63,10 +63,11 @@ class SQLiteAdminQueriesMixin:
                 "("
                 "COALESCE(json_extract(job_posting, '$.title'), '') LIKE ? "
                 "OR COALESCE(json_extract(job_posting, '$.company'), '') LIKE ? "
+                "OR COALESCE(json_extract(job_posting, '$.description'), '') LIKE ? "
                 "OR COALESCE(error_message, '') LIKE ?"
                 ")"
             )
-            params.extend([pat, pat, pat])
+            params.extend([pat, pat, pat, pat])
         where_sql = (" WHERE " + " AND ".join(where_parts)) if where_parts else ""
         return where_sql, params
 
