@@ -6,8 +6,8 @@
 		type AdminJobRecord,
 	} from '$lib/api/admin';
 	import ToastNotification from '$lib/components/ToastNotification.svelte';
+	import { POLL_INTERVAL_MS } from '$lib/config';
 
-	const POLL_MS = 10_000;
 	const PAGE_SIZE = 50;
 
 	type SinceWindow = '1h' | '24h' | '7d' | 'all';
@@ -183,7 +183,7 @@
 	onMount(() => {
 		fetchUsers();
 		fetchErrors();
-		pollTimer = setInterval(() => fetchErrors({ silent: true }), POLL_MS);
+		pollTimer = setInterval(() => fetchErrors({ silent: true }), POLL_INTERVAL_MS);
 	});
 
 	onDestroy(() => {
