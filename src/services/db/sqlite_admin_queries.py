@@ -25,6 +25,7 @@ class SQLiteAdminQueriesMixin:
     _engine: object
     def _ensure_initialized(self) -> None: ...  # pragma: no cover - typing only
     def _row_to_job_record(self, row: dict) -> JobRecord: ...  # pragma: no cover
+    def _normalize_datetime(self, dt): ...  # pragma: no cover - typing only
 
     def _build_admin_filter_sql(
         self,
@@ -160,6 +161,28 @@ class SQLiteAdminQueriesMixin:
         finally:
             await conn.close()
         return {row["status"]: row["n"] for row in rows if row["status"]}
+
+    async def get_latest_session_auth(self) -> dict | None:
+        self._ensure_initialized()
+        sql = (
+            "SELECT job_id, session_authenticated, created_at FROM job "
+            "WHERE source = 'linkedin' AND session_authenticated IS NOT NULL "
+            "ORDER BY created_at DESC LIMIT 1"
+        )
+        conn = await self._engine.get_connection()
+        try:
+            cursor = await conn.execute(sql)
+            row = await cursor.fetchone()
+        finally:
+            await conn.close()
+        if row is None:
+            return None
+        scraped_at = self._normalize_datetime(row["created_at"])
+        return {
+            "authenticated": bool(row["session_authenticated"]),
+            "job_id": row["job_id"],
+            "scraped_at": scraped_at.isoformat() if scraped_at else None,
+        }
 
     async def list_jobs_with_errors(
         self,

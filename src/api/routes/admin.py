@@ -250,9 +250,17 @@ async def admin_get_queue(request: Request, admin: AdminUser) -> dict:
     counts_24h = await ctx.repository.count_by_status_global(window_hours=24)
     counts_7d = await ctx.repository.count_by_status_global(window_hours=168)
     counts_all = await ctx.repository.count_by_status_global()
+
+    try:
+        linkedin_auth = await ctx.repository.get_latest_session_auth()
+    except Exception:
+        logger.warning("Failed to read LinkedIn session auth state", exc_info=True)
+        linkedin_auth = None
+
     return {
         "consumer": snapshot,
         "scheduler": scheduler_state,
+        "linkedin_auth": linkedin_auth,
         "counts": {
             "last_24h": counts_24h,
             "last_7d": counts_7d,

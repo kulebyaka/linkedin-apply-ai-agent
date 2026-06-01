@@ -158,6 +158,12 @@ class JobRecord(BaseModel):
     last_scrape_error: str | None = None
     last_scrape_attempt_at: datetime | None = None
 
+    # Observability: whether the LinkedIn session was authenticated when this
+    # job was scraped (True/False), or None if unknown/not enriched. The admin
+    # dashboard derives the current global session state from the most recently
+    # scraped job's value.
+    session_authenticated: bool | None = None
+
     # Startup-recovery tracking — bounded so a poison row can't loop forever.
     recovery_attempts: int = 0
     last_recovery_attempt_at: datetime | None = None

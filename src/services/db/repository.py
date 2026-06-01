@@ -43,6 +43,7 @@ UPDATABLE_FIELDS = frozenset({
     "scrape_attempts",
     "last_scrape_error",
     "last_scrape_attempt_at",
+    "session_authenticated",
     "recovery_attempts",
     "last_recovery_attempt_at",
     "updated_at",
@@ -220,6 +221,17 @@ class JobRepository(ABC):
         offset: int = 0,
         since: datetime | None = None,
     ) -> list[JobRecord]:
+        pass
+
+    @abstractmethod
+    async def get_latest_session_auth(self) -> dict | None:
+        """Return the LinkedIn session-auth state from the most recently
+        scraped job, or None if no scraped job has recorded it yet.
+
+        Shape: {"authenticated": bool, "job_id": str, "scraped_at": datetime}.
+        Used by the admin dashboard to show the current global session state
+        (all users share one li_at cookie, so auth is a session-wide property).
+        """
         pass
 
     # =========================================================================
