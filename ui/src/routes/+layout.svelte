@@ -43,6 +43,7 @@
 	const navLinks: { href: string; label: string; wip?: { label: string; tooltip: string } }[] = [
 		{ href: '/', label: 'Review' },
 		{ href: '/generate', label: 'Generate', wip: WIP.GENERATE_PAGE_SCOPE },
+		{ href: '/applications', label: 'Applications' },
 		{ href: '/settings', label: 'Settings' },
 		{ href: '/welcome', label: 'Guide' },
 	];
