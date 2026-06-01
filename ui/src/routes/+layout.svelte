@@ -10,6 +10,8 @@
 
 	let { children } = $props();
 
+	const appVersion = __APP_VERSION__;
+
 	const publicPaths = ['/login', '/auth/verify', '/welcome'];
 
 	let menuOpen = $state(false);
@@ -61,10 +63,17 @@
 	{:else}
 		<nav class="border-b-4 border-[var(--color-foreground)] bg-[var(--color-background)]">
 			<div class="container mx-auto flex items-center justify-between px-4 py-3">
-				<a href="/" class="flex items-center gap-2 font-heading text-lg font-bold hover:underline">
-					Job Application Agent
-					<WIPBadge label={WIP.V1_BETA.label} tooltip={WIP.V1_BETA.tooltip} />
-				</a>
+				<div class="flex items-center gap-2">
+					<a href="/" class="flex items-center gap-2 font-heading text-lg font-bold hover:underline">
+						Job Application Agent
+						<WIPBadge label={WIP.V1_BETA.label} />
+					</a>
+					<!-- Release version: blends into the nav background, revealed only on text selection.
+					     Kept outside the <a> so the link's hover:underline doesn't decorate it. -->
+					<span class="font-mono text-xs text-[var(--color-background)] select-text" title="Release version"
+						>{appVersion}</span
+					>
+				</div>
 
 				{#if auth.isAuthenticated}
 					<!-- Desktop nav -->

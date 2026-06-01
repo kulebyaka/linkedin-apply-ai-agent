@@ -65,6 +65,8 @@ jobs:
           file: ui/Dockerfile
           platforms: linux/amd64
           push: true
+          build-args: |
+            VITE_APP_VERSION=${{ steps.tag.outputs.value }}
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NS }}/linkedin-apply-ai-agent-ui:${{ steps.tag.outputs.value }}
             ${{ env.REGISTRY }}/${{ env.IMAGE_NS }}/linkedin-apply-ai-agent-ui:latest

@@ -65,7 +65,7 @@ export interface AppState {
 	errorMessage: string | null;
 
 	// Polling control
-	pollingInterval: number | null;
+	pollingInterval: ReturnType<typeof setInterval> | null;
 }
 
 // HITL Review Types

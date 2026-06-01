@@ -48,7 +48,7 @@ export const appState = {
 		state.errorMessage = message;
 	},
 
-	setPollingInterval(intervalId: number) {
+	setPollingInterval(intervalId: ReturnType<typeof setInterval>) {
 		state.pollingInterval = intervalId;
 	},
 

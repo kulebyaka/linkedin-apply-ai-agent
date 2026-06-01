@@ -13,6 +13,12 @@ RUN npm ci --no-audit --no-fund
 ENV VITE_API_BASE_URL=""
 ENV VITE_USE_MOCK="false"
 
+# Release version shown in the header (set from the git tag by CI).
+# vite.config.ts prefers this over `git describe`, which is unavailable
+# here since the build context is ./ui without the .git directory.
+ARG VITE_APP_VERSION=""
+ENV VITE_APP_VERSION=$VITE_APP_VERSION
+
 COPY . .
 RUN npm run build
 
