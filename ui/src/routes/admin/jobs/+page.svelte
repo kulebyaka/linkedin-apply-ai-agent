@@ -12,8 +12,8 @@
 	import FilterBar from '$lib/components/admin/FilterBar.svelte';
 	import JobsTable from '$lib/components/admin/JobsTable.svelte';
 	import ToastNotification from '$lib/components/ToastNotification.svelte';
+	import { POLL_INTERVAL_MS } from '$lib/config';
 
-	const POLL_MS = 10_000;
 	const PAGE_SIZE = 50;
 
 	let userIds = $state<string[]>([]);
@@ -183,7 +183,7 @@
 	onMount(() => {
 		fetchUsers();
 		fetchJobs();
-		pollTimer = setInterval(() => fetchJobs({ silent: true }), POLL_MS);
+		pollTimer = setInterval(() => fetchJobs({ silent: true }), POLL_INTERVAL_MS);
 	});
 
 	onDestroy(() => {
