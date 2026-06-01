@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse
 
-from src.api.deps import CurrentUser, get_ctx, get_orchestrator
+from src.api.deps import (
+    CurrentUser,
+    get_ctx,
+    get_orchestrator,
+    normalize_query_datetime,
+)
 from src.config.settings import get_settings
 from src.models.state_machine import BusinessState, WorkflowStep
 from src.models.unified import (
@@ -207,6 +213,53 @@ async def get_job_stats(request: Request, user: CurrentUser) -> dict[str, int]:
     except Exception as e:
         logger.error(f"Failed to get job stats: {e}", exc_info=True)
         raise HTTPException(500, "Failed to get job stats") from None
+
+
+# Must precede /api/jobs/{job_id}/* wildcards or FastAPI will shadow it.
+@router.get("/api/jobs")
+async def list_jobs(
+    request: Request,
+    user: CurrentUser,
+    status: Annotated[list[str] | None, Query()] = None,
+    source: Annotated[list[str] | None, Query()] = None,
+    created_from: Annotated[datetime | None, Query()] = None,
+    created_to: Annotated[datetime | None, Query()] = None,
+    search: Annotated[str | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> dict:
+    """List the authenticated user's jobs with optional filters."""
+    # Validate status tokens before hitting the repository.
+    if status:
+        for token in status:
+            try:
+                BusinessState(token)
+            except ValueError as e:
+                raise HTTPException(400, f"Unknown status: {e}") from None
+
+    try:
+        orchestrator = get_orchestrator(request)
+        items, total = await orchestrator.list_jobs(
+            user.id,
+            statuses=status,
+            sources=source,
+            created_from=normalize_query_datetime(created_from),
+            created_to=normalize_query_datetime(created_to),
+            search=search,
+            limit=limit,
+            offset=offset,
+        )
+        return {
+            "items": [item.model_dump(mode="json") for item in items],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to list jobs: {e}", exc_info=True)
+        raise HTTPException(500, "Failed to list jobs") from None
 
 
 @router.delete("/api/jobs/cleanup")
