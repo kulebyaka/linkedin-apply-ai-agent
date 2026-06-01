@@ -95,11 +95,14 @@ jobs:
         env:
           GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
           GH_ACTOR: ${{ github.actor }}
+          KEEP_TAG: ${{ steps.tag.outputs.value }}
+          REGISTRY: ${{ env.REGISTRY }}
+          IMAGE_NS: ${{ env.IMAGE_NS }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
-          envs: GHCR_PULL_TOKEN,GH_ACTOR
+          envs: GHCR_PULL_TOKEN,GH_ACTOR,KEEP_TAG,REGISTRY,IMAGE_NS
           script: |
             set -e
             cd /opt/linkedin-apply
@@ -116,5 +119,20 @@ jobs:
             docker compose up -d --remove-orphans
             docker compose run --rm ui-publisher
             docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile || true
+            # Reclaim disk from prior releases. `docker image prune -f` only drops
+            # dangling (untagged) layers — it leaves the previous version-tagged
+            # image (e.g. api:v0.1.18, ~1.9GB) behind, which is what fills the disk
+            # over time. Explicitly remove old version tags of OUR two images,
+            # keeping the just-deployed tag and :latest. Scoped to our repo refs so
+            # other projects' images on this shared box are never touched.
+            for repo in api ui; do
+              img="${REGISTRY}/${IMAGE_NS}/linkedin-apply-ai-agent-${repo}"
+              docker images "$img" --format '{{.Tag}}' \
+                | grep -vxE "${KEEP_TAG}|latest|<none>" \
+                | while read -r t; do
+                    echo "Removing stale image $img:$t"
+                    docker rmi "$img:$t" || true
+                  done
+            done
             docker image prune -f
             docker compose ps
