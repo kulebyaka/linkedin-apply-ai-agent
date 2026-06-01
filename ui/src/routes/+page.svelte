@@ -1,13 +1,12 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
+	import { page } from '$app/stores';
 	import { reviewQueue } from '$lib/stores/reviewQueue.svelte';
-	import { inFlightStore } from '$lib/stores/inFlightJobs.svelte';
 	import JobCard from '$lib/components/review/JobCard.svelte';
 	import DecisionButtons from '$lib/components/review/DecisionButtons.svelte';
 	import NavigationControls from '$lib/components/review/NavigationControls.svelte';
 	import FeedbackModal from '$lib/components/review/FeedbackModal.svelte';
 	import EmptyState from '$lib/components/review/EmptyState.svelte';
-	import InFlightList from '$lib/components/review/InFlightList.svelte';
 	import ToastNotification from '$lib/components/ToastNotification.svelte';
 
 	let modalType = $state<'decline' | 'retry' | null>(null);
@@ -15,15 +14,19 @@
 	let toastMessage = $state('');
 	let toastType = $state<'success' | 'error' | 'info'>('info');
 
-	onMount(() => {
-		reviewQueue.loadPending();
-		inFlightStore.loadInitial();
-		inFlightStore.startPolling();
+	onMount(async () => {
 		window.addEventListener('keydown', handleKeyDown);
+		await reviewQueue.loadPending();
+		const jobId = $page.url.searchParams.get('job');
+		if (jobId) {
+			const ok = reviewQueue.selectJob(jobId);
+			if (!ok) {
+				showToastMessage('That job is no longer pending', 'info');
+			}
+		}
 	});
 
 	onDestroy(() => {
-		inFlightStore.stopPolling();
 		window.removeEventListener('keydown', handleKeyDown);
 	});
 
@@ -99,24 +102,6 @@
 		toastType = type;
 		showToast = true;
 	}
-
-	// Status counters shown next to "pending" — order matters (most useful first).
-	// Each entry: [status key from BusinessState, display label, bg color var]
-	const STAT_BADGES: Array<{ key: string; label: string; bg: string; fg?: string }> = [
-		{ key: 'queued', label: 'queued', bg: 'var(--color-muted)' },
-		{ key: 'processing', label: 'processing', bg: 'var(--color-accent)' },
-		{ key: 'retrying', label: 'retrying', bg: 'var(--color-accent)' },
-		{ key: 'scrape_failed', label: 'scrape retry', bg: 'var(--color-muted)' },
-		{ key: 'applied', label: 'applied', bg: 'var(--color-secondary)' },
-		{ key: 'approved', label: 'approved', bg: 'var(--color-secondary)' },
-		{ key: 'declined', label: 'declined', bg: 'var(--color-muted)' },
-		{ key: 'filtered_out', label: 'filtered out', bg: 'var(--color-muted)' },
-		{ key: 'failed', label: 'failed', bg: 'var(--color-destructive)' },
-	];
-
-	const visibleStatBadges = $derived(
-		STAT_BADGES.filter((b) => (reviewQueue.statusCounts[b.key] ?? 0) > 0)
-	);
 </script>
 
 <svelte:head>
@@ -145,24 +130,9 @@
 							>
 						</div>
 					{/if}
-					{#each visibleStatBadges as badge (badge.key)}
-						<div
-							class="border-2 border-[var(--color-foreground)] px-3 py-1.5"
-							style:background-color={badge.bg}
-							title="Jobs in '{badge.key}' state"
-						>
-							<span class="font-mono text-xs font-semibold">
-								{reviewQueue.statusCounts[badge.key]}
-								{badge.label}
-							</span>
-						</div>
-					{/each}
 				</div>
 			</div>
 		</header>
-
-		<!-- In-flight (read-only, polled) -->
-		<InFlightList jobs={inFlightStore.jobs} />
 
 		<!-- Main Content -->
 		{#if reviewQueue.isLoading}
