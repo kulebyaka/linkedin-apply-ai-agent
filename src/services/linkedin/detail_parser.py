@@ -47,6 +47,11 @@ class DetailPageParser:
         else:
             result = await self._parse_guest(page)
 
+        # Record whether LinkedIn served us the authenticated layout — this is
+        # the ground-truth "are we logged in" signal for this detail page, and
+        # is persisted per-job so the admin dashboard can surface session state.
+        result["session_authenticated"] = layout == "authenticated"
+
         if not result["description"]:
             logger.warning(
                 "Empty description on detail page: %s (layout=%s — "

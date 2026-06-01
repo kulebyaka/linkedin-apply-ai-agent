@@ -85,6 +85,11 @@ class Job(Table):
     last_scrape_error = Text(null=True)
     last_scrape_attempt_at = Timestamptz(null=True)
 
+    # Observability: was the LinkedIn session authenticated when this job was
+    # scraped? null = unknown / not enriched. Used to surface stale-cookie
+    # state on the admin dashboard (derived from the latest scraped job).
+    session_authenticated = Boolean(null=True)
+
     # Startup-recovery tracking
     recovery_attempts = Integer(default=0)
     last_recovery_attempt_at = Timestamptz(null=True)

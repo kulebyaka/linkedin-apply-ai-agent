@@ -157,6 +157,7 @@
 	});
 
 	const consumer = $derived(queueState?.consumer ?? null);
+	const linkedinAuth = $derived(queueState?.linkedin_auth ?? null);
 	const schedulerRows = $derived<SchedulerJobState[]>(queueState?.scheduler ?? []);
 	const counts24h = $derived(queueState?.counts?.last_24h);
 	const counts7d = $derived(queueState?.counts?.last_7d);
@@ -190,6 +191,48 @@
 			Loading…
 		</div>
 	{:else if queueState}
+		<!-- LinkedIn session state — derived from the most recently scraped job.
+		     All users share one li_at cookie, so this is a session-wide signal. -->
+		<section
+			class="flex flex-wrap items-center justify-between gap-3 border-4 border-[var(--color-foreground)] p-4 shadow-brutal {linkedinAuth ===
+			null
+				? 'bg-zinc-100'
+				: linkedinAuth.authenticated
+					? 'bg-emerald-200'
+					: 'bg-red-200'}"
+		>
+			<div class="flex items-center gap-3">
+				<span class="font-mono text-[10px] uppercase tracking-wider text-[var(--color-muted-foreground)]">
+					LinkedIn session
+				</span>
+				<span class="font-heading text-lg tracking-tight">
+					{#if linkedinAuth === null}
+						Unknown
+					{:else if linkedinAuth.authenticated}
+						Authenticated
+					{:else}
+						Unauthenticated (guest)
+					{/if}
+				</span>
+			</div>
+			<div class="flex flex-col items-end gap-0.5 text-right">
+				{#if linkedinAuth === null}
+					<span class="font-mono text-xs text-[var(--color-muted-foreground)]">
+						No scraped jobs have recorded session state yet.
+					</span>
+				{:else}
+					<span class="font-mono text-xs" title={formatAbsolute(linkedinAuth.scraped_at)}>
+						Last scrape {formatRelative(linkedinAuth.scraped_at)}
+					</span>
+					{#if !linkedinAuth.authenticated}
+						<span class="font-mono text-[10px] uppercase tracking-wider text-red-900">
+							Refresh the li_at cookie (see vps skill)
+						</span>
+					{/if}
+				{/if}
+			</div>
+		</section>
+
 		<section class="flex flex-wrap gap-3">
 			<StatCard
 				title="Queue depth"

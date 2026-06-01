@@ -29,4 +29,8 @@ class ScrapedJob(BaseModel):
     experience_level: str | None = None
     job_type: str | None = None
 
-
+    # Observability: was LinkedIn serving us the authenticated layout when this
+    # job's detail page was scraped? True = authenticated SDUI/SPA layout,
+    # False = guest/authwall layout, None = not enriched / detection unavailable.
+    # Set from the detail-page layout detection; surfaces stale-cookie state.
+    session_authenticated: bool | None = None

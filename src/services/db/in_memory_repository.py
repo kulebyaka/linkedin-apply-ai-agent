@@ -320,6 +320,20 @@ class InMemoryJobRepository(JobRepository):
             counts[key] = counts.get(key, 0) + 1
         return counts
 
+    async def get_latest_session_auth(self) -> dict | None:
+        candidates = [
+            j for j in self._jobs.values()
+            if j.source == "linkedin" and j.session_authenticated is not None
+        ]
+        if not candidates:
+            return None
+        latest = max(candidates, key=lambda j: j.created_at)
+        return {
+            "authenticated": bool(latest.session_authenticated),
+            "job_id": latest.job_id,
+            "scraped_at": latest.created_at.isoformat() if latest.created_at else None,
+        }
+
     async def list_jobs_with_errors(
         self,
         limit: int = 50,

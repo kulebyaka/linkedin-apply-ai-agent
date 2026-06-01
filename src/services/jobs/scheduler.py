@@ -345,6 +345,7 @@ class LinkedInSearchScheduler:
                                 "location": scraped_job.location,
                             },
                             raw_input=scraped_job.model_dump(),
+                            session_authenticated=scraped_job.session_authenticated,
                             created_at=now,
                             updated_at=now,
                         )

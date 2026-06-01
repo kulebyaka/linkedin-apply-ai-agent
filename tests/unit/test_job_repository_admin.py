@@ -28,6 +28,7 @@ def _job(
     description: str | None = None,
     error_message: str | None = None,
     last_scrape_error: str | None = None,
+    session_authenticated: bool | None = None,
     created_at: datetime | None = None,
     updated_at: datetime | None = None,
 ) -> JobRecord:
@@ -44,6 +45,7 @@ def _job(
         job_posting=job_posting,
         error_message=error_message,
         last_scrape_error=last_scrape_error,
+        session_authenticated=session_authenticated,
         created_at=created_at or now,
         updated_at=updated_at or now,
     )
@@ -336,3 +338,72 @@ async def test_delete_returns_true_then_false(repo):
 @pytest.mark.asyncio
 async def test_delete_unknown_returns_false(repo):
     assert await repo.delete("never-existed") is False
+
+
+# =============================================================================
+# get_latest_session_auth — global LinkedIn session state for admin dashboard
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_get_latest_session_auth_none_when_no_data(repo):
+    # No jobs at all.
+    assert await repo.get_latest_session_auth() is None
+
+    # A linkedin job with no recorded auth state still yields None.
+    await repo.create(_job("j1", source="linkedin", session_authenticated=None))
+    assert await repo.get_latest_session_auth() is None
+
+
+@pytest.mark.asyncio
+async def test_get_latest_session_auth_returns_most_recent(repo):
+    base = datetime.now(tz=timezone.utc)
+    await repo.create(
+        _job(
+            "old",
+            source="linkedin",
+            session_authenticated=False,
+            created_at=base - timedelta(hours=2),
+        )
+    )
+    await repo.create(
+        _job(
+            "new",
+            source="linkedin",
+            session_authenticated=True,
+            created_at=base,
+        )
+    )
+
+    auth = await repo.get_latest_session_auth()
+    assert auth is not None
+    assert auth["authenticated"] is True
+    assert auth["job_id"] == "new"
+    assert auth["scraped_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_get_latest_session_auth_ignores_non_linkedin(repo):
+    base = datetime.now(tz=timezone.utc)
+    # A more recent manual job must not mask the latest linkedin auth signal.
+    await repo.create(
+        _job(
+            "li",
+            source="linkedin",
+            session_authenticated=True,
+            created_at=base - timedelta(hours=1),
+        )
+    )
+    await repo.create(
+        _job(
+            "manual",
+            source="manual",
+            session_authenticated=None,
+            created_at=base,
+        )
+    )
+
+    auth = await repo.get_latest_session_auth()
+    assert auth is not None
+    assert auth["job_id"] == "li"
+    assert auth["authenticated"] is True

@@ -34,6 +34,8 @@ export interface AdminJobRecord {
 	pdf_path?: string | null;
 	error_message?: string | null;
 	last_scrape_error?: string | null;
+	/** Whether the LinkedIn session was authenticated when this job was scraped. */
+	session_authenticated?: boolean | null;
 	attempt_count?: number;
 	created_at: string;
 	updated_at?: string | null;
@@ -76,9 +78,17 @@ export interface SchedulerJobState {
 	last_status: string | null;
 }
 
+export interface LinkedInAuthState {
+	authenticated: boolean;
+	job_id: string;
+	scraped_at: string | null;
+}
+
 export interface QueueStateResponse {
 	consumer: ConsumerSnapshot;
 	scheduler: SchedulerJobState[];
+	/** Global LinkedIn session state derived from the most recently scraped job. Null until a job has recorded it. */
+	linkedin_auth: LinkedInAuthState | null;
 	counts: {
 		last_24h: Record<string, number>;
 		last_7d: Record<string, number>;

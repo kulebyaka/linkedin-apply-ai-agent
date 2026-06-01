@@ -409,6 +409,8 @@ class TestParseJobDetailPage:
 
         result = await scraper._parse_job_detail_page(page)
         assert result["description"] == "We are looking for a Python developer."
+        # Authenticated SDUI layout → session recorded as authenticated.
+        assert result["session_authenticated"] is True
 
     async def test_clicks_show_more_when_visible(self, scraper):
         """Verify the scraper clicks 'Show more' before extracting description."""
@@ -575,6 +577,8 @@ class TestParseJobDetailPage:
         assert "Show more" not in result["description"]
         assert "Show less" not in result["description"]
         assert "AI Developera" in result["description"]
+        # Guest layout → session recorded as unauthenticated.
+        assert result["session_authenticated"] is False
 
     async def test_layout_detection_prefers_authenticated_when_both_markers_present(
         self, scraper

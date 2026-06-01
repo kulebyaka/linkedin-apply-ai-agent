@@ -68,10 +68,13 @@ def _rename_column(table: str, old: str, new: str) -> Callable[[object], Awaitab
             await conn.execute(f"ALTER TABLE {table} RENAME COLUMN {old} TO {new}")
             return True
         return False
+
     return runner
 
 
-def _add_column(table: str, column: str, ddl_suffix: str) -> Callable[[object], Awaitable[bool | None]]:
+def _add_column(
+    table: str, column: str, ddl_suffix: str
+) -> Callable[[object], Awaitable[bool | None]]:
     async def runner(conn) -> bool | None:
         if not await _table_exists(conn, table):
             return None  # table not created yet — try again next run
@@ -81,6 +84,7 @@ def _add_column(table: str, column: str, ddl_suffix: str) -> Callable[[object], 
             await conn.execute(f"ALTER TABLE {table} ADD COLUMN {ddl_suffix}")
             return True
         return False
+
     return runner
 
 
@@ -148,6 +152,10 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "add_job_workflow_step",
         _add_column("job", "workflow_step", "workflow_step VARCHAR(40) NULL"),
+    ),
+    Migration(
+        "add_job_session_authenticated",
+        _add_column("job", "session_authenticated", "session_authenticated BOOLEAN NULL"),
     ),
 )
 
