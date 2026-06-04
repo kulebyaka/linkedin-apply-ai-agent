@@ -83,6 +83,8 @@ class TestValidTransitions:
             (BusinessState.APPLYING, BusinessState.APPLIED),
             (BusinessState.APPLYING, BusinessState.FAILED),
             (BusinessState.FAILED, BusinessState.RETRYING),
+            # "Proceed Anyway" override re-enters CV generation.
+            (BusinessState.FILTERED_OUT, BusinessState.PROCESSING),
         ],
     )
     def test_valid_transition(self, current, target):

@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from src.context import AppContext
+from src.models.state_machine import BusinessState
 from src.models.unified import JobDescriptionInput, JobRecord, JobSubmitRequest
 from src.services.jobs.job_orchestrator import JobOrchestrator
 
@@ -114,6 +115,100 @@ class TestSubmitJob:
         thread_info = await ctx.get_workflow_thread(response.job_id)
         assert thread_info is not None
         assert thread_info["workflow_type"] == "preparation"
+
+
+class TestProceedFilteredOut:
+    """Test JobOrchestrator.proceed_filtered_out() ("Proceed Anyway")."""
+
+    @staticmethod
+    def _filtered_out_job() -> JobRecord:
+        return JobRecord(
+            job_id="job-fo-1",
+            user_id=TEST_USER_ID,
+            source="linkedin",
+            mode="full",
+            status="filtered_out",
+            job_posting={"title": "Engineer", "company": "Acme", "description": "x" * 500},
+            raw_input={"url": "https://linkedin.com/jobs/1"},
+            filter_result={"score": 12, "disqualified": True, "reasoning": "nope"},
+        )
+
+    def _ctx_with_user(self, repo):
+        ctx = _make_ctx(repository=repo)
+        user = MagicMock()
+        user.master_cv_json = TEST_MASTER_CV
+        user.model_preferences = None
+        user_repo = AsyncMock()
+        user_repo.get_by_id = AsyncMock(return_value=user)
+        ctx.user_repository = user_repo
+        return ctx
+
+    async def test_proceed_dispatches_and_sets_processing(self):
+        job = self._filtered_out_job()
+        repo = AsyncMock()
+        repo.get_for_user = AsyncMock(return_value=job)
+        repo.update = AsyncMock()
+        ctx = self._ctx_with_user(repo)
+        orchestrator = JobOrchestrator(ctx)
+
+        response = await orchestrator.proceed_filtered_out("job-fo-1", TEST_USER_ID)
+
+        assert response.status == "processing"
+        assert response.job_id == "job-fo-1"
+        # Status flipped to PROCESSING.
+        repo.update.assert_awaited_once_with(
+            "job-fo-1", {"status": BusinessState.PROCESSING}
+        )
+        # Workflow registered for the job.
+        thread_info = await ctx.get_workflow_thread("job-fo-1")
+        assert thread_info is not None
+        assert thread_info["workflow_type"] == "preparation"
+
+    async def test_proceed_preserves_filter_result_and_forces_full(self):
+        job = self._filtered_out_job()
+        repo = AsyncMock()
+        repo.get_for_user = AsyncMock(return_value=job)
+        repo.update = AsyncMock()
+        ctx = self._ctx_with_user(repo)
+        orchestrator = JobOrchestrator(ctx)
+
+        captured = {}
+
+        async def fake_ainvoke(initial_state, config):
+            captured.update(initial_state)
+            return {"current_step": "pending"}
+
+        ctx.prep_workflow.ainvoke = AsyncMock(side_effect=fake_ainvoke)
+
+        await orchestrator.proceed_filtered_out("job-fo-1", TEST_USER_ID)
+        # Let the background dispatch task run.
+        import asyncio as _asyncio
+        await _asyncio.sleep(0.05)
+
+        assert captured["skip_filter"] is True
+        assert captured["mode"] == "full"
+        assert captured["filter_result"] == job.filter_result
+        assert captured["job_posting"] == job.job_posting
+
+    async def test_proceed_non_filtered_raises(self):
+        job = self._filtered_out_job()
+        job.status = "pending"
+        repo = AsyncMock()
+        repo.get_for_user = AsyncMock(return_value=job)
+        ctx = self._ctx_with_user(repo)
+        orchestrator = JobOrchestrator(ctx)
+
+        with pytest.raises(RuntimeError, match="not filtered out"):
+            await orchestrator.proceed_filtered_out("job-fo-1", TEST_USER_ID)
+
+    async def test_proceed_missing_job_raises(self):
+        repo = AsyncMock()
+        repo.get_for_user = AsyncMock(return_value=None)
+        ctx = self._ctx_with_user(repo)
+        orchestrator = JobOrchestrator(ctx)
+
+        with pytest.raises(KeyError, match="not found"):
+            await orchestrator.proceed_filtered_out("nope", TEST_USER_ID)
 
 
 class TestGetStatus:

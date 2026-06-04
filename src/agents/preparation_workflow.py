@@ -62,6 +62,10 @@ class PreparationWorkflowState(TypedDict):
     # Filter result (from LLM job evaluation)
     filter_result: dict | None
 
+    # User override: when True (set by "Proceed Anyway" on a filtered_out job),
+    # extraction passes through the stored job_posting and filtering is skipped.
+    skip_filter: bool
+
     # Status
     # `current_step` is a transient WorkflowStep (string-valued) — never a
     # BusinessState. Business outcomes go into `target_status` and the
@@ -139,6 +143,9 @@ def route_after_extract(state: PreparationWorkflowState) -> str:
         return "scrape_failed"
     if state.get("error_message"):
         return "error"
+    # "Proceed Anyway" override: bypass the filter even for LinkedIn jobs.
+    if state.get("skip_filter"):
+        return "compose"
     if state.get("source") == "linkedin":
         return "filter"
     return "compose"
@@ -205,6 +212,19 @@ async def extract_job_node(
         )
 
     try:
+        # "Proceed Anyway" override: the job was already scraped and stored, so
+        # reuse the persisted job_posting instead of re-scraping (and skip the
+        # description quality gate, which already passed on the original run).
+        if state.get("skip_filter") and state.get("job_posting"):
+            state["current_step"] = WorkflowStep.JOB_EXTRACTED
+            logger.info(
+                "Skipping extraction for %s — reusing stored job_posting (proceed anyway)",
+                job_id,
+            )
+            elapsed = time.time() - start_time
+            logger.info(f"[TIMING] extract_job_node completed in {elapsed:.2f}s")
+            return state
+
         # Extract job data
         raw_input = state.get("raw_input", {})
 

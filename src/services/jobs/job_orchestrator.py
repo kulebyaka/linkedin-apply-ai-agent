@@ -189,6 +189,125 @@ class JobOrchestrator:
             message=f"Job submitted successfully. Mode: {request.mode}",
         )
 
+    async def proceed_filtered_out(
+        self, job_id: str, user_id: str
+    ) -> JobSubmitResponse:
+        """Override the job filter for a single filtered-out job.
+
+        Re-enters the preparation workflow skipping extraction and filtering
+        (the job_posting is already persisted), composes a tailored CV, and
+        lands the job in ``pending_review`` for HITL review. The original
+        ``filter_result`` is preserved so the reviewer sees why it was filtered.
+
+        Args:
+            job_id: The filtered-out job to proceed.
+            user_id: Authenticated user's ID (for ownership verification).
+
+        Returns:
+            JobSubmitResponse with status PROCESSING.
+
+        Raises:
+            KeyError: If job not found or not owned by user.
+            RuntimeError: If job is not in filtered_out status.
+        """
+        job_record = await self._ctx.repository.get_for_user(job_id, user_id)
+        if job_record is None:
+            raise KeyError(f"Job {job_id} not found")
+
+        if job_record.status != BusinessState.FILTERED_OUT:
+            raise RuntimeError(
+                f"Job {job_id} is not filtered out (status: {job_record.status})"
+            )
+
+        dispatcher = self._ctx.workflow_dispatcher
+        if dispatcher is None:
+            raise RuntimeError("workflow_dispatcher not initialized on AppContext")
+
+        # FILTERED_OUT → PROCESSING; extract_job_node will keep it PROCESSING.
+        await self._ctx.repository.update(
+            job_id, {"status": BusinessState.PROCESSING}
+        )
+
+        try:
+            thread_id = str(uuid.uuid4())
+
+            # Load master CV and CV-generation model preference from user record.
+            master_cv: dict | None = None
+            cv_provider: str | None = None
+            cv_model: str | None = None
+            if self._ctx.user_repository:
+                user = await self._ctx.user_repository.get_by_id(user_id)
+                if user and user.master_cv_json:
+                    master_cv = user.master_cv_json
+                if user and user.model_preferences and user.model_preferences.cv_generation:
+                    cv_provider = user.model_preferences.cv_generation.provider
+                    cv_model = user.model_preferences.cv_generation.model
+            if not master_cv:
+                from src.agents._shared import load_master_cv
+
+                master_cv = load_master_cv()
+
+            raw_input = dict(job_record.raw_input or {})
+            if cv_provider:
+                raw_input["llm_provider"] = cv_provider
+            if cv_model:
+                raw_input["llm_model"] = cv_model
+
+            initial_state = {
+                "job_id": job_id,
+                "user_id": user_id,
+                "source": job_record.source,
+                # Force full mode so the override always enters HITL review.
+                "mode": "full",
+                "raw_input": raw_input,
+                "job_posting": job_record.job_posting,
+                # Preserve the original verdict — not re-evaluated.
+                "filter_result": job_record.filter_result,
+                "master_cv": master_cv,
+                "skip_filter": True,
+                "current_step": BusinessState.QUEUED,
+                "retry_count": 0,
+                "user_feedback": None,
+                "error_message": None,
+            }
+
+            await self._ctx.register_workflow(
+                job_id, thread_id, "preparation", user_id=user_id,
+            )
+            self._ctx.create_background_task(
+                dispatcher.dispatch_preparation(
+                    job_id=job_id,
+                    thread_id=thread_id,
+                    initial_state=initial_state,
+                    user_id=user_id,
+                    create_failure_record=False,
+                )
+            )
+        except Exception:
+            # Dispatch setup failed — roll back to filtered_out so the button reappears.
+            logger.error(
+                "Failed to dispatch proceed-anyway workflow for job %s, rolling back to filtered_out",
+                job_id,
+                exc_info=True,
+            )
+            try:
+                await self._ctx.repository.update(
+                    job_id, {"status": BusinessState.FILTERED_OUT}
+                )
+            except Exception:
+                logger.error(
+                    "Failed to roll back job %s to filtered_out", job_id
+                )
+            raise
+
+        logger.info("Job %s proceeded past filter (proceed anyway)", job_id)
+
+        return JobSubmitResponse(
+            job_id=job_id,
+            status=BusinessState.PROCESSING,
+            message="CV generation started — the job will appear in your review queue.",
+        )
+
     @staticmethod
     def _build_job_posting_preview(request: JobSubmitRequest) -> dict:
         """Return a minimal job_posting dict for the QUEUED row.

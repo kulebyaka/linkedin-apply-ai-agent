@@ -192,7 +192,6 @@ class TestFailedTransitionBlocked:
             BusinessState.COMPLETED,
             BusinessState.DECLINED,
             BusinessState.APPLIED,
-            BusinessState.FILTERED_OUT,
         ],
     )
     async def test_terminal_status_not_clobbered(self, terminal_status):
@@ -216,6 +215,32 @@ class TestFailedTransitionBlocked:
         )
 
         ctx.repository.get.assert_awaited_once_with(TEST_JOB_ID)
+        ctx.repository.update.assert_not_called()
+        ctx.repository.create.assert_not_called()
+
+    async def test_filtered_out_status_not_clobbered(self):
+        """FILTERED_OUT is non-terminal (allows PROCESSING for "Proceed Anyway")
+        but FILTERED_OUT → FAILED is not allowed, so a late exception must not
+        clobber a job that was correctly filtered out.
+        """
+        assert (
+            BusinessState.FAILED
+            not in ALLOWED_TRANSITIONS[BusinessState.FILTERED_OUT]
+        )
+
+        ctx = _make_ctx(prep_exc=RuntimeError("oops"))
+        ctx.repository.get = AsyncMock(
+            return_value=_make_record(BusinessState.FILTERED_OUT)
+        )
+        dispatcher = ctx.workflow_dispatcher
+
+        await dispatcher.dispatch_preparation(
+            job_id=TEST_JOB_ID,
+            thread_id=TEST_THREAD_ID,
+            initial_state=_initial_state(),
+            user_id=TEST_USER_ID,
+        )
+
         ctx.repository.update.assert_not_called()
         ctx.repository.create.assert_not_called()
 

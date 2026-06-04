@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { listMyJobs, type MyJobsFilters } from '$lib/api/jobs';
+	import { listMyJobs, proceedAnyway, type MyJobsFilters } from '$lib/api/jobs';
 	import { fetchJobStats, deleteJob, type JobStatusCounts } from '$lib/api/hitl';
 	import { downloadPDF, triggerDownload } from '$lib/api/client';
-	import type { AdminJobRecord } from '$lib/api/admin';
+	import type { AdminJobRecord, FilterResult } from '$lib/api/admin';
 	import { POLL_INTERVAL_MS } from '$lib/config';
 	import ApplicationsFilterBar from '$lib/components/applications/ApplicationsFilterBar.svelte';
 	import ApplicationsTable from '$lib/components/applications/ApplicationsTable.svelte';
@@ -29,6 +29,16 @@
 
 	let toast = $state<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+	// "Proceed Anyway" confirmation modal state.
+	let proceedJob = $state<AdminJobRecord | null>(null);
+	let proceedSubmitting = $state(false);
+
+	const proceedFilter = $derived<FilterResult | null>(
+		proceedJob?.filter_result && typeof proceedJob.filter_result === 'object'
+			? (proceedJob.filter_result as FilterResult)
+			: null
+	);
 
 	function showToast(message: string, type: 'success' | 'error' | 'info' = 'info') {
 		toast = { message, type };
@@ -156,6 +166,32 @@
 		}
 	}
 
+	function handleProceed(job: AdminJobRecord) {
+		proceedJob = job;
+	}
+
+	function cancelProceed() {
+		if (proceedSubmitting) return;
+		proceedJob = null;
+	}
+
+	async function confirmProceed() {
+		if (!proceedJob) return;
+		const jobId = proceedJob.job_id;
+		proceedSubmitting = true;
+		try {
+			await proceedAnyway(jobId);
+			showToast('CV generation started — the job will appear in your review queue.', 'success');
+			proceedJob = null;
+			await fetchJobs({ silent: true });
+			await fetchStats();
+		} catch (err) {
+			showToast(err instanceof Error ? err.message : 'Failed to proceed with job', 'error');
+		} finally {
+			proceedSubmitting = false;
+		}
+	}
+
 	function goPrev() {
 		if (offset === 0) return;
 		offset = Math.max(0, offset - PAGE_SIZE);
@@ -236,6 +272,7 @@
 		onDelete={handleDelete}
 		onReview={handleReview}
 		onDownload={handleDownload}
+		onProceed={handleProceed}
 		loading={loading && !initialLoadDone}
 	/>
 
@@ -263,6 +300,72 @@
 		</div>
 	</footer>
 </div>
+
+{#if proceedJob}
+	{@const job = proceedJob}
+	<div
+		class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+		role="dialog"
+		aria-modal="true"
+		aria-labelledby="proceed-title"
+	>
+		<div class="w-full max-w-lg border-4 border-[var(--color-foreground)] bg-white shadow-brutal">
+			<div class="border-b-2 border-[var(--color-foreground)] bg-[var(--color-muted)] px-4 py-3">
+				<h2 id="proceed-title" class="font-heading text-lg tracking-tight">Proceed anyway?</h2>
+			</div>
+			<div class="flex flex-col gap-3 px-4 py-4">
+				<p class="text-sm">
+					This job was filtered out automatically. Proceeding will generate a tailored CV and
+					send it to your review queue.
+				</p>
+				<div class="border-2 border-[var(--color-foreground)] bg-[var(--color-muted)]/40 px-3 py-2 text-sm">
+					<div class="font-mono text-xs uppercase tracking-wider text-[var(--color-muted-foreground)]">
+						{(job.job_posting?.title as string | undefined) ?? '—'}
+						{#if job.job_posting?.company}· {job.job_posting.company}{/if}
+					</div>
+					{#if proceedFilter}
+						<div class="mt-2 font-mono text-[10px] font-bold uppercase tracking-wider">
+							Filter score {proceedFilter.score}/100
+						</div>
+						{#if proceedFilter.disqualified && proceedFilter.disqualifier_reason}
+							<p class="mt-1 text-xs text-red-900">
+								<span class="font-bold">Disqualified:</span> {proceedFilter.disqualifier_reason}
+							</p>
+						{/if}
+						{#if proceedFilter.red_flags?.length}
+							<ul class="mt-1 list-disc pl-4 text-xs">
+								{#each proceedFilter.red_flags as flag}
+									<li>{flag}</li>
+								{/each}
+							</ul>
+						{/if}
+						{#if proceedFilter.reasoning}
+							<p class="mt-1 text-xs text-[var(--color-muted-foreground)]">{proceedFilter.reasoning}</p>
+						{/if}
+					{/if}
+				</div>
+			</div>
+			<div class="flex justify-end gap-2 border-t-2 border-[var(--color-foreground)] px-4 py-3">
+				<button
+					type="button"
+					onclick={cancelProceed}
+					disabled={proceedSubmitting}
+					class="font-mono border-2 border-[var(--color-foreground)] bg-white px-3 py-1.5 text-xs uppercase tracking-wider hover:bg-[var(--color-muted)] disabled:opacity-50"
+				>
+					Cancel
+				</button>
+				<button
+					type="button"
+					onclick={confirmProceed}
+					disabled={proceedSubmitting}
+					class="font-mono border-2 border-[var(--color-foreground)] bg-yellow-200 px-3 py-1.5 text-xs uppercase tracking-wider text-yellow-900 shadow-brutal hover:-translate-y-0.5 disabled:opacity-50 disabled:hover:translate-y-0"
+				>
+					{proceedSubmitting ? 'Starting…' : 'Proceed Anyway'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
 
 {#if toast}
 	<ToastNotification message={toast.message} type={toast.type} onClose={clearToast} />

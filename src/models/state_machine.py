@@ -118,7 +118,10 @@ ALLOWED_TRANSITIONS: dict[BusinessState, set[BusinessState]] = {
         BusinessState.RETRYING,
         BusinessState.QUEUED,  # Admin-initiated retry re-enqueues the job
     },
-    BusinessState.FILTERED_OUT: set(),  # Terminal
+    BusinessState.FILTERED_OUT: {
+        # User override: "Proceed Anyway" re-enters CV generation, skipping the filter.
+        BusinessState.PROCESSING,
+    },
     BusinessState.SCRAPE_FAILED: {
         BusinessState.QUEUED,
         BusinessState.PROCESSING,
