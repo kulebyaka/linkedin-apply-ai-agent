@@ -31,6 +31,7 @@ from unittest.mock import AsyncMock, patch  # noqa: E402
 import pytest  # noqa: E402
 
 from src.agents.preparation_workflow import (  # noqa: E402
+    extract_job_node,
     filter_job_node,
     route_after_extract,
     route_after_filter,
@@ -141,6 +142,43 @@ class TestRouteAfterFilter:
         state = _make_state()
         state.pop("current_step", None)
         assert route_after_filter(state) == "compose"
+
+
+# ---------------------------------------------------------------------------
+# "Proceed Anyway" override (skip_filter)
+# ---------------------------------------------------------------------------
+
+
+class TestProceedAnywaySkipFilter:
+    def test_route_after_extract_skips_filter_for_linkedin(self):
+        # Without skip_filter a LinkedIn job goes to the filter...
+        assert route_after_extract({"source": "linkedin"}) == "filter"
+        # ...with skip_filter it goes straight to compose.
+        assert (
+            route_after_extract({"source": "linkedin", "skip_filter": True}) == "compose"
+        )
+
+    async def test_extract_node_reuses_stored_posting(self):
+        """skip_filter + existing job_posting → no re-scrape, JOB_EXTRACTED."""
+        repo = AsyncMock()
+        repo.get = AsyncMock(
+            return_value=JobRecord(
+                job_id="job-1",
+                user_id="user-1",
+                source="linkedin",
+                mode="full",
+                status=BusinessState.PROCESSING,
+            )
+        )
+        state = _make_state(skip_filter=True)
+        config = _make_config(repo=repo)
+
+        result = await extract_job_node(state, config)
+
+        # Posting passed through unchanged; no adapter/scrape involved.
+        assert result["job_posting"] == JOB_POSTING
+        assert result["current_step"] == WorkflowStep.JOB_EXTRACTED
+        assert result.get("error_message") is None
 
 
 # ---------------------------------------------------------------------------

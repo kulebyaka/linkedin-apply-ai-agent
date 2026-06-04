@@ -181,8 +181,11 @@ class TestFilteredOutState:
     def test_enum_from_string(self):
         assert BusinessState("filtered_out") == BusinessState.FILTERED_OUT
 
-    def test_filtered_out_is_terminal(self):
-        assert ALLOWED_TRANSITIONS[BusinessState.FILTERED_OUT] == set()
+    def test_filtered_out_allows_proceed_anyway(self):
+        # "Proceed Anyway" re-enters CV generation: filtered_out → processing.
+        assert ALLOWED_TRANSITIONS[BusinessState.FILTERED_OUT] == {
+            BusinessState.PROCESSING
+        }
 
     def test_queued_to_filtered_out(self):
         assert validate_transition(BusinessState.QUEUED, BusinessState.FILTERED_OUT) is True
@@ -193,9 +196,16 @@ class TestFilteredOutState:
     def test_filtered_out_self_transition(self):
         assert validate_transition(BusinessState.FILTERED_OUT, BusinessState.FILTERED_OUT) is True
 
+    def test_filtered_out_to_processing_valid(self):
+        # The only non-self transition out of filtered_out ("Proceed Anyway").
+        assert validate_transition(
+            BusinessState.FILTERED_OUT, BusinessState.PROCESSING
+        ) is True
+
     def test_filtered_out_to_other_states_invalid(self):
+        allowed = {BusinessState.FILTERED_OUT, BusinessState.PROCESSING}
         for target in BusinessState:
-            if target == BusinessState.FILTERED_OUT:
+            if target in allowed:
                 continue
             with pytest.raises(InvalidStateTransitionError):
                 validate_transition(BusinessState.FILTERED_OUT, target)

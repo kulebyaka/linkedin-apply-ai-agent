@@ -7,9 +7,10 @@
 		onDelete: (jobId: string) => void;
 		onReview: (jobId: string) => void;
 		onDownload: (job: AdminJobRecord) => void;
+		onProceed: (job: AdminJobRecord) => void;
 	}
 
-	let { jobs, loading = false, onDelete, onReview, onDownload }: Props = $props();
+	let { jobs, loading = false, onDelete, onReview, onDownload, onProceed }: Props = $props();
 
 	/** Statuses that have a finished CV but no Review action — offer a download instead. */
 	const CV_DOWNLOAD_STATUSES = new Set(['approved', 'applied', 'completed']);
@@ -166,6 +167,14 @@
 										class="font-mono border-2 border-[var(--color-foreground)] bg-[var(--color-primary)] px-2 py-1 text-[10px] uppercase tracking-wider text-[var(--color-primary-foreground)] hover:-translate-y-0.5"
 									>
 										Download CV
+									</button>
+								{:else if j.status === 'filtered_out'}
+									<button
+										type="button"
+										onclick={() => onProceed(j)}
+										class="font-mono border-2 border-[var(--color-foreground)] bg-yellow-200 px-2 py-1 text-[10px] uppercase tracking-wider text-yellow-900 hover:-translate-y-0.5"
+									>
+										Proceed Anyway
 									</button>
 								{/if}
 								{#if jobUrl(j)}

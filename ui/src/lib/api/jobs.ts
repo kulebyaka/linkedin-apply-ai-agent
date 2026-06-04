@@ -55,3 +55,21 @@ export async function listMyJobs(filters: MyJobsFilters = {}): Promise<MyJobsRes
 	});
 	return handle<MyJobsResponse>(response, 'List jobs');
 }
+
+export interface ProceedResponse {
+	job_id: string;
+	status: string;
+	message: string;
+}
+
+/**
+ * Override the job filter for a filtered-out job ("Proceed Anyway").
+ * Re-runs CV generation so the job enters the HITL review queue.
+ */
+export async function proceedAnyway(jobId: string): Promise<ProceedResponse> {
+	const response = await fetch(`${API_BASE}/api/jobs/${jobId}/proceed`, {
+		method: 'POST',
+		credentials: 'include',
+	});
+	return handle<ProceedResponse>(response, 'Proceed with job');
+}

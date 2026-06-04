@@ -328,6 +328,27 @@ async def get_job_status(
         raise HTTPException(500, "Failed to get job status") from None
 
 
+@router.post("/api/jobs/{job_id}/proceed", response_model=JobSubmitResponse)
+async def proceed_filtered_out_job(
+    job_id: str, request: Request, user: CurrentUser
+) -> JobSubmitResponse:
+    """Override the filter for a filtered-out job ("Proceed Anyway").
+
+    Re-enters CV generation (skipping extraction + filtering) so the job
+    lands in the HITL review queue.
+    """
+    try:
+        orchestrator = get_orchestrator(request)
+        return await orchestrator.proceed_filtered_out(job_id, user.id)
+    except KeyError:
+        raise HTTPException(404, f"Job {job_id} not found") from None
+    except RuntimeError as e:
+        raise HTTPException(409, str(e)) from None
+    except Exception as e:
+        logger.error(f"Failed to proceed job {job_id}: {e}", exc_info=True)
+        raise HTTPException(500, "Failed to proceed with job") from None
+
+
 @router.get("/api/jobs/{job_id}/pdf")
 async def download_job_pdf(job_id: str, request: Request, user: CurrentUser):
     """Download generated CV PDF for a job."""
