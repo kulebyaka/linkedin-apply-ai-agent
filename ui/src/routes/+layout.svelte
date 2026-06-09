@@ -32,7 +32,7 @@
 		const isPublicPath = publicPaths.some((p) => pathname.startsWith(p));
 
 		if (!auth.isAuthenticated && !isPublicPath) {
-			goto('/login');
+			goto('/welcome');
 		}
 	});
 
@@ -124,6 +124,15 @@
 							class:-translate-y-2={menuOpen}
 						></span>
 					</button>
+				{:else}
+					<!-- Logged-out: single Sign In action (no hamburger needed) -->
+					<a
+						href="/login"
+						class="border-2 border-[var(--color-foreground)] bg-[var(--color-primary)] px-4 py-2 font-mono text-sm uppercase tracking-wider shadow-brutal transition-all duration-150 hover:-translate-y-0.5"
+						class:font-bold={$page.url.pathname === '/login'}
+					>
+						Sign In
+					</a>
 				{/if}
 			</div>
 
