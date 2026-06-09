@@ -2,8 +2,14 @@
 	import { onMount } from 'svelte';
 	import WIPBadge from '$lib/components/wip/WIPBadge.svelte';
 	import { WIP } from '$lib/wip/features';
+	import { auth } from '$lib/stores/auth.svelte';
 
 	let mounted = $state(false);
+
+	// Logged-out visitors land here by default — point the primary CTA at sign-in
+	// rather than Settings (which would bounce them straight back here).
+	const ctaHref = $derived(auth.isAuthenticated ? '/settings' : '/login');
+	const ctaLabel = $derived(auth.isAuthenticated ? 'Go to Settings →' : 'Sign In to Get Started →');
 
 	onMount(() => {
 		requestAnimationFrame(() => {
@@ -452,10 +458,10 @@
 					</p>
 				</div>
 				<a
-					href="/settings"
+					href={ctaHref}
 					class="flex-shrink-0 border-4 border-[var(--color-foreground)] bg-[var(--color-foreground)] px-8 py-4 font-mono text-sm font-bold uppercase tracking-wider text-[var(--color-primary)] shadow-brutal-xl transition-all duration-150 hover:-translate-y-1 hover:shadow-[10px_10px_0_rgba(0,0,0,0.4)]"
 				>
-					Go to Settings →
+					{ctaLabel}
 				</a>
 			</div>
 		</div>
