@@ -1,11 +1,20 @@
 <script lang="ts">
-	import type { UserFilterPreferences } from '$lib/types/index';
-	import { updateFilterPreferences, generateFilterPrompt } from '$lib/api/settings';
+	import { onMount } from 'svelte';
+	import type { RefinementProposal, UserFilterPreferences } from '$lib/types/index';
+	import {
+		updateFilterPreferences,
+		generateFilterPrompt,
+		getFilterRefinement,
+		acceptFilterRefinement,
+		rejectFilterRefinement,
+	} from '$lib/api/settings';
 	import { auth } from '$lib/stores/auth.svelte';
+	import { notifications } from '$lib/stores/notifications.svelte';
 
 	let { prefs: initialPrefs }: { prefs: UserFilterPreferences } = $props();
 
 	let enabled = $state(initialPrefs.enabled);
+	let autoRefineEnabled = $state(initialPrefs.auto_refine_enabled ?? false);
 	let naturalLanguagePrefs = $state(initialPrefs.natural_language_prefs);
 	let customPrompt = $state(initialPrefs.custom_prompt ?? '');
 	let rejectThreshold = $state(initialPrefs.reject_threshold);
@@ -15,6 +24,54 @@
 	let saved = $state(false);
 	let generating = $state(false);
 	let error = $state<string | null>(null);
+
+	// Pending auto-refinement proposal (loaded on mount).
+	let proposal = $state<RefinementProposal | null>(null);
+	let currentLearnedBlock = $state<string | null>(null);
+	let refineActing = $state(false);
+	let refineError = $state<string | null>(null);
+
+	onMount(loadRefinement);
+
+	async function loadRefinement() {
+		try {
+			const view = await getFilterRefinement();
+			proposal = view.proposal;
+			currentLearnedBlock = view.current_learned_block;
+		} catch {
+			// Refinement panel is optional — fail quietly.
+		}
+	}
+
+	async function handleAccept() {
+		refineActing = true;
+		refineError = null;
+		try {
+			const updated = await acceptFilterRefinement();
+			auth.setUser(updated);
+			customPrompt = updated.filter_preferences?.custom_prompt ?? customPrompt;
+			proposal = null;
+			void notifications.refreshCount();
+		} catch (err) {
+			refineError = err instanceof Error ? err.message : 'Failed to accept proposal';
+		} finally {
+			refineActing = false;
+		}
+	}
+
+	async function handleReject() {
+		refineActing = true;
+		refineError = null;
+		try {
+			await rejectFilterRefinement();
+			proposal = null;
+			void notifications.refreshCount();
+		} catch (err) {
+			refineError = err instanceof Error ? err.message : 'Failed to reject proposal';
+		} finally {
+			refineActing = false;
+		}
+	}
 
 	async function handleGeneratePrompt() {
 		if (!naturalLanguagePrefs.trim()) return;
@@ -42,6 +99,7 @@
 
 		const payload: UserFilterPreferences = {
 			enabled,
+			auto_refine_enabled: autoRefineEnabled,
 			natural_language_prefs: naturalLanguagePrefs,
 			custom_prompt: customPrompt.trim() || null,
 			reject_threshold: rejectThreshold,
@@ -83,6 +141,78 @@
 		LLM evaluates each LinkedIn job posting for hidden disqualifiers and scores suitability 0-100.
 		Jobs below the reject threshold are filtered out before CV generation.
 	</p>
+
+	{#if proposal}
+		<div class="mb-4 border-2 border-[var(--color-primary)] bg-[var(--color-primary)]/10 p-4">
+			<div class="mb-2 flex items-center justify-between">
+				<h3 class="font-heading text-sm tracking-tight">Filter improvement suggested</h3>
+				<span class="font-mono text-[10px] uppercase tracking-wider text-[var(--color-muted-foreground)]">
+					{proposal.decline_count} declines · {proposal.override_count} overrides
+				</span>
+			</div>
+			<p class="font-body mb-3 text-xs text-[var(--color-muted-foreground)]">{proposal.rationale}</p>
+
+			<div class="mb-3 grid gap-3 sm:grid-cols-2">
+				<div>
+					<p class="font-mono mb-1 text-[10px] uppercase tracking-wider text-[var(--color-muted-foreground)]">
+						Current learned criteria
+					</p>
+					<pre class="max-h-48 overflow-auto border-2 border-[var(--color-foreground)] bg-white p-2 font-mono text-[11px] whitespace-pre-wrap">{currentLearnedBlock || '(none yet)'}</pre>
+				</div>
+				<div>
+					<p class="font-mono mb-1 text-[10px] uppercase tracking-wider text-[var(--color-muted-foreground)]">
+						Proposed
+					</p>
+					<pre class="max-h-48 overflow-auto border-2 border-[var(--color-primary)] bg-white p-2 font-mono text-[11px] whitespace-pre-wrap">{proposal.proposed_learned_block}</pre>
+				</div>
+			</div>
+
+			{#if refineError}
+				<div class="mb-2 border-2 border-[var(--color-error)] bg-red-50 px-3 py-2 font-mono text-xs text-[var(--color-error)]">
+					{refineError}
+				</div>
+			{/if}
+
+			<div class="flex items-center gap-2">
+				<button
+					onclick={handleAccept}
+					disabled={refineActing}
+					class="border-2 border-[var(--color-foreground)] bg-[var(--color-primary)] px-4 py-2 font-mono text-xs uppercase tracking-wider text-[var(--color-primary-foreground)] shadow-brutal transition-all hover:-translate-y-0.5 disabled:opacity-50 disabled:hover:translate-y-0"
+				>
+					{refineActing ? 'Working…' : 'Accept'}
+				</button>
+				<button
+					onclick={handleReject}
+					disabled={refineActing}
+					class="border-2 border-[var(--color-foreground)] bg-white px-4 py-2 font-mono text-xs uppercase tracking-wider transition-all hover:bg-[var(--color-muted)] disabled:opacity-50"
+				>
+					Reject
+				</button>
+				<span class="font-mono text-[10px] text-[var(--color-muted-foreground)]">
+					Accepting updates only the auto-learned section of your prompt.
+				</span>
+			</div>
+		</div>
+	{/if}
+
+	<label class="mb-4 flex cursor-pointer items-start gap-3 border-2 border-[var(--color-foreground)] bg-white p-3">
+		<div
+			class="relative mt-0.5 h-6 w-10 flex-shrink-0 border-2 border-[var(--color-foreground)] transition-colors {autoRefineEnabled ? 'bg-[var(--color-primary)]' : 'bg-white'}"
+		>
+			<div
+				class="absolute top-0.5 h-4 w-4 border border-[var(--color-foreground)] bg-white transition-all {autoRefineEnabled ? 'left-4' : 'left-0.5'}"
+			></div>
+		</div>
+		<input type="checkbox" bind:checked={autoRefineEnabled} class="sr-only" />
+		<span class="flex-1">
+			<span class="font-mono text-xs font-bold uppercase tracking-wider">Auto-refine filter</span>
+			<span class="font-body mt-0.5 block text-xs text-[var(--color-muted-foreground)]">
+				Periodically analyze the jobs you decline (with a reason) and the filtered-out jobs you
+				override, then propose an improved filter prompt for your review. Never changes your prompt
+				without your approval. Save to apply this setting.
+			</span>
+		</span>
+	</label>
 
 	<div class="mb-4">
 		<label

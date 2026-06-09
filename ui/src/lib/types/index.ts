@@ -94,6 +94,21 @@ export interface UserFilterPreferences {
 	reject_threshold: number;
 	warning_threshold: number;
 	enabled: boolean;
+	auto_refine_enabled: boolean;
+}
+
+export interface RefinementProposal {
+	proposed_learned_block: string;
+	rationale: string;
+	signal_job_ids: string[];
+	decline_count: number;
+	override_count: number;
+	created_at: string;
+}
+
+export interface RefinementView {
+	proposal: RefinementProposal | null;
+	current_learned_block: string | null;
 }
 
 export type BusinessState =

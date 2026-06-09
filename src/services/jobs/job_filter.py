@@ -143,6 +143,85 @@ class JobFilter:
         logger.info(f"Generated filter prompt ({len(generated)} chars)")
         return generated
 
+    # JSON schema for the refinement LLM call.
+    _REFINEMENT_SCHEMA = {
+        "type": "object",
+        "properties": {
+            "proposed_learned_block": {
+                "type": "string",
+                "description": "Full '## Auto-learned criteria' markdown block.",
+            },
+            "rationale": {
+                "type": "string",
+                "description": "Plain-language explanation citing the signals.",
+            },
+        },
+        "required": ["proposed_learned_block", "rationale"],
+        "additionalProperties": False,
+    }
+
+    def generate_refinement(
+        self,
+        current_learned_block: str,
+        decline_signals: list[str],
+        override_signals: list[str],
+        user_id: str = "",
+    ) -> dict[str, str]:
+        """Propose an updated auto-learned criteria block from user signals.
+
+        Args:
+            current_learned_block: The existing auto-learned block (may be "").
+            decline_signals: False-positive reasons (filter passed, user declined).
+            override_signals: False-negative reasons (filter rejected, user forced through).
+            user_id: User identifier for the prompt cache key.
+
+        Returns:
+            Dict with ``proposed_learned_block`` and ``rationale``.
+
+        Raises:
+            JobFilterError: If the LLM call fails or returns an invalid block.
+        """
+        logger.info(
+            "Generating filter refinement: %d decline + %d override signals",
+            len(decline_signals),
+            len(override_signals),
+        )
+
+        def _fmt(items: list[str]) -> str:
+            return "\n".join(f"- {s}" for s in items) if items else "(none)"
+
+        spec = self.prompts.load_spec(
+            "refine_filter_prompt",
+            cache_key=f"filter_refine:{user_id}" if user_id else "",
+            user_vars={
+                "current_learned_block": current_learned_block or "(empty — none yet)",
+                "decline_signals": _fmt(decline_signals),
+                "override_signals": _fmt(override_signals),
+            },
+        )
+
+        try:
+            raw = self.llm.generate_json(
+                spec,
+                schema=self._REFINEMENT_SCHEMA,
+                temperature=0.3,
+            )
+        except Exception as e:
+            logger.error(f"Refinement generation failed: {e}")
+            raise JobFilterError(f"Refinement generation failed: {e}") from e
+
+        block = (raw.get("proposed_learned_block") or "").strip()
+        rationale = (raw.get("rationale") or "").strip()
+        # Validate the block looks like the expected structure before storing.
+        if not block or "## Auto-learned criteria" not in block:
+            raise JobFilterError(
+                "Refinement produced a malformed auto-learned block "
+                "(missing '## Auto-learned criteria' heading)"
+            )
+
+        logger.info("Generated filter refinement (%d chars)", len(block))
+        return {"proposed_learned_block": block, "rationale": rationale}
+
     def should_reject(self, result: FilterResult, reject_threshold: int = 30) -> bool:
         """Check if a job should be auto-rejected.
 

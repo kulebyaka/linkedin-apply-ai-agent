@@ -7,6 +7,7 @@
 	import { auth } from '$lib/stores/auth.svelte';
 	import WIPBadge from '$lib/components/wip/WIPBadge.svelte';
 	import { WIP } from '$lib/wip/features';
+	import NotificationBell from '$lib/components/NotificationBell.svelte';
 
 	let { children } = $props();
 
@@ -91,6 +92,7 @@
 							</a>
 						{/each}
 						<span class="text-[var(--color-muted)]">|</span>
+						<NotificationBell />
 						<span class="font-body max-w-[120px] truncate text-sm text-[var(--color-muted-foreground)]">
 							{auth.user?.display_name || auth.user?.email}
 						</span>
@@ -102,10 +104,12 @@
 						</button>
 					</div>
 
-					<!-- Mobile hamburger button -->
-					<button
+					<!-- Mobile: notification bell + hamburger -->
+					<div class="flex items-center gap-2 sm:hidden">
+						<NotificationBell />
+						<button
 						onclick={() => (menuOpen = !menuOpen)}
-						class="flex h-9 w-9 flex-col items-center justify-center gap-1.5 border-2 border-[var(--color-foreground)] bg-[var(--color-background)] shadow-brutal sm:hidden"
+						class="flex h-9 w-9 flex-col items-center justify-center gap-1.5 border-2 border-[var(--color-foreground)] bg-[var(--color-background)] shadow-brutal"
 						aria-label="Toggle menu"
 						aria-expanded={menuOpen}
 					>
@@ -124,6 +128,7 @@
 							class:-translate-y-2={menuOpen}
 						></span>
 					</button>
+				</div>
 				{:else}
 					<!-- Logged-out: single Sign In action (no hamburger needed) -->
 					<a

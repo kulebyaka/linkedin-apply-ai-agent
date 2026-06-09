@@ -1,0 +1,14 @@
+CURRENT auto-learned criteria block:
+---
+$current_learned_block
+---
+
+DECLINE signals (filter passed these, user declined them — false positives):
+---
+$decline_signals
+---
+
+OVERRIDE signals (filter rejected these, user forced them through — false negatives):
+---
+$override_signals
+---

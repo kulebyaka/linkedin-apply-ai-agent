@@ -33,6 +33,7 @@
 	// "Proceed Anyway" confirmation modal state.
 	let proceedJob = $state<AdminJobRecord | null>(null);
 	let proceedSubmitting = $state(false);
+	let proceedReason = $state('');
 
 	const proceedFilter = $derived<FilterResult | null>(
 		proceedJob?.filter_result && typeof proceedJob.filter_result === 'object'
@@ -168,11 +169,13 @@
 
 	function handleProceed(job: AdminJobRecord) {
 		proceedJob = job;
+		proceedReason = '';
 	}
 
 	function cancelProceed() {
 		if (proceedSubmitting) return;
 		proceedJob = null;
+		proceedReason = '';
 	}
 
 	async function confirmProceed() {
@@ -180,9 +183,10 @@
 		const jobId = proceedJob.job_id;
 		proceedSubmitting = true;
 		try {
-			await proceedAnyway(jobId);
+			await proceedAnyway(jobId, proceedReason.trim() || undefined);
 			showToast('CV generation started — the job will appear in your review queue.', 'success');
 			proceedJob = null;
+			proceedReason = '';
 			await fetchJobs({ silent: true });
 			await fetchStats();
 		} catch (err) {
@@ -343,6 +347,23 @@
 							<p class="mt-1 text-xs text-[var(--color-muted-foreground)]">{proceedFilter.reasoning}</p>
 						{/if}
 					{/if}
+				</div>
+
+				<div>
+					<label
+						for="proceed-reason"
+						class="font-mono mb-1 block text-xs uppercase tracking-wider text-[var(--color-muted-foreground)]"
+					>
+						Why was this filtered out by mistake? <span class="normal-case">(optional)</span>
+					</label>
+					<textarea
+						id="proceed-reason"
+						bind:value={proceedReason}
+						rows={2}
+						disabled={proceedSubmitting}
+						placeholder="e.g. This is genuinely remote despite the location field. Helps the filter learn."
+						class="font-body w-full border-2 border-[var(--color-foreground)] bg-white px-3 py-2 text-sm placeholder:text-[var(--color-muted-foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] disabled:opacity-50"
+					></textarea>
 				</div>
 			</div>
 			<div class="flex justify-end gap-2 border-t-2 border-[var(--color-foreground)] px-4 py-3">

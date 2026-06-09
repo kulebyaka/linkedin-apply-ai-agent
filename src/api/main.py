@@ -35,7 +35,7 @@ from src.api.deps import (
     get_optional_user,
     get_orchestrator,
 )
-from src.api.routes import admin, auth, hitl, jobs, system, users
+from src.api.routes import admin, auth, hitl, jobs, notifications, system, users
 from src.config.settings import get_settings
 from src.context import AppContext, create_app_context
 from src.utils.logger import setup_api_logger
@@ -120,6 +120,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     ctx.create_background_task(_cleanup_magic_links_loop())
 
+    # Start the auto-refining filter scheduler (independent of LinkedIn search).
+    # Per-user opt-in (default OFF) still gates whether each user is processed.
+    if settings.auto_refine_enabled and ctx.user_repository is not None:
+        try:
+            from src.services.jobs.refinement_scheduler import RefinementScheduler
+
+            refinement_scheduler = RefinementScheduler(ctx)
+            refinement_scheduler.start()
+            ctx.refinement_scheduler = refinement_scheduler
+        except Exception:
+            logger.exception("Failed to start refinement scheduler")
+
     if settings.seed_jobs_from_file:
         logger.info(
             "Fixture replay mode enabled — LinkedIn scraping disabled. "
@@ -193,6 +205,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if ctx.scheduler:
         ctx.scheduler.stop()
 
+    if ctx.refinement_scheduler:
+        ctx.refinement_scheduler.stop()
+
     if ctx.browser:
         await ctx.browser.close()
 
@@ -236,6 +251,7 @@ app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(jobs.router)
 app.include_router(hitl.router)
+app.include_router(notifications.router)
 app.include_router(admin.router)
 
 

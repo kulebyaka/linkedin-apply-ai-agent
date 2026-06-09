@@ -6,7 +6,7 @@ import type {
 	UserModelPreferences,
 	UserSearchPreferences,
 } from '$lib/api/auth';
-import type { UserFilterPreferences } from '$lib/types/index';
+import type { RefinementView, UserFilterPreferences } from '$lib/types/index';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
 
@@ -192,6 +192,40 @@ export async function getCVExtractionStatus(
 	}
 
 	return response.json();
+}
+
+export async function getFilterRefinement(): Promise<RefinementView> {
+	const response = await fetch(`${API_BASE}/api/users/me/filter-preferences/refinement`, {
+		credentials: 'include',
+	});
+	if (!response.ok) {
+		const errorText = await response.text();
+		throw new Error(`Failed to get refinement: ${response.statusText} - ${errorText}`);
+	}
+	return response.json();
+}
+
+export async function acceptFilterRefinement(): Promise<User> {
+	const response = await fetch(`${API_BASE}/api/users/me/filter-preferences/refinement/accept`, {
+		method: 'POST',
+		credentials: 'include',
+	});
+	if (!response.ok) {
+		const errorText = await response.text();
+		throw new Error(`Failed to accept refinement: ${response.statusText} - ${errorText}`);
+	}
+	return response.json();
+}
+
+export async function rejectFilterRefinement(): Promise<void> {
+	const response = await fetch(`${API_BASE}/api/users/me/filter-preferences/refinement/reject`, {
+		method: 'POST',
+		credentials: 'include',
+	});
+	if (!response.ok) {
+		const errorText = await response.text();
+		throw new Error(`Failed to reject refinement: ${response.statusText} - ${errorText}`);
+	}
 }
 
 export async function generateFilterPrompt(naturalLanguagePrefs: string): Promise<{ prompt: string }> {

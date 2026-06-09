@@ -39,6 +39,9 @@ UPDATABLE_FIELDS = frozenset({
     "current_pdf_path",
     "application_url",
     "filter_result",
+    "decline_reason",
+    "override_reason",
+    "refine_signal_state",
     "error_message",
     "scrape_attempts",
     "last_scrape_error",
@@ -232,6 +235,26 @@ class JobRepository(ABC):
         Used by the admin dashboard to show the current global session state
         (all users share one li_at cookie, so auth is a session-wide property).
         """
+        pass
+
+    # =========================================================================
+    # Auto-Refinement Signal Methods
+    # =========================================================================
+
+    @abstractmethod
+    async def list_refine_signals(
+        self, user_id: str, state: str, limit: int = 50
+    ) -> list[JobRecord]:
+        """Return the user's jobs carrying a refine signal in ``state``.
+
+        A "signal" is a job with a non-null decline_reason or override_reason
+        and ``refine_signal_state == state``. Newest first, capped at ``limit``.
+        """
+        pass
+
+    @abstractmethod
+    async def mark_refine_signals(self, job_ids: list[str], state: str) -> None:
+        """Set ``refine_signal_state`` to ``state`` for the given job ids."""
         pass
 
     # =========================================================================

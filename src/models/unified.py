@@ -150,6 +150,14 @@ class JobRecord(BaseModel):
     # Filter result (from LLM job evaluation)
     filter_result: dict | None = None
 
+    # Auto-refinement signal capture. Populated when the user declines a job
+    # (with a reason) at HITL or overrides a filtered-out job via "Proceed
+    # Anyway" (with a reason). refine_signal_state tracks once-only consumption
+    # by the refiner: pending -> proposed -> consumed.
+    decline_reason: str | None = None
+    override_reason: str | None = None
+    refine_signal_state: str | None = None
+
     # Error tracking
     error_message: str | None = None
 

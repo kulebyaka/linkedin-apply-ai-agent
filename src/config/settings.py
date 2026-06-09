@@ -136,6 +136,16 @@ class Settings(BaseSettings):
     job_filter_warning_threshold: int = 70 # score below this → warning badge in HITL
 
     # -------------------------------------------------------------------------
+    # Auto-Refining Filter Prompt  (same for everyone — defaults defined here)
+    # -------------------------------------------------------------------------
+    # Global kill-switch for the periodic refinement scheduler. Per-user opt-in
+    # still gates whether a given user is ever processed (default OFF per user).
+    auto_refine_enabled: bool = True
+    auto_refine_interval_hours: int = 168       # weekly
+    auto_refine_min_signals: int = 10           # gate: need at least this many signals
+    auto_refine_signal_cap: int = 50            # feed at most the most-recent N signals
+
+    # -------------------------------------------------------------------------
     # CV Composer  (same for everyone — defaults defined here)
     # -------------------------------------------------------------------------
     cv_composer_temperature_summary: float = 0.5        # creative for professional summary

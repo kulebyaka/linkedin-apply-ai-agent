@@ -165,7 +165,8 @@ export async function fetchJobStats(): Promise<JobStatusCounts> {
 export async function submitDecision(
 	jobId: string,
 	decision: Decision,
-	feedback?: string
+	feedback?: string,
+	reasoning?: string
 ): Promise<DecisionResponse> {
 	if (USE_MOCK) {
 		await delay(800);
@@ -184,7 +185,7 @@ export async function submitDecision(
 	const response = await fetch(`${API_BASE}/api/hitl/${jobId}/decide`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ decision, feedback }),
+		body: JSON.stringify({ decision, feedback, reasoning }),
 		credentials: 'include',
 	});
 	if (!response.ok) {
