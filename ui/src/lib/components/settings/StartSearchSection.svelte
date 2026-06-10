@@ -6,6 +6,7 @@
 		getLinkedInSearchStatus,
 		type UserLastRun,
 	} from '$lib/api/client';
+	import { relativeTime } from '$lib/utils/time';
 
 	let triggering = $state(false);
 	let showConfirmModal = $state(false);
@@ -42,18 +43,6 @@
 		now;
 		return nextRunTime ? relativeTime(nextRunTime) : null;
 	});
-
-	function relativeTime(date: Date): string {
-		const diffMs = date.getTime() - Date.now();
-		const past = diffMs < 0;
-		const absMin = Math.round(Math.abs(diffMs) / 60_000);
-		if (absMin < 1) return past ? 'just now' : 'in less than a minute';
-		if (absMin < 60) return past ? `${absMin} min ago` : `in ${absMin} min`;
-		const absHr = Math.round(absMin / 60);
-		if (absHr < 24) return past ? `${absHr} h ago` : `in ${absHr} h`;
-		const absDay = Math.round(absHr / 24);
-		return past ? `${absDay} d ago` : `in ${absDay} d`;
-	}
 
 	onMount(async () => {
 		try {

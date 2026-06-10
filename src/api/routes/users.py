@@ -277,8 +277,17 @@ async def get_filter_refinement(
 
 
 async def _consume_proposal(ctx, user, proposal: RefinementProposal) -> None:
-    """Clear the proposal, consume its signals, and clear its notification."""
-    await ctx.user_repository.clear_pending_proposal(user.id)
+    """Clear the proposal, consume its signals, and clear its notification.
+
+    Best-effort: the caller has already performed the meaningful state change
+    (accept persisted the new prompt; reject is itself a discard), so a failure
+    here must not surface as an error implying the action didn't take effect.
+    A lingering proposal is harmless — accepting re-applies idempotently.
+    """
+    try:
+        await ctx.user_repository.clear_pending_proposal(user.id)
+    except Exception:
+        logger.warning("Failed to clear pending proposal", exc_info=True)
     try:
         await ctx.repository.mark_refine_signals(proposal.signal_job_ids, "consumed")
     except Exception:

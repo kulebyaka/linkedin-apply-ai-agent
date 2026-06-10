@@ -17,13 +17,12 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Literal
 
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-
 from src.config.settings import Settings
 from src.models.state_machine import BusinessState
 from src.models.unified import JobRecord
 from src.services.linkedin.linkedin_search import LinkedInSearchParams, LinkedInSearchURLBuilder
 
+from .interval_scheduler import IntervalScheduler
 from .job_queue import JobQueue, _scoped_job_id, _should_retry_scrape
 
 if TYPE_CHECKING:
@@ -80,8 +79,11 @@ class SearchRun:
     run: UserLastRun
 
 
-class LinkedInSearchScheduler:
+class LinkedInSearchScheduler(IntervalScheduler):
     """Orchestrates periodic LinkedIn job searches via APScheduler."""
+
+    job_id = "linkedin_search"
+    label = "LinkedIn search scheduler"
 
     def __init__(
         self,
@@ -92,19 +94,17 @@ class LinkedInSearchScheduler:
         admin_alert_service: AdminAlertService | None = None,
         job_repository: JobRepository | None = None,
     ) -> None:
+        super().__init__()
         self.settings = settings
         self.scraper = scraper
         self.queue = queue
         self.user_repository = user_repository
         self.admin_alert_service = admin_alert_service
         self.job_repository = job_repository
-        self._scheduler = AsyncIOScheduler()
         self._search_lock = asyncio.Lock()
-        self._last_run_time: datetime | None = None
         self._last_run_jobs: int = 0
         self._last_run_per_user: dict[str, UserLastRun] = {}
         self._run_history: deque[SearchRun] = deque(maxlen=_RUN_HISTORY_MAXLEN)
-        self._running = False
 
     @property
     def search_in_progress(self) -> bool:
@@ -398,51 +398,13 @@ class LinkedInSearchScheduler:
 
     def start(self) -> None:
         """Add interval job and start the APScheduler."""
-        if self._running:
-            logger.warning("Scheduler already running")
-            return
-
-        interval_hours = self.settings.linkedin_search_interval_hours
-        self._scheduler.add_job(
-            self.run_search,
-            "interval",
-            hours=interval_hours,
-            id="linkedin_search",
-            replace_existing=True,
+        self.start_interval(
+            self.run_search, hours=self.settings.linkedin_search_interval_hours
         )
-        self._scheduler.start()
-        self._running = True
-        logger.info("LinkedIn search scheduler started (every %d hours)", interval_hours)
-
-    def stop(self) -> None:
-        """Shutdown the scheduler gracefully."""
-        if not self._running:
-            return
-        self._scheduler.shutdown(wait=False)
-        self._running = False
-        logger.info("LinkedIn search scheduler stopped")
-
-    @property
-    def is_running(self) -> bool:
-        return self._running
-
-    @property
-    def last_run_time(self) -> datetime | None:
-        return self._last_run_time
 
     @property
     def last_run_jobs(self) -> int:
         return self._last_run_jobs
-
-    @property
-    def next_run_time(self) -> datetime | None:
-        """Return the next scheduled run time, if any."""
-        if not self._running:
-            return None
-        job = self._scheduler.get_job("linkedin_search")
-        if job:
-            return job.next_run_time
-        return None
 
     def _record_run(
         self,

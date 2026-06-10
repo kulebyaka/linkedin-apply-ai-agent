@@ -82,13 +82,14 @@ class NotificationRepository:
         """Return the number of unread notifications for the bell badge."""
         from src.services.db.tables import NotificationTable
 
-        rows = (
-            await NotificationTable.select(NotificationTable.id)
+        # COUNT(*) — this is a hot path (every client polls it on an interval),
+        # so don't materialize id rows just to len() them.
+        return (
+            await NotificationTable.count()
             .where(NotificationTable.user_id == user_id)
             .where(NotificationTable.read == False)  # noqa: E712
             .run()
         )
-        return len(rows)
 
     async def mark_read(self, notification_id: str, user_id: str) -> bool:
         """Mark a single notification read. Returns False if not found/owned."""
@@ -115,13 +116,13 @@ class NotificationRepository:
         """Mark all of a user's notifications read. Returns the count updated."""
         from src.services.db.tables import NotificationTable
 
-        unread = (
-            await NotificationTable.select(NotificationTable.id)
+        count = (
+            await NotificationTable.count()
             .where(NotificationTable.user_id == user_id)
             .where(NotificationTable.read == False)  # noqa: E712
             .run()
         )
-        if not unread:
+        if not count:
             return 0
         await (
             NotificationTable.update({NotificationTable.read: True})
@@ -129,7 +130,7 @@ class NotificationRepository:
             .where(NotificationTable.read == False)  # noqa: E712
             .run()
         )
-        return len(unread)
+        return count
 
     async def mark_read_by_type(self, user_id: str, type: str) -> int:
         """Mark all of a user's unread notifications of a given type read.
@@ -139,14 +140,14 @@ class NotificationRepository:
         """
         from src.services.db.tables import NotificationTable
 
-        unread = (
-            await NotificationTable.select(NotificationTable.id)
+        count = (
+            await NotificationTable.count()
             .where(NotificationTable.user_id == user_id)
             .where(NotificationTable.type == type)
             .where(NotificationTable.read == False)  # noqa: E712
             .run()
         )
-        if not unread:
+        if not count:
             return 0
         await (
             NotificationTable.update({NotificationTable.read: True})
@@ -155,7 +156,7 @@ class NotificationRepository:
             .where(NotificationTable.read == False)  # noqa: E712
             .run()
         )
-        return len(unread)
+        return count
 
     # =========================================================================
     # Helpers

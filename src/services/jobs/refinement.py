@@ -48,6 +48,25 @@ async def run_refinement_cycle(ctx: AppContext, user: User) -> RefinementProposa
         logger.debug("Refinement skipped for user %s: not opted in", user.id)
         return None
 
+    # Don't stack proposals: if the user already has an un-acknowledged proposal,
+    # leave it for them to review. A new cycle only begins once the prior one is
+    # accepted/rejected. This prevents superseding an existing proposal (which
+    # would orphan its already-"proposed" signals so their feedback is lost) and
+    # prevents a re-feed / duplicate-notification loop if a prior cycle failed to
+    # mark its signals "proposed".
+    try:
+        existing_proposal = await ctx.user_repository.get_pending_proposal(user.id)
+    except Exception:
+        logger.exception(
+            "Refinement: failed to check existing proposal for user %s", user.id
+        )
+        return None
+    if existing_proposal is not None:
+        logger.info(
+            "Refinement skipped for user %s: a proposal is awaiting review", user.id
+        )
+        return None
+
     settings = ctx.settings
     cap = settings.auto_refine_signal_cap
     min_signals = settings.auto_refine_min_signals
@@ -73,9 +92,12 @@ async def run_refinement_cycle(ctx: AppContext, user: User) -> RefinementProposa
     override_signals: list[str] = []
     for job in signals:
         ctx_line = _signal_line(job)
+        # A job contributes to at most one list. The HITLProcessor decline guard
+        # already prevents a forced-through (override) job from also becoming a
+        # decline signal; the elif defends against any legacy row carrying both.
         if job.decline_reason:
             decline_signals.append(f"{ctx_line}: {job.decline_reason}")
-        if job.override_reason:
+        elif job.override_reason:
             override_signals.append(f"{ctx_line}: {job.override_reason}")
 
     current_block = extract_learned_block(prefs.custom_prompt) or ""

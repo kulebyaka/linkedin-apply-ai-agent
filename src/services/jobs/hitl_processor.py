@@ -222,11 +222,15 @@ class HITLProcessor:
         updates: dict = {"status": BusinessState.DECLINED}
 
         # Capture a false-positive signal for the auto-refiner: a job the filter
-        # passed (no filter_result, or scored above reject) that the user still
-        # declined. Only count it when the user gave a reason, to keep proposals
-        # grounded. Reuses HITLDecision.reasoning as the decline reason.
+        # PASSED that the user still declined, with a stated reason. We skip jobs
+        # that reached review via "Proceed Anyway" (override_reason set): the
+        # filter rejected those correctly, so a later decline is NOT a filter
+        # false-positive — capturing it would feed a contradictory signal and
+        # resurrect the already-captured override signal back to "pending".
+        # Only count declines with a reason, to keep proposals grounded.
         reason = (decision.reasoning or "").strip()
-        if reason:
+        was_filter_override = bool(getattr(job_record, "override_reason", None))
+        if reason and not was_filter_override:
             updates["decline_reason"] = reason
             updates["refine_signal_state"] = "pending"
             logger.info("Captured decline-with-reason refine signal for job %s", job_id)
