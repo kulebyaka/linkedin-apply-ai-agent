@@ -36,7 +36,11 @@ class UserRepository:
         """
         from pathlib import Path
 
-        from src.services.db.tables import MagicLinkTable, UserTable
+        from src.services.db.tables import (
+            MagicLinkTable,
+            NotificationTable,
+            UserTable,
+        )
 
         # Set up engine if not already configured (SQLiteJobRepository may have
         # done this already when repo_type=sqlite).
@@ -49,9 +53,11 @@ class UserRepository:
             engine = SQLiteEngine(path=db_path)
             UserTable._meta._db = engine
             MagicLinkTable._meta._db = engine
+            NotificationTable._meta._db = engine
 
             await UserTable.create_table(if_not_exists=True).run()
             await MagicLinkTable.create_table(if_not_exists=True).run()
+            await NotificationTable.create_table(if_not_exists=True).run()
 
         # Apply pending schema migrations. Idempotent via schema_migrations table —
         # safe even when SQLiteJobRepository.initialize already ran them.
@@ -180,6 +186,84 @@ class UserRepository:
         ).where(UserTable.id == user_id).run()
 
         return await self.get_by_id(user_id)
+
+    # =========================================================================
+    # Auto-Refinement Proposal (single pending per user)
+    # =========================================================================
+
+    async def get_pending_proposal(self, user_id: str) -> "RefinementProposal | None":
+        """Return the user's single pending refinement proposal, or None."""
+        from src.models.job_filter import RefinementProposal
+        from src.services.db.tables import UserTable
+
+        row = (
+            await UserTable.select(UserTable.pending_refinement)
+            .where(UserTable.id == user_id)
+            .first()
+            .run()
+        )
+        if not row:
+            return None
+        raw = self._parse_json_field(row.get("pending_refinement"))
+        if not raw:
+            return None
+        try:
+            return RefinementProposal(**raw)
+        except Exception:
+            logger.warning(
+                "Failed to parse pending_refinement for user %s; treating as none",
+                user_id,
+                exc_info=True,
+            )
+            return None
+
+    async def set_pending_proposal(
+        self, user_id: str, proposal: "RefinementProposal"
+    ) -> None:
+        """Store (or supersede) the user's single pending refinement proposal."""
+        from src.services.db.tables import UserTable
+
+        await UserTable.update(
+            {
+                "pending_refinement": proposal.model_dump(mode="json"),
+                "updated_at": datetime.now(tz=timezone.utc),
+            }
+        ).where(UserTable.id == user_id).run()
+
+    async def clear_pending_proposal(self, user_id: str) -> None:
+        """Clear the user's pending refinement proposal."""
+        from src.services.db.tables import UserTable
+
+        await UserTable.update(
+            {
+                "pending_refinement": None,
+                "updated_at": datetime.now(tz=timezone.utc),
+            }
+        ).where(UserTable.id == user_id).run()
+
+    async def get_all_with_auto_refine(self) -> list[User]:
+        """All users whose filter preferences opt into auto-refinement."""
+        from src.services.db.tables import UserTable
+
+        rows = (
+            await UserTable.select()
+            .where(UserTable.filter_preferences.is_not_null())
+            .run()
+        )
+        users: list[User] = []
+        for row in rows:
+            try:
+                user = self._row_to_user(row)
+            except Exception:
+                logger.warning(
+                    "Failed to parse user row (id=%s), skipping",
+                    row.get("id"),
+                    exc_info=True,
+                )
+                continue
+            if user.filter_preferences and user.filter_preferences.auto_refine_enabled:
+                users.append(user)
+        return users
 
     async def count_admins(self) -> int:
         """Return the total number of users with role == admin.

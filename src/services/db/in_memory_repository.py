@@ -218,6 +218,26 @@ class InMemoryJobRepository(JobRepository):
             counts[key] = counts.get(key, 0) + 1
         return counts
 
+    async def list_refine_signals(
+        self, user_id: str, state: str, limit: int = 50
+    ) -> list[JobRecord]:
+        jobs = [
+            j for j in self._jobs.values()
+            if j.user_id == user_id and j.refine_signal_state == state
+        ]
+        jobs.sort(key=lambda j: j.updated_at, reverse=True)
+        return jobs[:limit]
+
+    async def mark_refine_signals(self, job_ids: list[str], state: str) -> None:
+        async with self._lock:
+            now = datetime.now(tz=timezone.utc)
+            for job_id in job_ids:
+                job = self._jobs.get(job_id)
+                if job is not None:
+                    self._jobs[job_id] = job.model_copy(
+                        update={"refine_signal_state": state, "updated_at": now}
+                    )
+
     # =========================================================================
     # Admin-scope Query Methods
     # =========================================================================

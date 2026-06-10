@@ -29,6 +29,7 @@ class UserTable(Table, tablename="user"):
     search_preferences = JSON(null=True)  # Serialized LinkedInSearchParams
     filter_preferences = JSON(null=True)  # Serialized UserFilterPreferences
     model_preferences = JSON(null=True)  # Serialized UserModelPreferences
+    pending_refinement = JSON(null=True)  # Serialized RefinementProposal (single pending)
     created_at = Timestamptz(index=True)
     updated_at = Timestamptz()
 
@@ -77,6 +78,11 @@ class Job(Table):
     # Filter result (LLM job evaluation)
     filter_result = JSON(null=True)
 
+    # Auto-refinement signal capture (decline/override reasons + lifecycle).
+    decline_reason = Text(null=True)
+    override_reason = Text(null=True)
+    refine_signal_state = Varchar(length=20, null=True)  # pending | proposed | consumed
+
     # Error tracking
     error_message = Text(null=True)
 
@@ -122,3 +128,21 @@ class CVAttemptTable(Table, tablename="cv_attempt"):
 
     # Timestamp
     created_at = Timestamptz()
+
+
+class NotificationTable(Table, tablename="notification"):
+    """Piccolo ORM model for persistent, user-scoped notifications.
+
+    The "persistent" tier of the notification system — survives navigation and
+    reload until the user marks it read. Ephemeral confirmations remain
+    client-only toasts and are not stored here.
+    """
+
+    id = Varchar(length=36, primary_key=True)  # UUID
+    user_id = Varchar(length=36, index=True)
+    type = Varchar(length=40)  # e.g. "filter_refinement"
+    title = Varchar(length=200)
+    body = Text(null=True)
+    action_url = Varchar(length=300, null=True)  # e.g. "/settings#filter"
+    read = Boolean(default=False, index=True)
+    created_at = Timestamptz(index=True)

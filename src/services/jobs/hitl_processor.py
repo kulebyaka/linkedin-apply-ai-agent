@@ -108,7 +108,7 @@ class HITLProcessor:
             if decision.decision == "approved":
                 return await self._handle_approve(job_id)
             elif decision.decision == "declined":
-                return await self._handle_decline(job_id)
+                return await self._handle_decline(job_id, decision, job_record)
             elif decision.decision == "retry":
                 return await self._handle_retry(
                     job_id, job_record, decision.feedback, user_id
@@ -214,9 +214,24 @@ class HITLProcessor:
             message="Job approved. Application workflow not yet implemented.",
         )
 
-    async def _handle_decline(self, job_id: str) -> HITLDecisionResponse:
+    async def _handle_decline(
+        self, job_id: str, decision: HITLDecision, job_record
+    ) -> HITLDecisionResponse:
         logger.info("Job %s declined by user", job_id)
-        await self._ctx.repository.update(job_id, {"status": BusinessState.DECLINED})
+
+        updates: dict = {"status": BusinessState.DECLINED}
+
+        # Capture a false-positive signal for the auto-refiner: a job the filter
+        # passed (no filter_result, or scored above reject) that the user still
+        # declined. Only count it when the user gave a reason, to keep proposals
+        # grounded. Reuses HITLDecision.reasoning as the decline reason.
+        reason = (decision.reasoning or "").strip()
+        if reason:
+            updates["decline_reason"] = reason
+            updates["refine_signal_state"] = "pending"
+            logger.info("Captured decline-with-reason refine signal for job %s", job_id)
+
+        await self._ctx.repository.update(job_id, updates)
 
         return HITLDecisionResponse(
             job_id=job_id,

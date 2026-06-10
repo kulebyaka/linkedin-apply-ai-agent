@@ -1,3 +1,5 @@
+import type { UserFilterPreferences } from '$lib/types/index';
+
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
 
 export type UserRole = 'trial' | 'premium' | 'admin';
@@ -9,6 +11,7 @@ export interface User {
 	role: UserRole;
 	master_cv_json: Record<string, unknown> | null;
 	search_preferences: UserSearchPreferences | null;
+	filter_preferences: UserFilterPreferences | null;
 	model_preferences: UserModelPreferences | null;
 	created_at: string;
 	updated_at: string;

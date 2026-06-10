@@ -25,8 +25,10 @@ if TYPE_CHECKING:
     from src.services.jobs.hitl_processor import HITLProcessor
     from src.services.jobs.job_orchestrator import JobOrchestrator
     from src.services.jobs.job_queue import ConsumerManager, JobQueue
+    from src.services.jobs.refinement_scheduler import RefinementScheduler
     from src.services.jobs.scheduler import LinkedInSearchScheduler
     from src.services.linkedin.browser_automation import LinkedInAutomation
+    from src.services.notifications.notification_repository import NotificationRepository
 
 from src.config.settings import Settings, get_settings
 
@@ -52,6 +54,8 @@ class AppContext:
     admin_alert_service: AdminAlertService | None = None
     job_queue: JobQueue | None = None
     scheduler: LinkedInSearchScheduler | None = None
+    refinement_scheduler: RefinementScheduler | None = None
+    notification_repository: NotificationRepository | None = None
     browser: LinkedInAutomation | None = None
     orchestrator: JobOrchestrator | None = None
     hitl_processor: HITLProcessor | None = None
@@ -134,6 +138,7 @@ def create_app_context(
     from src.services.jobs.hitl_processor import HITLProcessor
     from src.services.jobs.job_orchestrator import JobOrchestrator
     from src.services.jobs.job_queue import ConsumerManager, JobQueue
+    from src.services.notifications.notification_repository import NotificationRepository
 
     if settings is None:
         settings = get_settings()
@@ -164,6 +169,7 @@ def create_app_context(
         auth_service=auth_service,
         admin_alert_service=admin_alert_service,
         job_queue=job_queue,
+        notification_repository=NotificationRepository(),
         cv_extraction_registry=CVExtractionRegistry(),
         consumer_manager=ConsumerManager(),
     )

@@ -315,6 +315,33 @@ async def admin_run_scheduler(
     return {"status": "started", "user_id": user_id}
 
 
+@router.post("/api/admin/scheduler/refine/{user_id}")
+async def admin_run_refinement(
+    user_id: str, request: Request, admin: AdminUser
+) -> dict:
+    """Manually fire a filter-refinement cycle for the given user.
+
+    Runs inline (a single LLM call) and reports whether a proposal was created.
+    """
+    ctx = get_ctx(request)
+    if ctx.user_repository is None:
+        raise HTTPException(500, "User repository not initialized")
+
+    target_user = await ctx.user_repository.get_by_id(user_id)
+    if target_user is None:
+        raise HTTPException(404, f"User {user_id} not found")
+
+    from src.services.jobs.refinement import run_refinement_cycle
+
+    proposal = await run_refinement_cycle(ctx, target_user)
+    return {
+        "user_id": user_id,
+        "proposal_created": proposal is not None,
+        "decline_count": proposal.decline_count if proposal else 0,
+        "override_count": proposal.override_count if proposal else 0,
+    }
+
+
 @router.get("/api/admin/errors")
 async def admin_list_errors(
     request: Request,

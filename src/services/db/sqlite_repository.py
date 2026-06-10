@@ -40,7 +40,13 @@ class SQLiteJobRepository(SQLiteAdminQueriesMixin, JobRepository):
         """Initialize database (create tables + apply migrations)."""
         from piccolo.engine.sqlite import SQLiteEngine
 
-        from .tables import CVAttemptTable, Job, MagicLinkTable, UserTable
+        from .tables import (
+            CVAttemptTable,
+            Job,
+            MagicLinkTable,
+            NotificationTable,
+            UserTable,
+        )
 
         db_dir = Path(self.db_path).parent
         db_dir.mkdir(parents=True, exist_ok=True)
@@ -51,12 +57,14 @@ class SQLiteJobRepository(SQLiteAdminQueriesMixin, JobRepository):
         CVAttemptTable._meta._db = self._engine
         UserTable._meta._db = self._engine
         MagicLinkTable._meta._db = self._engine
+        NotificationTable._meta._db = self._engine
 
         try:
             await UserTable.create_table(if_not_exists=True).run()
             await MagicLinkTable.create_table(if_not_exists=True).run()
             await Job.create_table(if_not_exists=True).run()
             await CVAttemptTable.create_table(if_not_exists=True).run()
+            await NotificationTable.create_table(if_not_exists=True).run()
 
             await apply_migrations(self._engine)
 
@@ -94,6 +102,9 @@ class SQLiteJobRepository(SQLiteAdminQueriesMixin, JobRepository):
             "current_pdf_path": job.current_pdf_path,
             "application_url": job.application_url,
             "filter_result": job.filter_result,
+            "decline_reason": job.decline_reason,
+            "override_reason": job.override_reason,
+            "refine_signal_state": job.refine_signal_state,
             "error_message": job.error_message,
             "scrape_attempts": job.scrape_attempts,
             "last_scrape_error": job.last_scrape_error,
@@ -137,6 +148,9 @@ class SQLiteJobRepository(SQLiteAdminQueriesMixin, JobRepository):
             current_pdf_path=row.get("current_pdf_path"),
             application_url=row.get("application_url"),
             filter_result=self._parse_json_field(row.get("filter_result")),
+            decline_reason=row.get("decline_reason"),
+            override_reason=row.get("override_reason"),
+            refine_signal_state=row.get("refine_signal_state"),
             error_message=row.get("error_message"),
             scrape_attempts=row.get("scrape_attempts") or 0,
             last_scrape_error=row.get("last_scrape_error"),
@@ -456,6 +470,43 @@ class SQLiteJobRepository(SQLiteAdminQueriesMixin, JobRepository):
             await conn.close()
 
         return {row["status"]: row["n"] for row in rows if row["status"]}
+
+    # =========================================================================
+    # Auto-Refinement Signal Methods
+    # =========================================================================
+
+    async def list_refine_signals(
+        self, user_id: str, state: str, limit: int = 50
+    ) -> list[JobRecord]:
+        self._ensure_initialized()
+        from .tables import Job
+
+        rows = (
+            await Job.select()
+            .where(Job.user_id == user_id)
+            .where(Job.refine_signal_state == state)
+            .order_by(Job.updated_at, ascending=False)
+            .limit(limit)
+            .run()
+        )
+        return [self._row_to_job_record(row) for row in rows]
+
+    async def mark_refine_signals(self, job_ids: list[str], state: str) -> None:
+        self._ensure_initialized()
+        from .tables import Job
+
+        if not job_ids:
+            return
+        await (
+            Job.update(
+                {
+                    Job.refine_signal_state: state,
+                    Job.updated_at: datetime.now(tz=timezone.utc),
+                }
+            )
+            .where(Job.job_id.is_in(job_ids))
+            .run()
+        )
 
     # =========================================================================
     # CV Attempt Methods

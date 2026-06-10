@@ -58,7 +58,11 @@
 		decision: 'approved' | 'declined' | 'retry',
 		feedback?: string
 	) {
-		const result = await reviewQueue.submitDecision(decision, feedback);
+		// For declines, the modal text is an optional reason captured as
+		// `reasoning` (feeds the auto-refiner); for retries it's the CV feedback.
+		const reasoning = decision === 'declined' ? feedback : undefined;
+		const retryFeedback = decision === 'retry' ? feedback : undefined;
+		const result = await reviewQueue.submitDecision(decision, retryFeedback, reasoning);
 		if (result) {
 			showToastMessage(
 				decision === 'approved'

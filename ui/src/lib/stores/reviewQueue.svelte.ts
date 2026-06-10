@@ -71,7 +71,8 @@ async function refreshStats(): Promise<void> {
 
 async function submitDecision(
 	decision: Decision,
-	feedback?: string
+	feedback?: string,
+	reasoning?: string
 ): Promise<DecisionResponse | null> {
 	const job = pendingJobs[currentIndex];
 	if (!job) return null;
@@ -79,7 +80,7 @@ async function submitDecision(
 	isSubmitting = true;
 	error = null;
 	try {
-		const result = await apiSubmitDecision(job.job_id, decision, feedback);
+		const result = await apiSubmitDecision(job.job_id, decision, feedback, reasoning);
 
 		// Remove job from queue
 		const jobId = job.job_id;

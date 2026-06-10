@@ -190,7 +190,7 @@ class JobOrchestrator:
         )
 
     async def proceed_filtered_out(
-        self, job_id: str, user_id: str
+        self, job_id: str, user_id: str, override_reason: str | None = None
     ) -> JobSubmitResponse:
         """Override the job filter for a single filtered-out job.
 
@@ -224,9 +224,15 @@ class JobOrchestrator:
             raise RuntimeError("workflow_dispatcher not initialized on AppContext")
 
         # FILTERED_OUT → PROCESSING; extract_job_node will keep it PROCESSING.
-        await self._ctx.repository.update(
-            job_id, {"status": BusinessState.PROCESSING}
-        )
+        # Capture a false-negative signal for the auto-refiner when the user
+        # explains why the filter was wrong (only reasons become signals).
+        proceed_updates: dict = {"status": BusinessState.PROCESSING}
+        reason = (override_reason or "").strip()
+        if reason:
+            proceed_updates["override_reason"] = reason
+            proceed_updates["refine_signal_state"] = "pending"
+            logger.info("Captured override-with-reason refine signal for job %s", job_id)
+        await self._ctx.repository.update(job_id, proceed_updates)
 
         try:
             thread_id = str(uuid.uuid4())

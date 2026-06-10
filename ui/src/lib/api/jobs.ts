@@ -66,9 +66,14 @@ export interface ProceedResponse {
  * Override the job filter for a filtered-out job ("Proceed Anyway").
  * Re-runs CV generation so the job enters the HITL review queue.
  */
-export async function proceedAnyway(jobId: string): Promise<ProceedResponse> {
+export async function proceedAnyway(
+	jobId: string,
+	overrideReason?: string
+): Promise<ProceedResponse> {
 	const response = await fetch(`${API_BASE}/api/jobs/${jobId}/proceed`, {
 		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ override_reason: overrideReason || null }),
 		credentials: 'include',
 	});
 	return handle<ProceedResponse>(response, 'Proceed with job');

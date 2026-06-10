@@ -9,6 +9,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse
+from pydantic import BaseModel, Field
 
 from src.api.deps import (
     CurrentUser,
@@ -328,9 +329,22 @@ async def get_job_status(
         raise HTTPException(500, "Failed to get job status") from None
 
 
+class ProceedRequest(BaseModel):
+    """Optional body for the 'Proceed Anyway' override.
+
+    A reason (why the filter was wrong) is captured as a false-negative signal
+    for the auto-refiner when present.
+    """
+
+    override_reason: str | None = Field(None, max_length=2000)
+
+
 @router.post("/api/jobs/{job_id}/proceed", response_model=JobSubmitResponse)
 async def proceed_filtered_out_job(
-    job_id: str, request: Request, user: CurrentUser
+    job_id: str,
+    request: Request,
+    user: CurrentUser,
+    body: ProceedRequest | None = None,
 ) -> JobSubmitResponse:
     """Override the filter for a filtered-out job ("Proceed Anyway").
 
@@ -339,7 +353,10 @@ async def proceed_filtered_out_job(
     """
     try:
         orchestrator = get_orchestrator(request)
-        return await orchestrator.proceed_filtered_out(job_id, user.id)
+        override_reason = body.override_reason if body else None
+        return await orchestrator.proceed_filtered_out(
+            job_id, user.id, override_reason=override_reason
+        )
     except KeyError:
         raise HTTPException(404, f"Job {job_id} not found") from None
     except RuntimeError as e:

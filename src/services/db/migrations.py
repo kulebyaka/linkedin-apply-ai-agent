@@ -157,6 +157,22 @@ MIGRATIONS: tuple[Migration, ...] = (
         "add_job_session_authenticated",
         _add_column("job", "session_authenticated", "session_authenticated BOOLEAN NULL"),
     ),
+    Migration(
+        "add_job_decline_reason",
+        _add_column("job", "decline_reason", "decline_reason TEXT NULL"),
+    ),
+    Migration(
+        "add_job_override_reason",
+        _add_column("job", "override_reason", "override_reason TEXT NULL"),
+    ),
+    Migration(
+        "add_job_refine_signal_state",
+        _add_column("job", "refine_signal_state", "refine_signal_state VARCHAR(20) NULL"),
+    ),
+    Migration(
+        "add_user_pending_refinement",
+        _add_column("user", "pending_refinement", "pending_refinement JSON NULL"),
+    ),
 )
 
 

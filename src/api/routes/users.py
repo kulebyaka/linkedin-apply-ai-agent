@@ -7,10 +7,18 @@ import logging
 from typing import Annotated
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from pydantic import BaseModel
 
 from src.api.deps import CurrentUser, get_ctx
 from src.config.settings import get_settings
-from src.models.job_filter import GeneratePromptRequest, UserFilterPreferences
+from src.models.job_filter import (
+    GeneratePromptRequest,
+    RefinementProposal,
+    UserFilterPreferences,
+    apply_learned_block,
+    extract_learned_block,
+)
+from src.services.jobs.refinement import NOTIFICATION_TYPE
 from src.models.pdf_extraction import (
     CVExtractionStartResponse,
     CVExtractionStatusResponse,
@@ -245,6 +253,85 @@ async def update_filter_preferences(
     """Update current user's job filter preferences."""
     ctx = get_ctx(request)
     return await ctx.user_repository.update(user.id, {"filter_preferences": prefs})
+
+
+class RefinementView(BaseModel):
+    """The pending refinement proposal plus the current learned block."""
+
+    proposal: RefinementProposal | None = None
+    current_learned_block: str | None = None
+
+
+@router.get("/api/users/me/filter-preferences/refinement", response_model=RefinementView)
+async def get_filter_refinement(
+    request: Request,
+    user: CurrentUser,
+) -> RefinementView:
+    """Return the user's pending filter-refinement proposal (or null)."""
+    ctx = get_ctx(request)
+    proposal = await ctx.user_repository.get_pending_proposal(user.id)
+    current_block = None
+    if user.filter_preferences:
+        current_block = extract_learned_block(user.filter_preferences.custom_prompt)
+    return RefinementView(proposal=proposal, current_learned_block=current_block)
+
+
+async def _consume_proposal(ctx, user, proposal: RefinementProposal) -> None:
+    """Clear the proposal, consume its signals, and clear its notification."""
+    await ctx.user_repository.clear_pending_proposal(user.id)
+    try:
+        await ctx.repository.mark_refine_signals(proposal.signal_job_ids, "consumed")
+    except Exception:
+        logger.warning("Failed to mark refine signals consumed", exc_info=True)
+    if ctx.notification_repository is not None:
+        try:
+            await ctx.notification_repository.mark_read_by_type(user.id, NOTIFICATION_TYPE)
+        except Exception:
+            logger.warning("Failed to clear refinement notification", exc_info=True)
+
+
+@router.post("/api/users/me/filter-preferences/refinement/accept", response_model=User)
+async def accept_filter_refinement(
+    request: Request,
+    user: CurrentUser,
+) -> User:
+    """Apply the proposed auto-learned block to ``custom_prompt`` and clear the proposal.
+
+    Only the delimited auto-learned region is rewritten; the user's hand-written
+    prompt is preserved verbatim.
+    """
+    ctx = get_ctx(request)
+    proposal = await ctx.user_repository.get_pending_proposal(user.id)
+    if proposal is None:
+        raise HTTPException(404, "No pending refinement proposal")
+
+    prefs = user.filter_preferences or UserFilterPreferences()
+    new_custom_prompt = apply_learned_block(
+        prefs.custom_prompt, proposal.proposed_learned_block
+    )
+    updated_prefs = prefs.model_copy(update={"custom_prompt": new_custom_prompt})
+
+    updated_user = await ctx.user_repository.update(
+        user.id, {"filter_preferences": updated_prefs}
+    )
+    await _consume_proposal(ctx, user, proposal)
+    logger.info("Filter refinement accepted for user %s", user.id)
+    return updated_user
+
+
+@router.post("/api/users/me/filter-preferences/refinement/reject")
+async def reject_filter_refinement(
+    request: Request,
+    user: CurrentUser,
+) -> dict:
+    """Discard the pending proposal without changing the filter prompt."""
+    ctx = get_ctx(request)
+    proposal = await ctx.user_repository.get_pending_proposal(user.id)
+    if proposal is None:
+        raise HTTPException(404, "No pending refinement proposal")
+    await _consume_proposal(ctx, user, proposal)
+    logger.info("Filter refinement rejected for user %s", user.id)
+    return {"status": "rejected"}
 
 
 @router.post("/api/users/me/filter-preferences/generate-prompt")
