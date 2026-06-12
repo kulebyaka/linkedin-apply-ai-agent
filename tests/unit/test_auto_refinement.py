@@ -419,3 +419,81 @@ async def test_refinement_creates_proposal_and_notification(user_repo, notif_rep
     notifs = await notif_repo.list_for_user(user.id)
     assert notifs[0].type == "filter_refinement"
     assert notifs[0].action_url == "/settings#filter"
+
+
+@pytest.mark.asyncio
+async def test_decline_on_override_job_does_not_capture_signal():
+    """A forced-through ("Proceed Anyway") job declined later is not a filter
+    false-positive: no decline signal is captured and the override signal is
+    left intact rather than reset to 'pending'."""
+    from src.services.jobs.hitl_processor import HITLProcessor
+    from src.models.unified import HITLDecision
+
+    repo = InMemoryJobRepository()
+    await repo.initialize()
+    await repo.create(
+        _job("o1", override_reason="genuinely remote", refine_signal_state="pending")
+    )
+
+    processor = HITLProcessor(_DeclineCtx(repo))
+    await processor.process_decision(
+        "o1", HITLDecision(decision="declined", reasoning="changed my mind"), "u1"
+    )
+    rec = await repo.get("o1")
+    assert rec.status == BusinessState.DECLINED
+    assert rec.decline_reason is None
+    assert rec.override_reason == "genuinely remote"
+    assert rec.refine_signal_state == "pending"  # untouched, not resurrected
+
+
+@pytest.mark.asyncio
+async def test_refinement_skips_when_proposal_pending(user_repo, notif_repo):
+    """An un-acknowledged proposal blocks a new cycle, so signals are neither
+    re-fed nor superseded and no duplicate notification is emitted."""
+    from src.config.settings import get_settings
+    from src.models.job_filter import RefinementProposal
+    from src.services.jobs import refinement
+
+    repo = InMemoryJobRepository()
+    await repo.initialize()
+    user = await user_repo.create_user("pending@example.com")
+    await user_repo.update(
+        user.id, {"filter_preferences": UserFilterPreferences(auto_refine_enabled=True)}
+    )
+    user = await user_repo.get_by_id(user.id)
+
+    await user_repo.set_pending_proposal(
+        user.id,
+        RefinementProposal(
+            proposed_learned_block="## Auto-learned criteria\n- x",
+            rationale="already pending",
+            signal_job_ids=[],
+        ),
+    )
+
+    # Even with enough fresh signals, the cycle must skip.
+    for i in range(10):
+        await repo.create(_job(f"p{i}", user_id=user.id))
+        await repo.update(f"p{i}", {
+            "status": BusinessState.DECLINED,
+            "decline_reason": "nope",
+            "refine_signal_state": "pending",
+        })
+
+    ctx = _Ctx(repo, user_repo, notif_repo, get_settings())
+    result = await refinement.run_refinement_cycle(ctx, user)
+
+    assert result is None
+    assert len(await repo.list_refine_signals(user.id, "pending")) == 10
+    assert await notif_repo.unread_count(user.id) == 0
+
+
+def test_apply_learned_block_strips_nested_markers():
+    """A proposed block that itself contains markers must not produce a nested
+    marker pair (which would corrupt later extract/replace)."""
+    poisoned = f"{AUTO_LEARNED_BEGIN}\n## Auto-learned criteria\n- x\n{AUTO_LEARNED_END}"
+    out = apply_learned_block("HAND", poisoned)
+    assert out.count(AUTO_LEARNED_BEGIN) == 1
+    assert out.count(AUTO_LEARNED_END) == 1
+    assert "HAND" in out
+    assert extract_learned_block(out) == "## Auto-learned criteria\n- x"

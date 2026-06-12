@@ -3,6 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { notifications } from '$lib/stores/notifications.svelte';
 	import type { Notification } from '$lib/api/notifications';
+	import { relativeTime } from '$lib/utils/time';
 
 	let open = $state(false);
 
@@ -31,18 +32,6 @@
 			close();
 			goto(n.action_url);
 		}
-	}
-
-	function relative(iso: string): string {
-		const then = new Date(iso).getTime();
-		const diff = Date.now() - then;
-		const mins = Math.floor(diff / 60000);
-		if (mins < 1) return 'just now';
-		if (mins < 60) return `${mins}m ago`;
-		const hours = Math.floor(mins / 60);
-		if (hours < 24) return `${hours}h ago`;
-		const days = Math.floor(hours / 24);
-		return `${days}d ago`;
 	}
 </script>
 
@@ -123,7 +112,7 @@
 										</p>
 									{/if}
 									<p class="mt-1 font-mono text-[10px] uppercase tracking-wider text-[var(--color-muted-foreground)]">
-										{relative(n.created_at)}{#if n.action_url} · view{/if}
+										{relativeTime(n.created_at)}{#if n.action_url} · view{/if}
 									</p>
 								</div>
 							</div>

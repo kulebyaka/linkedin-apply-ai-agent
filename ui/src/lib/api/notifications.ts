@@ -1,3 +1,5 @@
+import { handle } from './_http';
+
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
 
 export interface Notification {
@@ -9,14 +11,6 @@ export interface Notification {
 	action_url: string | null;
 	read: boolean;
 	created_at: string;
-}
-
-async function handle<T>(response: Response, action: string): Promise<T> {
-	if (!response.ok) {
-		const errorText = await response.text();
-		throw new Error(`${action} failed: ${response.statusText} - ${errorText}`);
-	}
-	return response.json();
 }
 
 export async function listNotifications(opts: { unreadOnly?: boolean; limit?: number } = {}): Promise<Notification[]> {

@@ -159,6 +159,10 @@ def apply_learned_block(custom_prompt: str | None, learned_block: str) -> str:
     The result always contains exactly one well-formed marker pair.
     """
     block = learned_block.strip()
+    # Defensively strip any markers the proposed block may already contain so we
+    # never emit a nested/duplicated marker pair, which would corrupt later
+    # extract/replace (find() locates the first marker only).
+    block = block.replace(AUTO_LEARNED_BEGIN, "").replace(AUTO_LEARNED_END, "").strip()
     delimited = f"{AUTO_LEARNED_BEGIN}\n{block}\n{AUTO_LEARNED_END}"
 
     base = custom_prompt or ""

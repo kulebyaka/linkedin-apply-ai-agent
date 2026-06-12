@@ -1,4 +1,5 @@
 import type { AdminJobRecord } from './admin';
+import { handle } from './_http';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
 
@@ -35,14 +36,6 @@ function buildQuery(filters: MyJobsFilters): string {
 	}
 	const qs = params.toString();
 	return qs ? `?${qs}` : '';
-}
-
-async function handle<T>(response: Response, action: string): Promise<T> {
-	if (!response.ok) {
-		const errorText = await response.text();
-		throw new Error(`${action} failed: ${response.statusText} - ${errorText}`);
-	}
-	return response.json();
 }
 
 /**
