@@ -173,6 +173,15 @@ class Settings(BaseSettings):
     pdf_cv_upload_max_pages: int = 20
 
     # -------------------------------------------------------------------------
+    # Easy Apply browser bridge  (same for everyone — defaults defined here)
+    # -------------------------------------------------------------------------
+    easy_apply_enabled: bool = True
+    apply_per_app_timeout_seconds: int = 180    # wall-clock budget for one application
+    apply_stuck_timeout_seconds: int = 120      # no-progress watchdog within an application
+    apply_rpc_timeout_seconds: int = 30         # per-RPC timeout over the WS bridge
+    apply_daily_limit_detection: bool = True    # stop (don't retry) on LinkedIn daily limit
+
+    # -------------------------------------------------------------------------
     # Authentication  (secrets + env-specific — set in .env)
     # -------------------------------------------------------------------------
     resend_api_key: str = ""

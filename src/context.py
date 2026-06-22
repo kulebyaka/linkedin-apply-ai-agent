@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
 
     from src.agents.dispatcher import WorkflowDispatcher
+    from src.bridge import SessionStore, WsRelay
     from src.services.alerts import AdminAlertService
     from src.services.auth.auth import AuthService
     from src.services.auth.magic_link_repository import MagicLinkRepository
@@ -62,6 +63,9 @@ class AppContext:
     cv_extraction_registry: CVExtractionRegistry | None = None
     consumer_manager: ConsumerManager | None = None
     workflow_dispatcher: WorkflowDispatcher | None = None
+    # Easy Apply browser bridge (extension WebSocket relay + session registry)
+    session_store: SessionStore | None = None
+    ws_relay: WsRelay | None = None
 
     # Lock for LinkedIn search/browser initialization (manual trigger path).
     linkedin_init_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
@@ -128,6 +132,7 @@ def create_app_context(
     from src.agents.dispatcher import WorkflowDispatcher
     from src.agents.preparation_workflow import create_preparation_workflow
     from src.agents.retry_workflow import create_retry_workflow
+    from src.bridge import SessionStore, WsRelay
     from src.services.alerts import AdminAlertService
     from src.services.auth.auth import AuthService
     from src.services.auth.magic_link_repository import MagicLinkRepository
@@ -158,6 +163,9 @@ def create_app_context(
     auth_service = AuthService(settings, user_repository, magic_link_repository)
     admin_alert_service = AdminAlertService(settings)
 
+    session_store = SessionStore()
+    ws_relay = WsRelay(session_store, auth_service)
+
     ctx = AppContext(
         repository=repository,
         settings=settings,
@@ -172,6 +180,8 @@ def create_app_context(
         notification_repository=NotificationRepository(),
         cv_extraction_registry=CVExtractionRegistry(),
         consumer_manager=ConsumerManager(),
+        session_store=session_store,
+        ws_relay=ws_relay,
     )
 
     # Wire domain services (they need the full context)

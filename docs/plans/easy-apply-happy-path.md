@@ -68,12 +68,12 @@ Triggering: HITL **approve** dispatches an apply; a new `user.auto_apply` flag l
 - Modify: `src/config/settings.py`
 - Modify: `src/context.py`
 
-- [ ] `settings.py`: add `easy_apply_enabled: bool = True`, `apply_per_app_timeout_seconds: int = 180`, `apply_stuck_timeout_seconds: int = 120`, `apply_rpc_timeout_seconds: int = 30`, `apply_daily_limit_detection: bool = True`.
-- [ ] `session_store.py`: `class SessionStore` — in-memory registry mapping `user_id → WebSocket` (one active session per user; newest wins). Methods: `register(user_id, ws)`, `unregister(user_id)`, `is_connected(user_id) -> bool`, `get(user_id) -> WebSocket | None`. Guard with `asyncio.Lock`.
-- [ ] `ws_relay.py`: `class WsRelay` wrapping a `SessionStore`. `async def handle_connection(ws)`: accept, require first frame `{"type":"auth","token":...}`, validate via `auth_service` JWT decode (reuse existing decode used by `get_current_user`); on success bind `user_id`, send `{"type":"ready"}`, register session; then loop receiving frames and resolving pending RPC futures by `id`. `async def send_rpc(user_id, method, params, timeout) -> dict`: assign correlation `id`, send `{"type":"rpc","id","method","params"}`, await a `Future` resolved by the receive loop, raise `BridgeTimeout`/`BridgeDisconnected` on failure. Unregister on disconnect and fail all pending futures.
-- [ ] `context.py`: construct `SessionStore` + `WsRelay` in `create_app_context()`, expose as `ctx.session_store` / `ctx.ws_relay`.
-- [ ] Write unit tests with a fake WebSocket: auth accept/reject (bad JWT), `is_connected` lifecycle, `send_rpc` correlation + result resolution, timeout, and disconnect failing pending futures.
-- [ ] Run project test suite - must pass before task 3.
+- [x] `settings.py`: add `easy_apply_enabled: bool = True`, `apply_per_app_timeout_seconds: int = 180`, `apply_stuck_timeout_seconds: int = 120`, `apply_rpc_timeout_seconds: int = 30`, `apply_daily_limit_detection: bool = True`.
+- [x] `session_store.py`: `class SessionStore` — in-memory registry mapping `user_id → WebSocket` (one active session per user; newest wins). Methods: `register(user_id, ws)`, `unregister(user_id)`, `is_connected(user_id) -> bool`, `get(user_id) -> WebSocket | None`. Guard with `asyncio.Lock`.
+- [x] `ws_relay.py`: `class WsRelay` wrapping a `SessionStore`. `async def handle_connection(ws)`: accept, require first frame `{"type":"auth","token":...}`, validate via `auth_service` JWT decode (reuse existing decode used by `get_current_user`); on success bind `user_id`, send `{"type":"ready"}`, register session; then loop receiving frames and resolving pending RPC futures by `id`. `async def send_rpc(user_id, method, params, timeout) -> dict`: assign correlation `id`, send `{"type":"rpc","id","method","params"}`, await a `Future` resolved by the receive loop, raise `BridgeTimeout`/`BridgeDisconnected` on failure. Unregister on disconnect and fail all pending futures.
+- [x] `context.py`: construct `SessionStore` + `WsRelay` in `create_app_context()`, expose as `ctx.session_store` / `ctx.ws_relay`.
+- [x] Write unit tests with a fake WebSocket: auth accept/reject (bad JWT), `is_connected` lifecycle, `send_rpc` correlation + result resolution, timeout, and disconnect failing pending futures.
+- [x] Run project test suite - must pass before task 3.
 
 ### Task 3: Chrome MV3 extension (actuator) + extension-auth route
 
