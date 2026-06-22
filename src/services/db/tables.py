@@ -30,6 +30,8 @@ class UserTable(Table, tablename="user"):
     filter_preferences = JSON(null=True)  # Serialized UserFilterPreferences
     model_preferences = JSON(null=True)  # Serialized UserModelPreferences
     pending_refinement = JSON(null=True)  # Serialized RefinementProposal (single pending)
+    apply_profile = JSON(null=True)  # Serialized ApplyProfile (Easy Apply screening answers)
+    auto_apply = Boolean(default=False)  # Skip HITL: apply directly to filtered-in jobs
     created_at = Timestamptz(index=True)
     updated_at = Timestamptz()
 

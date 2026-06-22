@@ -14,7 +14,13 @@ import logging
 from datetime import datetime, timezone
 
 from src.models.job_filter import UserFilterPreferences
-from src.models.user import User, UserModelPreferences, UserRole, UserSearchPreferences
+from src.models.user import (
+    ApplyProfile,
+    User,
+    UserModelPreferences,
+    UserRole,
+    UserSearchPreferences,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +131,7 @@ class UserRepository:
         """Update a user's profile fields.
 
         Supports display_name, master_cv_json, search_preferences,
-        filter_preferences, model_preferences.
+        filter_preferences, model_preferences, apply_profile, auto_apply.
 
         Raises KeyError if the user is missing.
         """
@@ -161,6 +167,16 @@ class UserRepository:
                 db_updates["model_preferences"] = mprefs.model_dump()
             else:
                 db_updates["model_preferences"] = mprefs
+
+        if "apply_profile" in updates:
+            aprofile = updates["apply_profile"]
+            if isinstance(aprofile, ApplyProfile):
+                db_updates["apply_profile"] = aprofile.model_dump()
+            else:
+                db_updates["apply_profile"] = aprofile
+
+        if "auto_apply" in updates and updates["auto_apply"] is not None:
+            db_updates["auto_apply"] = bool(updates["auto_apply"])
 
         await UserTable.update(db_updates).where(UserTable.id == user_id).run()
 
@@ -358,6 +374,11 @@ class UserRepository:
             else None
         )
 
+        apply_profile_raw = self._parse_json_field(row.get("apply_profile"))
+        apply_profile = (
+            ApplyProfile(**apply_profile_raw) if apply_profile_raw else None
+        )
+
         cv_json = self._parse_json_field(row.get("master_cv_json"))
 
         created_at = row.get("created_at")
@@ -392,6 +413,8 @@ class UserRepository:
             search_preferences=search_prefs,
             filter_preferences=filter_prefs,
             model_preferences=model_prefs,
+            apply_profile=apply_profile,
+            auto_apply=bool(row.get("auto_apply") or False),
             created_at=created_at or datetime.now(tz=timezone.utc),
             updated_at=updated_at or datetime.now(tz=timezone.utc),
         )

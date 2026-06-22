@@ -68,6 +68,8 @@ class TestValidTransitions:
             (BusinessState.QUEUED, BusinessState.PROCESSING),
             (BusinessState.QUEUED, BusinessState.COMPLETED),
             (BusinessState.QUEUED, BusinessState.PENDING),
+            (BusinessState.QUEUED, BusinessState.APPROVED),  # auto_apply path
+            (BusinessState.PROCESSING, BusinessState.APPROVED),  # auto_apply path
             (BusinessState.QUEUED, BusinessState.FAILED),
             (BusinessState.PROCESSING, BusinessState.COMPLETED),
             (BusinessState.PROCESSING, BusinessState.PENDING),
@@ -115,7 +117,6 @@ class TestInvalidTransitions:
             (BusinessState.PROCESSING, BusinessState.QUEUED),
             # Skip-ahead transitions
             (BusinessState.QUEUED, BusinessState.APPLIED),
-            (BusinessState.QUEUED, BusinessState.APPROVED),
             (BusinessState.PENDING, BusinessState.APPLIED),
             # Failed can only go to retrying or queued (admin retry)
             (BusinessState.FAILED, BusinessState.APPROVED),

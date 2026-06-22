@@ -49,15 +49,15 @@ Triggering: HITL **approve** dispatches an apply; a new `user.auto_apply` flag l
 - Modify: `src/services/db/tables.py`
 - Modify: `src/services/auth/user_repository.py`
 
-- [ ] In `src/models/user.py` add `class ApplyProfile(BaseModel)` with fields: `phone_country_code: str | None`, `years_experience: int | None`, `expected_salary: str | None`, `needs_visa_sponsorship: bool | None`, `legally_authorized: bool | None`, `willing_to_relocate: bool | None`, `drivers_license: bool | None` (all optional; absence = "unknown" → abort path).
-- [ ] Add `apply_profile: ApplyProfile | None = None` and `auto_apply: bool = False` to `User`; add the same two optional fields to `UserUpdateRequest`.
-- [ ] Add `ApplyProfile.is_complete_for(required_kinds: set[str]) -> bool` helper used by the classifier/abort logic.
-- [ ] In `src/models/state_machine.py` add `BusinessState.MANUAL_REQUIRED = "manual_required"` (terminal) and `BusinessState.NEEDS_EXTENSION = "needs_extension"` (recoverable).
-- [ ] Update `ALLOWED_TRANSITIONS`: `APPROVED` → add `NEEDS_EXTENSION`, `MANUAL_REQUIRED`; `APPLYING` → add `MANUAL_REQUIRED`; add `NEEDS_EXTENSION: {APPLYING, FAILED}`; add `MANUAL_REQUIRED: set()`; add `APPROVED` to the target sets of `QUEUED` and `PROCESSING` (for the `auto_apply` save path).
-- [ ] In `src/services/db/tables.py` add `apply_profile = JSON(null=True)` and `auto_apply = Boolean(default=False)` to `UserTable`.
-- [ ] In `user_repository.py` `initialize()`: runtime-migrate both columns (mirror the `role`/`filter_preferences` `ALTER TABLE ... ADD COLUMN` guards); in `update()` map `apply_profile` (`.model_dump()`) and `auto_apply`; in `_row_to_user` parse them back (`_parse_json_field`).
-- [ ] Write unit tests: `ApplyProfile` round-trip, `is_complete_for`, new transition validity (`APPROVED→NEEDS_EXTENSION`, `NEEDS_EXTENSION→APPLYING`, illegal `MANUAL_REQUIRED→APPLYING` raises), repository save/load of `apply_profile`+`auto_apply` incl. the runtime migration on a column-less DB.
-- [ ] Run project test suite - must pass before task 2.
+- [x] In `src/models/user.py` add `class ApplyProfile(BaseModel)` with fields: `phone_country_code: str | None`, `years_experience: int | None`, `expected_salary: str | None`, `needs_visa_sponsorship: bool | None`, `legally_authorized: bool | None`, `willing_to_relocate: bool | None`, `drivers_license: bool | None` (all optional; absence = "unknown" → abort path).
+- [x] Add `apply_profile: ApplyProfile | None = None` and `auto_apply: bool = False` to `User`; add the same two optional fields to `UserUpdateRequest`.
+- [x] Add `ApplyProfile.is_complete_for(required_kinds: set[str]) -> bool` helper used by the classifier/abort logic.
+- [x] In `src/models/state_machine.py` add `BusinessState.MANUAL_REQUIRED = "manual_required"` (terminal) and `BusinessState.NEEDS_EXTENSION = "needs_extension"` (recoverable).
+- [x] Update `ALLOWED_TRANSITIONS`: `APPROVED` → add `NEEDS_EXTENSION`, `MANUAL_REQUIRED`; `APPLYING` → add `MANUAL_REQUIRED`; add `NEEDS_EXTENSION: {APPLYING, FAILED}`; add `MANUAL_REQUIRED: set()`; add `APPROVED` to the target sets of `QUEUED` and `PROCESSING` (for the `auto_apply` save path).
+- [x] In `src/services/db/tables.py` add `apply_profile = JSON(null=True)` and `auto_apply = Boolean(default=False)` to `UserTable`.
+- [x] In `user_repository.py` `initialize()`: runtime-migrate both columns (added `add_user_apply_profile` + `add_user_auto_apply` migrations to `src/services/db/migrations.py`, the repo's actual runtime-migration mechanism); in `update()` map `apply_profile` (`.model_dump()`) and `auto_apply`; in `_row_to_user` parse them back (`_parse_json_field`).
+- [x] Write unit tests: `ApplyProfile` round-trip, `is_complete_for`, new transition validity (`APPROVED→NEEDS_EXTENSION`, `NEEDS_EXTENSION→APPLYING`, illegal `MANUAL_REQUIRED→APPLYING` raises), repository save/load of `apply_profile`+`auto_apply` incl. the runtime migration on a column-less DB.
+- [x] Run project test suite - must pass before task 2.
 
 ### Task 2: WebSocket bridge — relay + session store
 

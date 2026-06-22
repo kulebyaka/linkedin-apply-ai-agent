@@ -173,6 +173,14 @@ MIGRATIONS: tuple[Migration, ...] = (
         "add_user_pending_refinement",
         _add_column("user", "pending_refinement", "pending_refinement JSON NULL"),
     ),
+    Migration(
+        "add_user_apply_profile",
+        _add_column("user", "apply_profile", "apply_profile JSON NULL"),
+    ),
+    Migration(
+        "add_user_auto_apply",
+        _add_column("user", "auto_apply", "auto_apply BOOLEAN NOT NULL DEFAULT 0"),
+    ),
 )
 
 
