@@ -136,16 +136,16 @@ Triggering: HITL **approve** dispatches an apply; a new `user.auto_apply` flag l
 - Modify: `src/agents/dispatcher.py`
 - Modify: `src/context.py`
 
-- [ ] `application_workflow.py`: build a LangGraph mirroring ARCHITECTURE §4 (deterministic, no LLM). State `ApplyWorkflowState` (job_id, user_id, job_url, pdf_path, apply_profile, contact_info). Nodes/edges:
-  - `open_easy_apply` → RPC navigate + click Easy Apply (handle safety-reminder modal `:665-687`); verify modal opened.
-  - `fill_step` (loop, max 10 steps `:778`): `read_form_state` → if `unknown_fields` non-empty → `discard` + `manual_required`; else `fill_field` for each `fill_plan`; `advance_step`; on validation `errors` it can't fix → `discard` + `manual_required`; on Submit-present → `submit`.
+- [x] `application_workflow.py`: build a LangGraph mirroring ARCHITECTURE §4 (deterministic, no LLM). State `ApplyWorkflowState` (job_id, user_id, job_url, pdf_path, apply_profile, contact_info). Nodes/edges:
+  - `open_easy_apply` → RPC navigate + click Easy Apply (handle safety-reminder modal `:665-687`); verify modal opened. (Added `ApplyBridge.open_easy_apply`.)
+  - `fill_step` (loop, max 10 steps `:778`): `read_form_state` → if `unknown_fields` non-empty → `discard` + `manual_required`; else `upload_file` for skipped file inputs + `fill_field` for each `fill_plan`; `advance_step`; on validation `errors` it can't fix → `discard` + `manual_required`; on Submit-present → `submit`.
   - `submit` → `submit_form`; `confirmed` → `applied`; else `failed`.
-  - Cross-cutting: per-app wall-clock timeout (`apply_per_app_timeout_seconds`) → discard+fail; daily-limit flag → stop + record (do not retry); `BridgeDisconnected` → `needs_extension`.
-  - Terminal writes: `APPLIED` (+ `application_url`, store confirmation screenshot path), `MANUAL_REQUIRED` (+ reason), `NEEDS_EXTENSION`, `FAILED` (+ error). Persist via repository, respecting `ALLOWED_TRANSITIONS`.
-- [ ] `dispatcher.py`: add `dispatch_application(*, job_id, thread_id, initial_state, user_id)` mirroring `dispatch_retry` (track on AppContext, FAILED on exception respecting transitions).
-- [ ] `context.py`: compile the apply workflow once, expose `ctx.apply_workflow`; wire `dispatch_application` into `WorkflowDispatcher`.
-- [ ] Write unit tests with a stubbed `ApplyBridge`: happy path 3-step form → `APPLIED`; unknown field → `MANUAL_REQUIRED` + discard called; daily-limit → stops without submit; disconnect → `NEEDS_EXTENSION`; per-app timeout → `FAILED`.
-- [ ] Run project test suite - must pass before task 7.
+  - Cross-cutting: per-app wall-clock timeout (`apply_per_app_timeout_seconds`) → discard+fail; daily-limit flag → stop + record (do not retry); `BridgeDisconnected`/`ExtensionUnavailable` → `needs_extension` (added `APPLYING→NEEDS_EXTENSION` transition for mid-apply drops).
+  - Terminal writes: `APPLIED` (+ `application_url`, confirmation screenshot saved to disk), `MANUAL_REQUIRED` (+ reason), `NEEDS_EXTENSION`, `FAILED` (+ error). Persist via repository in `finalize`, respecting `ALLOWED_TRANSITIONS`. (Note: no `from __future__ import annotations` — LangGraph's runtime config-param inspection needs the real annotation.)
+- [x] `dispatcher.py`: add `dispatch_application(*, job_id, thread_id, initial_state, user_id)` mirroring `dispatch_retry` (track on AppContext, FAILED on exception respecting transitions).
+- [x] `context.py`: compile the apply workflow once, expose `ctx.apply_workflow`; wire `dispatch_application` into `WorkflowDispatcher`.
+- [x] Write unit tests with a stubbed `ApplyBridge`: happy path 3-step form → `APPLIED`; unknown field → `MANUAL_REQUIRED` + discard called; daily-limit → stops without submit; disconnect → `NEEDS_EXTENSION`; per-app timeout → `FAILED`.
+- [x] Run project test suite - must pass before task 7.
 
 ### Task 7: Triggers — HITL approve, auto_apply branch, API surface
 

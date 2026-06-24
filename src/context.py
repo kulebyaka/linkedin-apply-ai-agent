@@ -49,6 +49,7 @@ class AppContext:
     settings: Settings
     prep_workflow: CompiledStateGraph
     retry_workflow: CompiledStateGraph
+    apply_workflow: CompiledStateGraph | None = None
     user_repository: UserRepository | None = None
     magic_link_repository: MagicLinkRepository | None = None
     user_service: UserService | None = None
@@ -131,6 +132,7 @@ def create_app_context(
     Returns:
         AppContext with repository, workflows, and queue wired up.
     """
+    from src.agents.application_workflow import create_application_workflow
     from src.agents.dispatcher import WorkflowDispatcher
     from src.agents.preparation_workflow import create_preparation_workflow
     from src.agents.retry_workflow import create_retry_workflow
@@ -158,6 +160,7 @@ def create_app_context(
 
     prep_workflow = create_preparation_workflow()  # type: ignore[arg-type]
     retry_workflow = create_retry_workflow()  # type: ignore[arg-type]
+    apply_workflow = create_application_workflow()  # type: ignore[arg-type]
     job_queue = JobQueue()
 
     user_repository = UserRepository()
@@ -175,6 +178,7 @@ def create_app_context(
         settings=settings,
         prep_workflow=prep_workflow,
         retry_workflow=retry_workflow,
+        apply_workflow=apply_workflow,
         user_repository=user_repository,
         magic_link_repository=magic_link_repository,
         user_service=user_service,

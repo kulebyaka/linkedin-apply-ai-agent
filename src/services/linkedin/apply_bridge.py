@@ -238,6 +238,19 @@ class ApplyBridge:
         logger.info("Discarding Easy Apply for user %s: %s", user_id, reason or "(no reason)")
         return await self._rpc_best_effort(user_id, "discard_application")
 
+    async def open_easy_apply(self, user_id: str, job_url: str | None = None) -> bool:
+        """Navigate to the job (if given) and click Easy Apply.
+
+        The content script handles the LinkedIn safety-reminder dialog
+        ("Continue applying", AutoApplyMax :665-687) and reports whether the
+        Easy Apply modal became visible. Returns True only when the modal
+        actually opened so the workflow can fail fast otherwise.
+        """
+        if job_url:
+            await self._rpc_best_effort(user_id, "navigate", {"url": job_url})
+        result = await self._rpc_result(user_id, "open_easy_apply")
+        return bool(result.get("opened"))
+
     # ------------------------------------------------------------------ #
     # Internals
     # ------------------------------------------------------------------ #

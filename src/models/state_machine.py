@@ -119,6 +119,8 @@ ALLOWED_TRANSITIONS: dict[BusinessState, set[BusinessState]] = {
         BusinessState.APPLIED,
         BusinessState.FAILED,
         BusinessState.MANUAL_REQUIRED,
+        # Extension dropped mid-apply — recoverable; user re-triggers once reconnected.
+        BusinessState.NEEDS_EXTENSION,
     },
     BusinessState.APPLIED: set(),  # Terminal
     BusinessState.FAILED: {

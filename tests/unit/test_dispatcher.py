@@ -26,7 +26,10 @@ TEST_JOB_ID = "job-1"
 TEST_THREAD_ID = "thread-1"
 
 
-def _make_ctx(*, prep_result=None, prep_exc=None, retry_result=None, retry_exc=None):
+def _make_ctx(
+    *, prep_result=None, prep_exc=None, retry_result=None, retry_exc=None,
+    apply_result=None, apply_exc=None,
+):
     """Build an AppContext with mock workflows + repository.
 
     Either ``prep_result`` (success) or ``prep_exc`` (failure) must be set
@@ -50,11 +53,20 @@ def _make_ctx(*, prep_result=None, prep_exc=None, retry_result=None, retry_exc=N
             return_value=retry_result or {"current_step": "pending"}
         )
 
+    apply_workflow = MagicMock()
+    if apply_exc is not None:
+        apply_workflow.ainvoke = AsyncMock(side_effect=apply_exc)
+    else:
+        apply_workflow.ainvoke = AsyncMock(
+            return_value=apply_result or {"current_step": "applied"}
+        )
+
     ctx = AppContext(
         repository=repo,
         settings=MagicMock(),
         prep_workflow=prep_workflow,
         retry_workflow=retry_workflow,
+        apply_workflow=apply_workflow,
     )
     ctx.workflow_dispatcher = WorkflowDispatcher(ctx)
     return ctx
@@ -431,3 +443,75 @@ class TestRetryDispatch:
         )
 
         assert await ctx.get_workflow_thread(TEST_JOB_ID) is None
+
+
+# ============================================================================
+# Application workflow dispatch
+# ============================================================================
+
+
+class TestApplicationDispatch:
+    async def test_success_no_failed_write_and_untracked(self):
+        ctx = _make_ctx(apply_result={"current_step": "applied"})
+        dispatcher = ctx.workflow_dispatcher
+
+        await dispatcher.dispatch_application(
+            job_id=TEST_JOB_ID,
+            thread_id=TEST_THREAD_ID,
+            initial_state={"job_id": TEST_JOB_ID, "user_id": TEST_USER_ID},
+            user_id=TEST_USER_ID,
+        )
+
+        ctx.apply_workflow.ainvoke.assert_awaited_once()
+        ctx.repository.update.assert_not_called()
+        assert await ctx.get_workflow_thread(TEST_JOB_ID) is None
+
+    async def test_passes_bridge_and_settings_in_config(self):
+        ctx = _make_ctx(apply_result={"current_step": "applied"})
+        ctx.apply_bridge = object()
+        dispatcher = ctx.workflow_dispatcher
+
+        await dispatcher.dispatch_application(
+            job_id=TEST_JOB_ID,
+            thread_id=TEST_THREAD_ID,
+            initial_state={"job_id": TEST_JOB_ID},
+            user_id=TEST_USER_ID,
+        )
+
+        _state, config = ctx.apply_workflow.ainvoke.await_args.args
+        configurable = config["configurable"]
+        assert configurable["apply_bridge"] is ctx.apply_bridge
+        assert configurable["repository"] is ctx.repository
+        assert configurable["settings"] is ctx.settings
+
+    async def test_exception_writes_failed_when_allowed(self):
+        ctx = _make_ctx(apply_exc=RuntimeError("bridge exploded"))
+        ctx.repository.get = AsyncMock(return_value=_make_record(BusinessState.APPLYING))
+        dispatcher = ctx.workflow_dispatcher
+
+        await dispatcher.dispatch_application(
+            job_id=TEST_JOB_ID,
+            thread_id=TEST_THREAD_ID,
+            initial_state={"job_id": TEST_JOB_ID},
+            user_id=TEST_USER_ID,
+        )
+
+        ctx.repository.update.assert_awaited_once_with(
+            TEST_JOB_ID,
+            {"status": BusinessState.FAILED, "error_message": "bridge exploded"},
+        )
+
+    async def test_exception_skips_failed_when_terminal(self):
+        """A terminal status (e.g. APPLIED) must not be clobbered to FAILED."""
+        ctx = _make_ctx(apply_exc=RuntimeError("late blowup"))
+        ctx.repository.get = AsyncMock(return_value=_make_record(BusinessState.APPLIED))
+        dispatcher = ctx.workflow_dispatcher
+
+        await dispatcher.dispatch_application(
+            job_id=TEST_JOB_ID,
+            thread_id=TEST_THREAD_ID,
+            initial_state={"job_id": TEST_JOB_ID},
+            user_id=TEST_USER_ID,
+        )
+
+        ctx.repository.update.assert_not_called()

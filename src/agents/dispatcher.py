@@ -142,6 +142,63 @@ class WorkflowDispatcher:
             await self._ctx.unregister_workflow(job_id)
 
     # ------------------------------------------------------------------
+    # Application workflow (deterministic Easy Apply)
+    # ------------------------------------------------------------------
+
+    async def dispatch_application(
+        self,
+        *,
+        job_id: str,
+        thread_id: str,
+        initial_state: dict[str, Any],
+        user_id: str = "",
+    ) -> None:
+        """Invoke the deterministic Easy Apply workflow.
+
+        The workflow writes its own terminal status (APPLIED / MANUAL_REQUIRED /
+        NEEDS_EXTENSION / FAILED) in its ``finalize`` node. This dispatcher is a
+        backstop: on an *unexpected* exception it persists FAILED, but only when
+        ``ALLOWED_TRANSITIONS`` permits it (so a terminal write isn't clobbered).
+        """
+        config = {
+            "configurable": {
+                "thread_id": thread_id,
+                "repository": self._ctx.repository,
+                "apply_bridge": self._ctx.apply_bridge,
+                "settings": self._ctx.settings,
+            }
+        }
+
+        await self._ctx.register_workflow(
+            job_id, thread_id, "application", user_id=user_id
+        )
+
+        try:
+            result = await self._ctx.apply_workflow.ainvoke(initial_state, config)
+            logger.info(
+                "Application workflow for job %s completed: %s",
+                job_id,
+                result.get("current_step"),
+            )
+        except Exception as exc:
+            logger.exception("Application workflow for job %s failed", job_id)
+            try:
+                existing = await self._ctx.repository.get(job_id)
+                if existing is not None and BusinessState.FAILED in ALLOWED_TRANSITIONS.get(
+                    existing.status, set()
+                ):
+                    await self._ctx.repository.update(
+                        job_id,
+                        {"status": BusinessState.FAILED, "error_message": str(exc)},
+                    )
+            except Exception:
+                logger.warning(
+                    "Failed to mark job %s as FAILED in repository", job_id
+                )
+        finally:
+            await self._ctx.unregister_workflow(job_id)
+
+    # ------------------------------------------------------------------
     # Failure recovery
     # ------------------------------------------------------------------
 
