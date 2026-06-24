@@ -84,19 +84,19 @@ Triggering: HITL **approve** dispatches an apply; a new `user.auto_apply` flag l
 - Create: `extension/popup/popup.html`, `extension/popup/popup.js`, `extension/popup/popup.css`
 - Create: `ui/src/routes/extension-auth/+page.svelte`
 
-- [ ] `manifest.json`: MV3; `permissions: ["tabs","storage","scripting"]`; `host_permissions: ["https://www.linkedin.com/*"]`; background `service_worker: background.js`; `externally_connectable` for the app origin so `/extension-auth` can post the JWT. **No declarative `content_scripts`** — inject on demand (AutoApplyMax §9 security model).
-- [ ] `extension/extension-auth` flow: `+page.svelte` reads the app JWT and calls `chrome.runtime.sendMessage(EXT_ID, {type:"SET_TOKEN", token})`; `background.js` stores it in `chrome.storage.session` (clears on browser close, per ARCHITECTURE §8).
-- [ ] `background.js`: open WebSocket to the configured `wss://<app>/ws/extension`, send `{"type":"auth","token}"`; on `{"type":"rpc",...}` route the method to the active LinkedIn tab via `chrome.tabs.sendMessage` (inject `content_script.js` via `chrome.scripting.executeScript` if not present), await the content-script reply, send `{"type":"result","id","result"}` back. Auto-reconnect with backoff; relay status to popup.
-- [ ] `content_script.js`: implement the **DOM primitives** invoked by the server tools, gated by `isRunning`/`userExplicitlyConnected` flags + gated `click()`/`fill()` (port AutoApplyMax §9, `:33-46`, `:417-429`):
+- [x] `manifest.json`: MV3; `permissions: ["tabs","storage","scripting"]`; `host_permissions: ["https://www.linkedin.com/*"]`; background `service_worker: background.js`; `externally_connectable` for the app origin so `/extension-auth` can post the JWT. **No declarative `content_scripts`** — inject on demand (AutoApplyMax §9 security model).
+- [x] `extension/extension-auth` flow: `+page.svelte` reads the app JWT (via new `GET /api/auth/extension-token`, since the session JWT is an httpOnly cookie) and calls `chrome.runtime.sendMessage(EXT_ID, {type:"SET_TOKEN", token})`; `background.js` stores it in `chrome.storage.session` (clears on browser close, per ARCHITECTURE §8).
+- [x] `background.js`: open WebSocket to the configured `wss://<app>/ws/extension`, send `{"type":"auth","token}"`; on `{"type":"rpc",...}` route the method to the active LinkedIn tab via `chrome.tabs.sendMessage` (inject `content_script.js` via `chrome.scripting.executeScript` if not present), await the content-script reply, send `{"type":"result","id","result"}` back. Auto-reconnect with backoff; relay status to popup.
+- [x] `content_script.js`: implement the **DOM primitives** invoked by the server tools, gated by `isRunning`/`userExplicitlyConnected` flags + gated `click()`/`fill()` (port AutoApplyMax §9, `:33-46`, `:417-429`):
   - `serialize_form()` → `{step, total, fields:[{selector,label,type,options,required}], flags:{has_spinner,modal_present,page_text_excerpt}}` (label assembled from `aria-label`+`name`+`<label for>`+parent, per AutoApplyMax `:872-918`).
   - `fill_field(selector, value)` — text/email/tel/number + custom listbox open/select (port `:872-979`, `:1282-1358`), native `<select>` (`:1213-1280`), checkbox (`:1111-1128`), radio (`:1130-1211`).
   - `upload_file(selector, dataUrl, filename, mime)` via `DataTransfer` (port `base64ToFile`/`fillFileInput` `:432-473`).
   - `click_button(role)` for Next/Review/Submit (finder `:1363-1367`); `find_and_click_done()` (port the 4-method × 3-strategy finder `:126-281`).
   - `discard_application()` (port `:298-414`); `reload_page()`; `take_screenshot()` (popup/page capture for confirmation).
-- [ ] `popup/`: minimal UI — connection status, "Connect" (opens `/extension-auth`), Pause/Resume, last-apply result. No profile form (profile lives in app Settings).
-- [ ] Add `EXTENSION_ID` / app origin to `settings.py` + `.env.example` as needed for `externally_connectable`.
-- [ ] Write tests: `manifest.json` is valid JSON with the required keys/permissions and no `content_scripts` block; a Node/JSDOM (or pytest-driven `node`) unit test of `serialize_form()` + `fill_field()` against a saved Easy Apply modal HTML fixture (capture one into `tests/fixtures/easy_apply_modal.html`).
-- [ ] Run project test suite - must pass before task 4.
+- [x] `popup/`: minimal UI — connection status, "Connect" (opens `/extension-auth`), Pause/Resume, last-apply result. No profile form (profile lives in app Settings).
+- [x] Add `EXTENSION_ID` / app origin to `settings.py` + `.env.example` as needed for `externally_connectable`.
+- [x] Write tests: `manifest.json` is valid JSON with the required keys/permissions and no `content_scripts` block; a Node/JSDOM (or pytest-driven `node`) unit test of `serialize_form()` + `fill_field()` against a saved Easy Apply modal HTML fixture (capture one into `tests/fixtures/easy_apply_modal.html`).
+- [x] Run project test suite - must pass before task 4.
 
 ### Task 4: Field classifier + Easy Apply selectors (TDD)
 

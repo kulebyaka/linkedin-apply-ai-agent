@@ -101,6 +101,19 @@ export async function getCurrentUser(): Promise<User> {
 	return response.json();
 }
 
+export async function getExtensionToken(): Promise<string> {
+	const response = await fetch(`${API_BASE}/api/auth/extension-token`, {
+		credentials: 'include',
+	});
+
+	if (!response.ok) {
+		throw new Error('Not authenticated');
+	}
+
+	const data = (await response.json()) as { token: string };
+	return data.token;
+}
+
 export async function logout(): Promise<void> {
 	await fetch(`${API_BASE}/api/auth/logout`, {
 		method: 'POST',

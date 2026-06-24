@@ -5,12 +5,19 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
+from pydantic import BaseModel
 
 from src.api.deps import CurrentUser, get_ctx
 from src.models.user import AuthResponse, LoginRequest, LoginResponse, User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+class ExtensionTokenResponse(BaseModel):
+    """A short-lived bearer token the Chrome extension uses for the WS bridge."""
+
+    token: str
 
 
 @router.post("/api/auth/login", response_model=LoginResponse)
@@ -95,6 +102,23 @@ async def auth_dev_login(request: Request, response: Response) -> AuthResponse:
 async def auth_me(user: CurrentUser) -> User:
     """Get the currently authenticated user."""
     return user
+
+
+@router.get("/api/auth/extension-token", response_model=ExtensionTokenResponse)
+async def auth_extension_token(request: Request, user: CurrentUser) -> ExtensionTokenResponse:
+    """Mint a JWT for the Chrome extension's WebSocket handshake.
+
+    The app's session JWT lives in an httpOnly cookie that JS can't read, so
+    the `/extension-auth` page calls this (with credentials) to obtain a token
+    string it can hand to the extension via ``chrome.runtime.sendMessage``.
+    The token is identical in shape/claims to the session cookie and is
+    validated by ``WsRelay`` via ``auth_service.decode_jwt``.
+    """
+    ctx = get_ctx(request)
+    if ctx.auth_service is None:
+        raise HTTPException(500, "Auth service not initialized")
+    token = ctx.auth_service.create_jwt(user.id, user.email)
+    return ExtensionTokenResponse(token=token)
 
 
 @router.post("/api/auth/logout")

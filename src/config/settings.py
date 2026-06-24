@@ -181,6 +181,12 @@ class Settings(BaseSettings):
     apply_rpc_timeout_seconds: int = 30         # per-RPC timeout over the WS bridge
     apply_daily_limit_detection: bool = True    # stop (don't retry) on LinkedIn daily limit
 
+    # Chrome extension identity. The MV3 extension's `externally_connectable`
+    # block must list the app origin (derived from `app_url`); the
+    # `/extension-auth` page targets this id when handing over the JWT. Set in
+    # .env once Chrome assigns the unpacked-extension id (chrome://extensions).
+    extension_id: str = ""
+
     # -------------------------------------------------------------------------
     # Authentication  (secrets + env-specific — set in .env)
     # -------------------------------------------------------------------------

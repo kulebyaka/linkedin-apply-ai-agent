@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<!--
+  Representative LinkedIn Easy Apply modal fixture for unit-testing the
+  extension content script's DOM primitives (serialize_form / fill_field).
+  Structure & class names mirror LinkedIn's real markup as ported from
+  AutoApplyMax (label-for associations, fieldset radios, follow-company box,
+  custom artdeco dropdown trigger, progress bar).
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Easy Apply</title>
+  </head>
+  <body>
+    <div class="jobs-easy-apply-modal" role="dialog" aria-label="Apply to Acme">
+      <div role="progressbar" aria-valuenow="2" aria-valuemax="4" aria-valuemin="0"></div>
+
+      <form>
+        <!-- Contact info -->
+        <div class="form-component">
+          <label for="first-name">First name</label>
+          <input type="text" id="first-name" name="firstName" value="" required />
+        </div>
+
+        <div class="form-component">
+          <label for="last-name">Last name</label>
+          <input type="text" id="last-name" name="lastName" value="" required />
+        </div>
+
+        <div class="form-component">
+          <label for="email">Email address</label>
+          <input type="email" id="email" name="email" value="" required />
+        </div>
+
+        <div class="form-component">
+          <label for="phone">Mobile phone number</label>
+          <input type="tel" id="phone" name="phone" value="" required />
+        </div>
+
+        <!-- Screening: years of experience -->
+        <div class="form-component">
+          <label for="yoe">How many years of experience do you have in Python?</label>
+          <input type="number" id="yoe" name="years_experience" value="" required />
+        </div>
+
+        <!-- Language proficiency dropdown (native select) -->
+        <div class="form-component">
+          <label for="lang">What is your level of proficiency in English?</label>
+          <select id="lang" name="english_proficiency" required>
+            <option value="">Select an option</option>
+            <option value="none">None</option>
+            <option value="professional">Professional working proficiency</option>
+            <option value="fluent">Fluent</option>
+            <option value="native">Native or bilingual</option>
+          </select>
+        </div>
+
+        <!-- Visa sponsorship radio -->
+        <fieldset data-test-form-builder-radio-button-form-component>
+          <legend>Will you now or in the future require visa sponsorship?</legend>
+          <div>
+            <input type="radio" id="visa-yes" name="visa" value="Yes" />
+            <label for="visa-yes">Yes</label>
+          </div>
+          <div>
+            <input type="radio" id="visa-no" name="visa" value="No" />
+            <label for="visa-no">No</label>
+          </div>
+        </fieldset>
+
+        <!-- Custom artdeco dropdown (listbox trigger) -->
+        <div class="form-component">
+          <label for="country-dd">Phone country code</label>
+          <button
+            type="button"
+            id="country-dd"
+            class="artdeco-dropdown__trigger"
+            aria-haspopup="listbox"
+          >
+            Select
+          </button>
+        </div>
+
+        <!-- Consent checkbox -->
+        <div class="form-component">
+          <input type="checkbox" id="consent" name="consent" />
+          <label for="consent">I agree to the terms and privacy policy</label>
+        </div>
+
+        <!-- Resume upload -->
+        <div class="form-component">
+          <label for="resume">Upload resume</label>
+          <input type="file" id="resume" name="resume" accept=".pdf" />
+        </div>
+
+        <!-- Follow company (must be untouched by serialize, unfollowed before submit) -->
+        <div class="form-component">
+          <input type="checkbox" id="follow-company-checkbox" checked />
+          <label for="follow-company-checkbox">Follow Acme to stay up to date</label>
+        </div>
+      </form>
+
+      <footer>
+        <button type="button" aria-label="Continue to next step">Next</button>
+        <button type="button" data-control-name="submit_unify" aria-label="Submit application">
+          Submit application
+        </button>
+      </footer>
+    </div>
+  </body>
+</html>
