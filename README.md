@@ -118,7 +118,7 @@ This covers the core value proposition: AI-powered CV tailoring with professiona
 Automated Easy Apply runs inside your own browser via a Chrome MV3 extension, so the server
 never handles your LinkedIn credentials.
 
-1. **Load the extension**: open `chrome://extensions`, enable *Developer mode*, click *Load unpacked*, and select the `extension/` directory. Copy the assigned extension ID into `.env` as `EXTENSION_ID` and restart the API.
+1. **Load the extension**: open `chrome://extensions`, enable *Developer mode*, click *Load unpacked*, and select the `extension/` directory. Set the assigned extension ID as the frontend build var `VITE_EXTENSION_ID` (the `/extension-auth` page targets it; you can also append `?ext=<id>` to that URL). If your app origin isn't `localhost:5173` / `*.kuule.cc`, add it to the hardcoded `externally_connectable.matches` list in `extension/manifest.json`.
 2. **Fill your Application Profile**: in *Settings*, complete the *Application Profile* card (phone, years of experience, work authorization, etc.). Incomplete profiles cause applies to abort to *manual required* rather than guessing.
 3. **Connect**: click *Connect* in the extension popup (or open `/extension-auth` in the app) to hand the extension a session token. The popup shows the live connection status.
 4. **Apply**: approve a job in the HITL review (or enable *auto-apply* in Settings to skip the checkpoint). Jobs approved while the extension is disconnected land in `needs_extension`; connect and hit *Apply now*.

@@ -96,6 +96,26 @@ test('fill_field is blocked until a session is connected (security gate)', async
   assert.equal(ok.filled, true);
 });
 
+test('begin_session opens the gate and end_session closes it', async () => {
+  const actuator = load();
+  const state = actuator.serializeForm();
+  const sel = state.fields.find((f) => /first name/i.test(f.label)).selector;
+
+  // Blocked before begin_session (the server must open the gate explicitly).
+  const blocked = await actuator.fillField(sel, 'Ada');
+  assert.ok(blocked.error, 'mutation blocked before begin_session');
+
+  // begin_session is the real RPC the server now sends in open_easy_apply.
+  actuator.beginSession();
+  const ok = await actuator.fillField(sel, 'Ada');
+  assert.equal(ok.filled, true, 'mutation allowed after begin_session');
+
+  // end_session re-closes the gate for the next run.
+  actuator.endSession();
+  const reblocked = await actuator.fillField(sel, 'Grace');
+  assert.ok(reblocked.error, 'mutation blocked again after end_session');
+});
+
 test('fill_field writes text, select, radio and checkbox values', async () => {
   const actuator = load();
   actuator._setConnected(true);

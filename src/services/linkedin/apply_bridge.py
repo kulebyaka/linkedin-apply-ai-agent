@@ -221,11 +221,14 @@ class ApplyBridge:
         # 2. Submit.
         submit_frame = await self._rpc(user_id, "click_button", {"role": "submit"})
         submit_result, submit_error = self._unwrap(submit_frame)
-        # 3. Final Done / confirmation control (best-effort — may be auto-shown).
-        await self._rpc_best_effort(user_id, "find_and_click_done")
-        # 4. Capture confirmation: tab pixels + modal confirmation text.
+        # 3. Capture the confirmation BEFORE dismissing it: clicking Done closes
+        #    the "Application sent" modal, so the screenshot/text must be grabbed
+        #    while it's still on screen.
         capture = await self._rpc_best_effort(user_id, "capture_visible")
         shot = await self._rpc_best_effort(user_id, "take_screenshot")
+        # 4. Final Done / confirmation control (best-effort — may be auto-shown).
+        await self._rpc_best_effort(user_id, "find_and_click_done")
+        await self.end_session(user_id)
         confirmed = submit_error is None and bool((submit_result or {}).get("clicked"))
         return SubmitResult(
             confirmed=confirmed,
@@ -236,20 +239,37 @@ class ApplyBridge:
     async def discard(self, user_id: str, reason: str = "") -> dict:
         """Discard the in-progress application (X → confirm → ESC → scan)."""
         logger.info("Discarding Easy Apply for user %s: %s", user_id, reason or "(no reason)")
-        return await self._rpc_best_effort(user_id, "discard_application")
+        result = await self._rpc_best_effort(user_id, "discard_application")
+        await self.end_session(user_id)
+        return result
 
     async def open_easy_apply(self, user_id: str, job_url: str | None = None) -> bool:
         """Navigate to the job (if given) and click Easy Apply.
 
-        The content script handles the LinkedIn safety-reminder dialog
-        ("Continue applying", AutoApplyMax :665-687) and reports whether the
-        Easy Apply modal became visible. Returns True only when the modal
-        actually opened so the workflow can fail fast otherwise.
+        Opens the mutation gate (``begin_session``) before any mutating
+        primitive — the content script blocks ``fill_field``/``click_button``/etc.
+        until the server explicitly begins a session (security model, see
+        ``content_script.js`` header). The content script handles the LinkedIn
+        safety-reminder dialog ("Continue applying", AutoApplyMax :665-687) and
+        reports whether the Easy Apply modal became visible. Returns True only
+        when the modal actually opened so the workflow can fail fast otherwise.
         """
+        await self._rpc_best_effort(user_id, "begin_session")
         if job_url:
             await self._rpc_best_effort(user_id, "navigate", {"url": job_url})
         result = await self._rpc_result(user_id, "open_easy_apply")
         return bool(result.get("opened"))
+
+    async def end_session(self, user_id: str) -> dict:
+        """Close the mutation gate at the end of an apply run.
+
+        Pure cleanup — must never raise (a dropped extension after a confirmed
+        submit must not turn ``APPLIED`` into ``NEEDS_EXTENSION``).
+        """
+        try:
+            return await self._rpc_best_effort(user_id, "end_session")
+        except ExtensionUnavailable:
+            return {}
 
     # ------------------------------------------------------------------ #
     # Internals

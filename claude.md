@@ -89,8 +89,8 @@ src/
 
 extension/                      # Chrome MV3 extension (dumb DOM actuator)
 ├── manifest.json               # MV3; on-demand injection, externally_connectable for /extension-auth
-├── background.js               # WS bridge to /ws/extension, JWT auth, routes RPC to LinkedIn tab
-├── content_script.js           # DOM primitives: serialize_form, fill_field, upload, click, discard
+├── background.js               # WS bridge to /ws/extension, JWT auth, routes RPC to LinkedIn tab; tracks the begin/end_session gate + re-asserts it after on-demand re-injection, and waits for navigated pages to load
+├── content_script.js           # DOM primitives: serialize_form, fill_field, upload, click, discard; mutating primitives gated behind begin_session (server opens the gate in open_easy_apply, closes it on discard/submit)
 └── popup/                      # Connection status + Pause/Resume + last-apply result
 
 data/
@@ -268,7 +268,7 @@ See `src/llm/provider.py` module documentation for detailed implementation.
 The apply workflow drives the LinkedIn Easy Apply modal field-by-field over the WebSocket
 bridge (`ApplyBridge` → `WsRelay` → extension content script). No LLM is involved; field
 values come straight from the user's `ApplyProfile` + CV `ContactInfo` via `field_classifier`.
-1. **open_easy_apply_node**: Navigate + click Easy Apply (handles the safety-reminder modal); verify the modal opened. On `BridgeDisconnected`/`ExtensionUnavailable` → `needs_extension`.
+1. **open_easy_apply_node**: Open the mutation gate (`begin_session`), navigate + click Easy Apply (handles the safety-reminder modal); verify the modal opened. On `BridgeDisconnected`/`ExtensionUnavailable` → `needs_extension`. The gate is closed again on discard/submit (`end_session`).
 2. **fill_step_node**: Loop (max 10 steps). `read_form_state` → if any `unknown_fields` (unrecognized question, or recognized field with no profile value) → `discard` + `manual_required` (never guess). Otherwise `upload_file` for file inputs + `fill_field` per `fill_plan`, then `advance_step`. Unfixable validation errors → `discard` + `manual_required`. Daily-limit flag → stop without submit. Submit button present → go to submit.
 3. **submit_node**: `submit_form` (un-follow company, click Submit, find-and-click Done, capture confirmation). `confirmed` → `applied`, else `failed`.
 4. **finalize_node**: Persists the terminal state (`APPLIED` + application_url + saved confirmation screenshot, `MANUAL_REQUIRED` + reason, `NEEDS_EXTENSION`, or `FAILED` + error), respecting `ALLOWED_TRANSITIONS`.
@@ -479,12 +479,12 @@ All settings in `.env`:
   - `JOB_FILTER_REJECT_THRESHOLD=30` - jobs scoring below this are saved as `filtered_out` (skips CV generation)
   - `JOB_FILTER_WARNING_THRESHOLD=70` - jobs scoring below this show warning badge + red flags in HITL review
 - **Easy Apply / Extension Bridge Configuration:**
-  - `EASY_APPLY_ENABLED=true` - feature flag for deterministic Easy Apply automation
-  - `APPLY_PER_APP_TIMEOUT_SECONDS=180` - wall-clock budget for a single application (else discard + fail)
-  - `APPLY_STUCK_TIMEOUT_SECONDS=120` - no-progress watchdog within an application
+  - `EASY_APPLY_ENABLED=true` - **RESERVED**: defined but not yet checked anywhere; does not currently gate the apply path
+  - `APPLY_PER_APP_TIMEOUT_SECONDS=180` - wall-clock budget for a single application (else discard + fail) — enforced in `application_workflow.py`
+  - `APPLY_STUCK_TIMEOUT_SECONDS=120` - **RESERVED**: a no-progress watchdog is not yet wired; runaway protection comes from the per-app wall-clock timeout + `MAX_STEPS` guard
   - `APPLY_RPC_TIMEOUT_SECONDS=30` - per-RPC timeout over the WS bridge
   - `APPLY_DAILY_LIMIT_DETECTION=true` - stop (do not retry) on LinkedIn daily-limit messages
-  - `EXTENSION_ID` - Chrome-assigned unpacked-extension id; the MV3 `externally_connectable` block lists the app origin and `/extension-auth` targets this id when handing over the JWT
+  - `EXTENSION_ID` - **RESERVED**: not read by the backend. The operative variable for the `/extension-auth` token handoff is the frontend build-time `VITE_EXTENSION_ID` (or `?ext=<id>`). The MV3 `externally_connectable.matches` list in `extension/manifest.json` is a hardcoded set of app origins — edit it by hand to add a new origin
 
 **Never commit `.env` or real CV data to git!**
 

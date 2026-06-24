@@ -300,6 +300,9 @@ class TestSubmitForm:
         # un-follow must precede the Submit click
         assert relay.methods.index("unfollow_company") < relay.methods.index("click_button")
         assert relay.calls[1] == ("click_button", {"role": "submit"})
+        # confirmation must be captured BEFORE Done dismisses the modal
+        assert relay.methods.index("capture_visible") < relay.methods.index("find_and_click_done")
+        assert relay.methods.index("take_screenshot") < relay.methods.index("find_and_click_done")
 
     async def test_not_confirmed_when_submit_not_clicked(self):
         relay = MockRelay(
@@ -325,7 +328,8 @@ class TestDiscardAndDisconnect:
         bridge = ApplyBridge(relay, _settings())
         result = await bridge.discard("u1", reason="unknown field")
         assert result == {"discarded": True}
-        assert relay.methods == ["discard_application"]
+        # Discard also closes the mutation gate for the next run.
+        assert relay.methods == ["discard_application", "end_session"]
 
     async def test_disconnect_becomes_extension_unavailable(self):
         relay = MockRelay({"serialize_form": {"fields": [], "flags": {}}})

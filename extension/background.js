@@ -26,6 +26,14 @@ let connected = false;
 let reconnectDelay = 1000; // backoff, capped below
 const MAX_RECONNECT_DELAY = 30000;
 let paused = false;
+// Mirrors the content script's `userExplicitlyConnected` gate. The server opens
+// it with `begin_session` and closes it with `end_session`. We track it here too
+// because the content script is re-injected on demand (and on every navigation),
+// which resets its module-level flag — we must re-assert the gate after any fresh
+// injection or all mutating primitives would silently block mid-apply.
+let sessionActive = false;
+// How long to wait for a navigated page to finish loading before driving it.
+const NAVIGATE_LOAD_TIMEOUT_MS = 15000;
 
 // ---- Token storage (session-scoped) ---------------------------------------
 async function getToken() {
@@ -81,6 +89,9 @@ async function connect() {
 
   socket.addEventListener('close', () => {
     connected = false;
+    // The session is server-driven; a dropped socket ends it. The next apply run
+    // re-opens the gate with a fresh `begin_session`.
+    sessionActive = false;
     relayStatus({ message: 'Disconnected' });
     scheduleReconnect();
   });
@@ -154,9 +165,43 @@ async function ensureContentScript(tabId) {
     target: { tabId },
     files: ['content_script.js'],
   });
+  // A fresh injection starts with the mutation gate closed. If the server has an
+  // open session, re-assert it so the next mutating RPC isn't silently blocked.
+  if (sessionActive) {
+    try {
+      await chrome.tabs.sendMessage(tabId, { method: 'begin_session', params: {} });
+    } catch (_e) {
+      /* re-assert is best-effort */
+    }
+  }
+}
+
+// Resolve once the tab finishes loading (or after a timeout fallback) so the
+// page exists before we drive it. chrome.tabs.update returns immediately, well
+// before the navigated page is ready.
+function waitForTabLoad(tabId) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve();
+    };
+    const listener = (updatedTabId, info) => {
+      if (updatedTabId === tabId && info.status === 'complete') finish();
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+    setTimeout(finish, NAVIGATE_LOAD_TIMEOUT_MS);
+  });
 }
 
 async function routeRpc(method, params) {
+  // Track the server-driven session gate (also delivered to the content script
+  // via the normal sendMessage path below / re-asserted on injection).
+  if (method === 'begin_session') sessionActive = true;
+  else if (method === 'end_session') sessionActive = false;
+
   // Screenshot pixels come from the tab capture API, not the content script.
   if (method === 'capture_visible') {
     const dataUrl = await chrome.tabs.captureVisibleTab(undefined, { format: 'png' });
@@ -166,9 +211,12 @@ async function routeRpc(method, params) {
   const tab = await findLinkedInTab();
   if (!tab) return { error: 'no LinkedIn tab open' };
 
-  // Background may navigate before driving the form.
+  // Background may navigate before driving the form. Wait for the load to
+  // complete so the Easy Apply button exists when the next RPC fires.
   if (method === 'navigate' && params.url) {
+    const loaded = waitForTabLoad(tab.id);
     await chrome.tabs.update(tab.id, { url: params.url });
+    await loaded;
     return { navigated: true };
   }
 

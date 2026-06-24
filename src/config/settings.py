@@ -20,8 +20,8 @@ class Settings(BaseSettings):
     # Application
     # -------------------------------------------------------------------------
     app_name: str = "LinkedIn Job Application Agent"
-    debug: bool = False       # env-specific — override in .env
-    log_level: str = "INFO"   # env-specific — override in .env
+    debug: bool = False  # env-specific — override in .env
+    log_level: str = "INFO"  # env-specific — override in .env
 
     # -------------------------------------------------------------------------
     # LinkedIn Credentials  (secrets — set in .env)
@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------------------
     # LLM Provider Selection  (env-specific — override in .env)
     # -------------------------------------------------------------------------
-    primary_llm_provider: str = "openai"      # openai | deepseek | grok | anthropic
+    primary_llm_provider: str = "openai"  # openai | deepseek | grok | anthropic
 
     # -------------------------------------------------------------------------
     # LLM API Keys  (secrets — set in .env)
@@ -68,22 +68,22 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------------------
     # Repository  (env-specific — override in .env)
     # -------------------------------------------------------------------------
-    repo_type: str = "memory"           # "memory" (dev) | "sqlite" (production)
-    db_path: str = "./data/jobs.db"     # SQLite path; same for everyone by default
+    repo_type: str = "memory"  # "memory" (dev) | "sqlite" (production)
+    db_path: str = "./data/jobs.db"  # SQLite path; same for everyone by default
 
     # -------------------------------------------------------------------------
     # PDF / CV Template  (same for everyone — change via CV_TEMPLATE_NAME in .env)
     # -------------------------------------------------------------------------
     cv_template_dir: str = "src/templates/cv"
-    cv_template_name: str = "compact"   # modern | compact | classic | minimal | profile-card
+    cv_template_name: str = "compact"  # modern | compact | classic | minimal | profile-card
 
     # -------------------------------------------------------------------------
     # LinkedIn Search — global fallback (env-specific — set in .env)
     # -------------------------------------------------------------------------
     linkedin_search_keywords: str = ""
     linkedin_search_location: str = ""
-    linkedin_search_remote_filter: str | None = None    # "remote" | "on-site" | "hybrid"
-    linkedin_search_date_posted: str | None = None      # "24h" | "week" | "month"
+    linkedin_search_remote_filter: str | None = None  # "remote" | "on-site" | "hybrid"
+    linkedin_search_date_posted: str | None = None  # "24h" | "week" | "month"
     linkedin_search_experience_level: list[str] | None = None
     linkedin_search_job_type: list[str] | None = None
 
@@ -104,36 +104,36 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------------------
     # Scrape failure recovery
     # -------------------------------------------------------------------------
-    scraper_min_description_chars: int = 200    # Below this → SCRAPE_FAILED
-    scraper_max_attempts: int = 3               # Retry cap before permanent FAILED
-    scraper_retry_backoff_minutes: int = 60     # Skip re-attempt within this window
+    scraper_min_description_chars: int = 200  # Below this → SCRAPE_FAILED
+    scraper_max_attempts: int = 3  # Retry cap before permanent FAILED
+    scraper_retry_backoff_minutes: int = 60  # Skip re-attempt within this window
 
     # -------------------------------------------------------------------------
     # LinkedIn Scheduler  (env-specific — override in .env)
     # -------------------------------------------------------------------------
     linkedin_search_schedule_enabled: bool = False
-    linkedin_search_interval_hours: int = 1     # same for everyone; change via .env if needed
+    linkedin_search_interval_hours: int = 1  # same for everyone; change via .env if needed
 
     # -------------------------------------------------------------------------
     # Job Fixture Record & Replay  (env-specific — for dev/demo use)
     # -------------------------------------------------------------------------
     seed_jobs_from_file: bool = False
     scraped_jobs_path: str = "./data/jobs/scraped_jobs.json"
-    seed_jobs_limit: int = 0    # 0 = no limit
+    seed_jobs_limit: int = 0  # 0 = no limit
 
     # -------------------------------------------------------------------------
     # Workflow  (same for everyone — defaults defined here)
     # -------------------------------------------------------------------------
     job_fetch_interval_hours: int = 1
     max_concurrent_applications: int = 3
-    browser_headless: bool = True   # env-specific: set false in .env for visual debugging
+    browser_headless: bool = True  # env-specific: set false in .env for visual debugging
 
     # -------------------------------------------------------------------------
     # Job Filter  (same for everyone — defaults defined here)
     # -------------------------------------------------------------------------
-    job_filter_enabled: bool = True        # global on/off switch
+    job_filter_enabled: bool = True  # global on/off switch
     job_filter_reject_threshold: int = 30  # score below this → FILTERED_OUT
-    job_filter_warning_threshold: int = 70 # score below this → warning badge in HITL
+    job_filter_warning_threshold: int = 70  # score below this → warning badge in HITL
 
     # -------------------------------------------------------------------------
     # Auto-Refining Filter Prompt  (same for everyone — defaults defined here)
@@ -141,20 +141,20 @@ class Settings(BaseSettings):
     # Global kill-switch for the periodic refinement scheduler. Per-user opt-in
     # still gates whether a given user is ever processed (default OFF per user).
     auto_refine_enabled: bool = True
-    auto_refine_interval_hours: int = 168       # weekly
-    auto_refine_min_signals: int = 10           # gate: need at least this many signals
-    auto_refine_signal_cap: int = 50            # feed at most the most-recent N signals
+    auto_refine_interval_hours: int = 168  # weekly
+    auto_refine_min_signals: int = 10  # gate: need at least this many signals
+    auto_refine_signal_cap: int = 50  # feed at most the most-recent N signals
 
     # -------------------------------------------------------------------------
     # CV Composer  (same for everyone — defaults defined here)
     # -------------------------------------------------------------------------
-    cv_composer_temperature_summary: float = 0.5        # creative for professional summary
-    cv_composer_temperature_job_analysis: float = 0.3   # precise for job analysis
-    cv_composer_temperature_sections: float = 0.4       # balanced for CV sections
+    cv_composer_temperature_summary: float = 0.5  # creative for professional summary
+    cv_composer_temperature_job_analysis: float = 0.3  # precise for job analysis
+    cv_composer_temperature_sections: float = 0.4  # balanced for CV sections
     cv_composer_max_retries: int = 3
     cv_composer_enable_hallucination_checks: bool = True
-    cv_composer_hallucination_policy: str = "strict"    # "strict" | "warn" | "disabled"
-    cv_composer_model_override: str | None = None       # env-specific override
+    cv_composer_hallucination_policy: str = "strict"  # "strict" | "warn" | "disabled"
+    cv_composer_model_override: str | None = None  # env-specific override
 
     # -------------------------------------------------------------------------
     # CV Length Limits  (same for everyone — targets a 2-page output)
@@ -169,22 +169,23 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------------------
     # PDF CV Upload  (same for everyone — defaults defined here)
     # -------------------------------------------------------------------------
-    pdf_cv_upload_max_bytes: int = 10_485_760   # 10 MB
+    pdf_cv_upload_max_bytes: int = 10_485_760  # 10 MB
     pdf_cv_upload_max_pages: int = 20
 
     # -------------------------------------------------------------------------
     # Easy Apply browser bridge  (same for everyone — defaults defined here)
     # -------------------------------------------------------------------------
-    easy_apply_enabled: bool = True
-    apply_per_app_timeout_seconds: int = 180    # wall-clock budget for one application
-    apply_stuck_timeout_seconds: int = 120      # no-progress watchdog within an application
-    apply_rpc_timeout_seconds: int = 30         # per-RPC timeout over the WS bridge
-    apply_daily_limit_detection: bool = True    # stop (don't retry) on LinkedIn daily limit
+    easy_apply_enabled: bool = True  # RESERVED: not yet gating the apply path
+    apply_per_app_timeout_seconds: int = 180  # wall-clock budget for one application (enforced)
+    apply_stuck_timeout_seconds: int = 120  # RESERVED: no-progress watchdog not yet wired
+    apply_rpc_timeout_seconds: int = 30  # per-RPC timeout over the WS bridge
+    apply_daily_limit_detection: bool = True  # stop (don't retry) on LinkedIn daily limit
 
-    # Chrome extension identity. The MV3 extension's `externally_connectable`
-    # block must list the app origin (derived from `app_url`); the
-    # `/extension-auth` page targets this id when handing over the JWT. Set in
-    # .env once Chrome assigns the unpacked-extension id (chrome://extensions).
+    # Chrome extension identity. RESERVED: the backend does not currently read
+    # this. The operative variable for the `/extension-auth` token handoff is the
+    # frontend build-time `VITE_EXTENSION_ID` (or the `?ext=<id>` query param).
+    # The MV3 `externally_connectable.matches` list in extension/manifest.json is
+    # a hardcoded set of app origins — edit it by hand to add a new origin.
     extension_id: str = ""
 
     # -------------------------------------------------------------------------
@@ -192,10 +193,10 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------------------
     resend_api_key: str = ""
     resend_from: str = "LinkedIn Agent <noreply@resend.dev>"
-    app_url: str = "http://localhost:5173"      # base URL for magic link callback
-    magic_link_ttl_minutes: int = 15            # same for everyone
+    app_url: str = "http://localhost:5173"  # base URL for magic link callback
+    magic_link_ttl_minutes: int = 15  # same for everyone
     jwt_secret: str = "change-me-in-production"
-    jwt_expiry_days: int = 30                   # same for everyone
+    jwt_expiry_days: int = 30  # same for everyone
 
     # Local-development auth bypass. When true, exposes POST /api/auth/dev-login
     # which mints a JWT for `dev_auth_email` without an email round-trip. Refuses
@@ -214,9 +215,7 @@ class Settings(BaseSettings):
     @classmethod
     def jwt_secret_must_be_strong(cls, v: str) -> str:
         if not v:
-            raise ValueError(
-                "JWT_SECRET must not be empty. Set a strong unique value in .env."
-            )
+            raise ValueError("JWT_SECRET must not be empty. Set a strong unique value in .env.")
         if v == "change-me-in-production":
             # Allow the placeholder at import time so tests that don't exercise
             # auth can still import Settings. AuthService re-checks at runtime
