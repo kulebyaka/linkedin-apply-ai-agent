@@ -85,8 +85,13 @@ class Unknown(BaseModel):
 
 # Order matters: more specific patterns first (e.g. phone-country-code before
 # phone, salary/experience before generic name matches).
+# Match on the *experience* concept, not a bare year-noun: labels like
+# "Years at current company" or "Notice period (in years)" must NOT be filled
+# with the candidate's total years of experience. Requiring an experience stem
+# keeps the multilingual coverage (EN/FR/ES/DE/IT) while dropping the ambiguous
+# bare "years"/"années"/"años"/"jahre"/"anni" tokens.
 _RE_YEARS = re.compile(
-    r"experience|years|exp[ée]rience|ann[ée]es|a[ñn]os|jahre|anni|esperienza",
+    r"experien|exp[ée]rien|experiencia|esperienza|erfahrung",
     re.I,
 )
 _RE_SALARY = re.compile(
@@ -289,9 +294,14 @@ def _classify_choice(
     if _RE_PROFICIENCY.search(label):
         choice = _pick_proficiency(f.options)
         if choice is None:
-            # Custom listbox serializes empty options; let the content script
-            # resolve the best tier by substring match.
-            choice = "Native"
+            # No enumerated tier matched (or a custom listbox serialized empty
+            # options). We have no profile-backed proficiency value, so picking
+            # one would be a fabricated screening answer — abort, never guess.
+            return Unknown(
+                selector=f.selector,
+                label=f.label,
+                reason="language proficiency: no matching option / not in profile",
+            )
         return FieldFill(selector=f.selector, value=choice, kind="language_proficiency")
 
     return None

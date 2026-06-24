@@ -318,6 +318,22 @@ class TestSubmitForm:
         result = await bridge.submit_form("u1")
         assert result.confirmed is False
 
+    async def test_not_confirmed_when_clicked_but_no_confirmation_text(self):
+        # The Submit button was clicked but LinkedIn never showed the
+        # "Application sent" modal — a click alone must not mark the job APPLIED.
+        relay = MockRelay(
+            {
+                "unfollow_company": {"unfollowed": True},
+                "click_button": {"clicked": True},
+                "find_and_click_done": {"clicked": False},
+                "capture_visible": {},
+                "take_screenshot": {"confirmation_text": "Please fix the errors above"},
+            }
+        )
+        bridge = ApplyBridge(relay, _settings())
+        result = await bridge.submit_form("u1")
+        assert result.confirmed is False
+
 
 # ---------------------------------------------------------------------------
 # discard + disconnect handling

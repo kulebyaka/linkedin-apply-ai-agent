@@ -62,6 +62,26 @@ DAILY_LIMIT_PATTERNS: tuple[str, ...] = (
 )
 
 
+# Phrases LinkedIn shows in the post-submit "Application sent" modal. Matched
+# case-insensitively against the captured modal text to *confirm* a submit
+# actually went through — a Submit-button click alone is not proof the
+# application was accepted. Multilingual (EN/FR/ES/DE/IT).
+CONFIRMATION_PATTERNS: tuple[str, ...] = (
+    "application sent",
+    "application was sent",
+    "your application was sent",
+    "application submitted",
+    "candidature envoyée",
+    "votre candidature a été envoyée",
+    "solicitud enviada",
+    "tu solicitud fue enviada",
+    "bewerbung gesendet",
+    "bewerbung wurde gesendet",
+    "candidatura inviata",
+    "la tua candidatura è stata inviata",
+)
+
+
 # Text labels for the final confirmation / Done button (AutoApplyMax :129).
 DONE_TEXTS: tuple[str, ...] = (
     "Done",

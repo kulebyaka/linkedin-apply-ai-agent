@@ -39,17 +39,21 @@ class SessionStore:
             self._sessions[user_id] = ws
             return previous
 
-    async def unregister(self, user_id: str, ws: WebSocket | None = None) -> None:
+    async def unregister(self, user_id: str, ws: WebSocket | None = None) -> bool:
         """Remove the session for ``user_id``.
 
         If ``ws`` is provided, only unregister when it is still the active
         socket — this avoids a stale disconnect handler evicting a newer
         session that already replaced it.
+
+        Returns ``True`` when this call actually removed a session (i.e. ``ws``
+        was the active socket, or no ``ws`` was given and one existed), ``False``
+        when it was a no-op because a newer socket had already displaced ``ws``.
         """
         async with self._lock:
             if ws is not None and self._sessions.get(user_id) is not ws:
-                return
-            self._sessions.pop(user_id, None)
+                return False
+            return self._sessions.pop(user_id, None) is not None
 
     async def is_connected(self, user_id: str) -> bool:
         """Return True if an active session exists for ``user_id``."""

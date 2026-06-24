@@ -90,8 +90,13 @@ class WsRelay:
         except Exception:  # noqa: BLE001 — WebSocketDisconnect + transport errors
             logger.debug("Extension session for user %s closed", user_id)
         finally:
-            await self._sessions.unregister(user_id, ws)
-            await self._fail_user_futures(user_id, BridgeDisconnected("extension disconnected"))
+            removed = await self._sessions.unregister(user_id, ws)
+            # Only fail pending futures when *this* socket was the live session.
+            # A socket that was already displaced by a newer one must not abort
+            # the in-flight RPCs that now belong to the replacement session
+            # (pending futures are keyed per-user, not per-socket).
+            if removed:
+                await self._fail_user_futures(user_id, BridgeDisconnected("extension disconnected"))
 
     async def _authenticate(self, ws: WebSocket) -> str | None:
         """Run the first-frame auth handshake; return user_id or None on reject."""

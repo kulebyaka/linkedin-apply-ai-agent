@@ -28,7 +28,10 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, Field
 
 from src.bridge import BridgeDisconnected
-from src.services.linkedin.easy_apply_selectors import DAILY_LIMIT_PATTERNS
+from src.services.linkedin.easy_apply_selectors import (
+    CONFIRMATION_PATTERNS,
+    DAILY_LIMIT_PATTERNS,
+)
 from src.services.linkedin.field_classifier import (
     FieldFill,
     SerializedField,
@@ -229,11 +232,18 @@ class ApplyBridge:
         # 4. Final Done / confirmation control (best-effort — may be auto-shown).
         await self._rpc_best_effort(user_id, "find_and_click_done")
         await self.end_session(user_id)
-        confirmed = submit_error is None and bool((submit_result or {}).get("clicked"))
+        confirmation_text = (shot or {}).get("confirmation_text", "")
+        # A Submit-button click alone is NOT proof the application was accepted
+        # (LinkedIn may re-show the form with a validation error). Require the
+        # post-submit "Application sent" modal text before declaring success;
+        # otherwise the apply workflow correctly routes to FAILED rather than
+        # falsely marking the job APPLIED.
+        clicked = submit_error is None and bool((submit_result or {}).get("clicked"))
+        confirmed = clicked and self._detect_confirmation(confirmation_text)
         return SubmitResult(
             confirmed=confirmed,
             screenshot_b64=(capture or {}).get("screenshot_b64"),
-            confirmation_text=(shot or {}).get("confirmation_text", ""),
+            confirmation_text=confirmation_text,
         )
 
     async def discard(self, user_id: str, reason: str = "") -> dict:
@@ -309,6 +319,14 @@ class ApplyBridge:
             return False
         low = page_text.lower()
         return any(pattern.lower() in low for pattern in DAILY_LIMIT_PATTERNS)
+
+    @staticmethod
+    def _detect_confirmation(modal_text: str) -> bool:
+        """True when the post-submit modal text matches an 'Application sent' phrase."""
+        if not modal_text:
+            return False
+        low = modal_text.lower()
+        return any(pattern in low for pattern in CONFIRMATION_PATTERNS)
 
     async def _rpc(self, user_id: str, method: str, params: dict | None = None) -> dict:
         """Send one RPC, translating a dropped session into a typed error."""

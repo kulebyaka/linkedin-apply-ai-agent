@@ -130,6 +130,13 @@ def test_salary(profile, contact):
     assert r.value == "120000"
 
 
+def test_years_matcher_does_not_hijack_bare_year_label(profile, contact):
+    # "Years at current company" is NOT a years-of-experience question; the
+    # matcher must not fill it with the candidate's total experience. Never guess.
+    r = classify_field(_field("Years at current company"), profile, contact)
+    assert isinstance(r, Unknown)
+
+
 def test_multilingual_labels(profile, contact):
     # French / Spanish / German / Italian variants resolve to the same kinds.
     assert classify_field(_field("Prénom"), profile, contact).kind == "first_name"
@@ -235,6 +242,31 @@ def test_language_proficiency_falls_back_to_fluent(profile, contact):
     )
     assert r.kind == "language_proficiency"
     assert r.value == "Courant"  # "fluent" tier
+
+
+def test_language_proficiency_no_matching_option_is_unknown(profile, contact):
+    # No option matches a known tier (and there is no profile-backed proficiency
+    # value) — the classifier must abort rather than fabricate "Native".
+    r = classify_field(
+        _field(
+            "What is your level of proficiency in English?",
+            type_="select",
+            options=["Select an option", "Beginner", "Intermediate"],
+        ),
+        profile,
+        contact,
+    )
+    assert isinstance(r, Unknown)
+
+
+def test_language_proficiency_empty_options_is_unknown(profile, contact):
+    # Custom listbox serialized with empty options must not fall back to a guess.
+    r = classify_field(
+        _field("Niveau de maîtrise du français", type_="listbox", options=[]),
+        profile,
+        contact,
+    )
+    assert isinstance(r, Unknown)
 
 
 def test_consent_checkbox_checked(profile, contact):
