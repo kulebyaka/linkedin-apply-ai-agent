@@ -10,7 +10,12 @@ from __future__ import annotations
 
 import pytest
 
-from src.agents.application_workflow import create_application_workflow
+from pathlib import Path
+
+from src.agents.application_workflow import (
+    create_application_workflow,
+    get_apply_bridge_from_config,
+)
 from src.config.settings import Settings
 from src.models.state_machine import BusinessState
 from src.models.unified import JobRecord
@@ -47,12 +52,14 @@ class StubBridge:
         advance_results: list[AdvanceResult] | None = None,
         submit_result: SubmitResult | None = None,
         disconnect_on: set[str] | None = None,
+        error_on: set[str] | None = None,
     ) -> None:
         self._opened = opened
         self._forms = list(form_states or [])
         self._advances = list(advance_results or [])
         self._submit = submit_result or SubmitResult(confirmed=True)
         self._disconnect_on = disconnect_on or set()
+        self._error_on = error_on or set()
         self.calls: list[str] = []
         self.discard_reasons: list[str] = []
         self.uploaded: list[tuple[str, str]] = []
@@ -61,6 +68,8 @@ class StubBridge:
     def _maybe_disconnect(self, method: str) -> None:
         if method in self._disconnect_on:
             raise ExtensionUnavailable(f"no session ({method})")
+        if method in self._error_on:
+            raise RuntimeError(f"boom ({method})")
 
     async def open_easy_apply(self, user_id, job_url=None):
         self.calls.append("open_easy_apply")
@@ -269,3 +278,96 @@ class TestSubmitUnconfirmed:
 
         assert record.status == BusinessState.FAILED
         assert "submit_form" in bridge.calls
+
+
+# ---------------------------------------------------------------------------
+# Open / generic-error / validation-error / screenshot branches
+# ---------------------------------------------------------------------------
+class TestOpenFailures:
+    async def test_modal_not_opening_is_failed(self):
+        bridge = StubBridge(opened=False)
+
+        final, record = await _run(bridge)
+
+        assert record.status == BusinessState.FAILED
+        assert "did not open" in (record.error_message or "")
+        assert "read_form_state" not in bridge.calls
+
+    async def test_generic_open_error_is_failed(self):
+        bridge = StubBridge(error_on={"open_easy_apply"})
+
+        final, record = await _run(bridge)
+
+        assert record.status == BusinessState.FAILED
+        assert "open_easy_apply failed" in (record.error_message or "")
+
+
+class TestValidationErrors:
+    async def test_validation_errors_abort_to_manual_required(self):
+        forms = [FormState(step=1, total=2)]
+        advances = [AdvanceResult(advanced=False, errors=["Phone is required", "Bad ZIP"])]
+        bridge = StubBridge(form_states=forms, advance_results=advances)
+
+        final, record = await _run(bridge)
+
+        assert record.status == BusinessState.MANUAL_REQUIRED
+        assert "Phone is required" in (record.error_message or "")
+        assert "discard" in bridge.calls
+        assert "submit_form" not in bridge.calls
+
+
+class TestGenericErrors:
+    async def test_generic_read_form_error_is_failed(self):
+        bridge = StubBridge(error_on={"read_form_state"})
+
+        final, record = await _run(bridge)
+
+        assert record.status == BusinessState.FAILED
+        assert "read_form_state failed" in (record.error_message or "")
+
+    async def test_generic_submit_error_is_failed(self):
+        forms = [FormState(step=1, total=1)]
+        advances = [AdvanceResult(advanced=False)]
+        bridge = StubBridge(
+            form_states=forms, advance_results=advances, error_on={"submit_form"}
+        )
+
+        final, record = await _run(bridge)
+
+        assert record.status == BusinessState.FAILED
+        assert "submit_form failed" in (record.error_message or "")
+
+
+class TestConfirmationScreenshot:
+    async def test_screenshot_persisted_on_applied(self, tmp_path):
+        # A 1x1 transparent PNG, base64-encoded (with a data-URL prefix to exercise
+        # the prefix-stripping branch).
+        png_b64 = (
+            "data:image/png;base64,"
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+        )
+        forms = [FormState(step=1, total=1)]
+        advances = [AdvanceResult(advanced=False)]
+        bridge = StubBridge(
+            form_states=forms,
+            advance_results=advances,
+            submit_result=SubmitResult(
+                confirmed=True, confirmation_text="Application sent", screenshot_b64=png_b64
+            ),
+        )
+
+        final, record = await _run(
+            bridge, settings=_settings(generated_cvs_dir=str(tmp_path))
+        )
+
+        assert record.status == BusinessState.APPLIED
+        shot = final["confirmation_screenshot_path"]
+        assert shot is not None
+        assert Path(shot).exists()
+        assert Path(shot).read_bytes()  # non-empty
+
+
+class TestConfigHelpers:
+    def test_missing_apply_bridge_raises(self):
+        with pytest.raises(RuntimeError, match="ApplyBridge not found"):
+            get_apply_bridge_from_config({"configurable": {}})

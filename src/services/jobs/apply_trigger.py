@@ -48,9 +48,7 @@ def _contact_info_from_master_cv(master_cv_json: dict | None) -> ContactInfo | N
     try:
         return ContactInfo(**contact)
     except Exception:  # noqa: BLE001 — incomplete contact info is non-fatal
-        logger.warning(
-            "Could not parse contact info from master CV; continuing without it"
-        )
+        logger.warning("Could not parse contact info from master CV; continuing without it")
         return None
 
 
@@ -101,9 +99,7 @@ async def trigger_apply(ctx: AppContext, job_id: str, user_id: str) -> BusinessS
         "contact_info": contact_info,
     }
 
-    await ctx.repository.update(
-        job_id, {"status": BusinessState.APPLYING, "error_message": None}
-    )
+    await ctx.repository.update(job_id, {"status": BusinessState.APPLYING, "error_message": None})
 
     dispatcher = ctx.workflow_dispatcher
     if dispatcher is None:

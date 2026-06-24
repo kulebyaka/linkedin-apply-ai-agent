@@ -91,9 +91,7 @@ class WsRelay:
             logger.debug("Extension session for user %s closed", user_id)
         finally:
             await self._sessions.unregister(user_id, ws)
-            await self._fail_user_futures(
-                user_id, BridgeDisconnected("extension disconnected")
-            )
+            await self._fail_user_futures(user_id, BridgeDisconnected("extension disconnected"))
 
     async def _authenticate(self, ws: WebSocket) -> str | None:
         """Run the first-frame auth handshake; return user_id or None on reject."""
@@ -169,9 +167,7 @@ class WsRelay:
                     {"type": "rpc", "id": rid, "method": method, "params": params or {}}
                 )
             except Exception as exc:  # noqa: BLE001 — transport failure during send
-                raise BridgeDisconnected(
-                    f"failed to send RPC to user {user_id}: {exc}"
-                ) from exc
+                raise BridgeDisconnected(f"failed to send RPC to user {user_id}: {exc}") from exc
 
             try:
                 return await asyncio.wait_for(fut, timeout=timeout)

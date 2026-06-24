@@ -202,9 +202,7 @@ async def open_easy_apply_node(
         return _terminal(state, BusinessState.FAILED, error=f"open_easy_apply failed: {exc}")
 
     if not opened:
-        return _terminal(
-            state, BusinessState.FAILED, error="Easy Apply modal did not open"
-        )
+        return _terminal(state, BusinessState.FAILED, error="Easy Apply modal did not open")
 
     state["route"] = "fill"
     return state
@@ -311,9 +309,7 @@ async def submit_node(
 
     if _timed_out(state):
         await _safe_discard(bridge, user_id, "per-application timeout")
-        return _terminal(
-            state, BusinessState.FAILED, error="Application timed out before submit"
-        )
+        return _terminal(state, BusinessState.FAILED, error="Application timed out before submit")
 
     try:
         result = await bridge.submit_form(user_id)
@@ -324,9 +320,7 @@ async def submit_node(
         return _terminal(state, BusinessState.FAILED, error=f"submit_form failed: {exc}")
 
     if not result.confirmed:
-        return _terminal(
-            state, BusinessState.FAILED, error="Submission was not confirmed"
-        )
+        return _terminal(state, BusinessState.FAILED, error="Submission was not confirmed")
 
     state["application_url"] = state.get("job_url")
     state["confirmation_text"] = result.confirmation_text
@@ -366,7 +360,9 @@ async def finalize_node(
         if existing.status != target and target not in allowed:
             logger.warning(
                 "finalize: illegal transition %s → %s for job %s; leaving status unchanged",
-                existing.status, target, job_id,
+                existing.status,
+                target,
+                job_id,
             )
             state["current_step"] = str(existing.status)
             return state
