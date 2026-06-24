@@ -106,7 +106,7 @@ class HITLProcessor:
                 )
 
             if decision.decision == "approved":
-                return await self._handle_approve(job_id)
+                return await self._handle_approve(job_id, user_id)
             elif decision.decision == "declined":
                 return await self._handle_decline(job_id, decision, job_record)
             elif decision.decision == "retry":
@@ -204,14 +204,39 @@ class HITLProcessor:
     # Private helpers
     # =========================================================================
 
-    async def _handle_approve(self, job_id: str) -> HITLDecisionResponse:
-        logger.info("Job %s approved for application (workflow not implemented)", job_id)
+    async def _handle_approve(self, job_id: str, user_id: str) -> HITLDecisionResponse:
+        from src.services.jobs.apply_trigger import (
+            NEEDS_EXTENSION_MESSAGE,
+            trigger_apply,
+        )
+
+        logger.info("Job %s approved; dispatching apply", job_id)
         await self._ctx.repository.update(job_id, {"status": BusinessState.APPROVED})
+
+        try:
+            result_state = await trigger_apply(self._ctx, job_id, user_id)
+        except Exception:
+            # Leave the job in APPROVED so the user can retry via
+            # POST /api/jobs/{id}/apply once their extension is connected.
+            logger.exception("Failed to trigger apply for job %s after approve", job_id)
+            return HITLDecisionResponse(
+                job_id=job_id,
+                status=BusinessState.APPROVED,
+                message=(
+                    "Job approved, but starting the application failed. "
+                    "Retry once your extension is connected."
+                ),
+            )
+
+        if result_state == BusinessState.APPLYING:
+            message = "Job approved. Application started."
+        else:
+            message = NEEDS_EXTENSION_MESSAGE
 
         return HITLDecisionResponse(
             job_id=job_id,
-            status=BusinessState.APPROVED,
-            message="Job approved. Application workflow not yet implemented.",
+            status=result_state,
+            message=message,
         )
 
     async def _handle_decline(

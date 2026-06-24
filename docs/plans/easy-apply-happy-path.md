@@ -154,12 +154,12 @@ Triggering: HITL **approve** dispatches an apply; a new `user.auto_apply` flag l
 - Modify: `src/agents/preparation_workflow.py`
 - Modify: `src/api/main.py`
 
-- [ ] Add a shared `trigger_apply(ctx, job_id, user_id)` helper (in `hitl_processor.py` or a small module): if `ctx.session_store.is_connected(user_id)` → set `APPLYING` + `dispatch_application`; else set `NEEDS_EXTENSION` with message "Open the extension in your browser to apply."
-- [ ] `hitl_processor.py` `_handle_approve` (:207): replace the no-op — set `APPROVED` then call `trigger_apply`. Return a response reflecting `APPLYING` vs `NEEDS_EXTENSION`.
-- [ ] `preparation_workflow.py` `save_to_db_node` (:621): in full mode, if `user.auto_apply` is True → save status `APPROVED` and call `trigger_apply` (else `PENDING` as today). Load `user.auto_apply` via `user_repository` (already available in config).
-- [ ] `api/main.py`: mount `WS /ws/extension` delegating to `ctx.ws_relay.handle_connection`; add `POST /api/jobs/{job_id}/apply` (user-scoped) that re-runs `trigger_apply` for a job in `NEEDS_EXTENSION`/`APPROVED` (manual retry once the extension connects); ensure `PUT /api/users/me` persists `apply_profile` + `auto_apply` (extend the existing `UserUpdateRequest` handling).
-- [ ] Write tests (TestClient + mock bridge/session): approve with connected session → `APPLYING` + dispatch invoked; approve with no session → `NEEDS_EXTENSION`; `auto_apply=True` prep save → `APPROVED` + trigger; `POST /api/jobs/{id}/apply` re-dispatches; WS endpoint rejects a missing/invalid JWT.
-- [ ] Run project test suite - must pass before task 8.
+- [x] Add a shared `trigger_apply(ctx, job_id, user_id)` helper (new `src/services/jobs/apply_trigger.py`): if `ctx.session_store.is_connected(user_id)` → set `APPLYING` + `dispatch_application`; else set `NEEDS_EXTENSION` with message "Open the extension in your browser to apply."
+- [x] `hitl_processor.py` `_handle_approve` (:207): replace the no-op — set `APPROVED` then call `trigger_apply` (now takes `user_id`). Return a response reflecting `APPLYING` vs `NEEDS_EXTENSION`.
+- [x] `preparation_workflow.py` `save_to_db_node` (:621): in full mode, if `user.auto_apply` is True → save status `APPROVED` and call `trigger_apply` (else `PENDING` as today). Load `user.auto_apply` via `user_repository`; `ctx` threaded through the dispatcher's preparation config.
+- [x] `api/main.py`: mount `WS /ws/extension` delegating to `ctx.ws_relay.handle_connection`; add `POST /api/jobs/{job_id}/apply` (user-scoped, in `jobs.py`) that re-runs `trigger_apply` for a job in `NEEDS_EXTENSION`/`APPROVED`; `PUT /api/users/me` already persists `apply_profile` + `auto_apply` via `model_dump(exclude_unset=True)` + repository mapping.
+- [x] Write tests (TestClient + mock bridge/session): approve with connected session → `APPLYING` + dispatch invoked; approve with no session → `NEEDS_EXTENSION`; `auto_apply=True` prep save → `APPROVED` + trigger; `POST /api/jobs/{id}/apply` re-dispatches; WS endpoint rejects a missing/invalid JWT.
+- [x] Run project test suite - must pass before task 8.
 
 ### Task 8: Frontend — Application Profile, auto_apply toggle, status badges
 

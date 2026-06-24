@@ -71,6 +71,8 @@ class WorkflowDispatcher:
                 "thread_id": thread_id,
                 "repository": self._ctx.repository,
                 "user_repository": self._ctx.user_repository,
+                # Needed by save_to_db_node's auto_apply branch to trigger apply.
+                "ctx": self._ctx,
             }
         }
 

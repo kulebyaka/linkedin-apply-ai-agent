@@ -20,7 +20,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -253,6 +253,21 @@ app.include_router(jobs.router)
 app.include_router(hitl.router)
 app.include_router(notifications.router)
 app.include_router(admin.router)
+
+
+@app.websocket("/ws/extension")
+async def extension_ws(websocket: WebSocket) -> None:
+    """Extension bridge endpoint — delegates to the authenticated WS relay.
+
+    The relay runs the first-frame JWT handshake (rejecting missing/invalid
+    tokens with close code 4401), registers the session, and pumps correlated
+    RPC frames between the server's apply workflow and the Chrome extension.
+    """
+    ctx: AppContext = websocket.app.state.ctx
+    if ctx.ws_relay is None:
+        await websocket.close(code=1011)
+        return
+    await ctx.ws_relay.handle_connection(websocket)
 
 
 # Static file serving — MUST be the last mount so it doesn't shadow API routes.

@@ -366,6 +366,44 @@ async def proceed_filtered_out_job(
         raise HTTPException(500, "Failed to proceed with job") from None
 
 
+@router.post("/api/jobs/{job_id}/apply", response_model=JobSubmitResponse)
+async def apply_job(
+    job_id: str, request: Request, user: CurrentUser
+) -> JobSubmitResponse:
+    """Manually (re-)trigger an Easy Apply run for a job awaiting application.
+
+    Used after the extension connects to recover a job parked in
+    ``needs_extension`` (or re-run an ``approved`` job). Dispatches the
+    deterministic application workflow when a session is connected, else parks
+    the job back in ``needs_extension``.
+    """
+    from src.services.jobs.apply_trigger import NEEDS_EXTENSION_MESSAGE, trigger_apply
+
+    ctx = get_ctx(request)
+    job = await ctx.repository.get_for_user(job_id, user.id)
+    if job is None:
+        raise HTTPException(404, f"Job {job_id} not found")
+
+    retriable = {BusinessState.NEEDS_EXTENSION, BusinessState.APPROVED}
+    if job.status not in retriable:
+        raise HTTPException(
+            409, f"Job is not awaiting application (status: {job.status})"
+        )
+
+    try:
+        new_state = await trigger_apply(ctx, job_id, user.id)
+    except Exception as e:
+        logger.error(f"Failed to trigger apply for job {job_id}: {e}", exc_info=True)
+        raise HTTPException(500, "Failed to start application") from None
+
+    message = (
+        "Application started."
+        if new_state == BusinessState.APPLYING
+        else NEEDS_EXTENSION_MESSAGE
+    )
+    return JobSubmitResponse(job_id=job_id, status=new_state, message=message)
+
+
 @router.get("/api/jobs/{job_id}/pdf")
 async def download_job_pdf(job_id: str, request: Request, user: CurrentUser):
     """Download generated CV PDF for a job."""
