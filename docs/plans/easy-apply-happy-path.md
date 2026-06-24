@@ -168,11 +168,11 @@ Triggering: HITL **approve** dispatches an apply; a new `user.auto_apply` flag l
 - Modify: HITL review + history components (status badge map)
 - Modify: auth store if it surfaces user fields
 
-- [ ] Settings: add an "Application Profile" card editing all `ApplyProfile` fields + an `auto_apply` toggle; save via `PUT /api/users/me`. Show a hint that an incomplete profile causes applies to abort to "manual required".
-- [ ] Add badges/labels for the new statuses `applied`, `manual_required` (with a "Finish manually" link to the LinkedIn job URL), and `needs_extension` (with an "Apply now" button hitting `POST /api/jobs/{id}/apply`).
-- [ ] Surface extension connection state where useful (e.g., a banner prompting "Connect extension" linking to `/extension-auth`).
-- [ ] Write/extend frontend tests (component or existing E2E harness) for the Application Profile form save and the new status rendering.
-- [ ] Run project test suite - must pass before task 9.
+- [x] Settings: add an "Application Profile" card editing all `ApplyProfile` fields + an `auto_apply` toggle; save via `PUT /api/users/me`. Show a hint that an incomplete profile causes applies to abort to "manual required". (New `ApplicationProfileSection.svelte`; tri-state selects for nullable booleans; numeric binding for years; `updateProfile` extended for `apply_profile`/`auto_apply`.)
+- [x] Add badges/labels for the new statuses `applied`, `manual_required` (with a "Finish manually" link to the LinkedIn job URL), and `needs_extension` (with an "Apply now" button hitting `POST /api/jobs/{id}/apply`). (`ApplicationsTable.svelte` badge map + actions; new `applyJob` API client.)
+- [x] Surface extension connection state where useful (e.g., a banner prompting "Connect extension" linking to `/extension-auth`). (Banner on the Applications page when any job is in `needs_extension`.)
+- [x] Write/extend frontend tests (component or existing E2E harness) for the Application Profile form save and the new status rendering. (`tests/e2e/test_apply_ui.py`; added `/__test__/ensure-test-user` harness endpoint so PUT-by-id persists.)
+- [x] Run project test suite - must pass before task 9. (859 unit passed; new e2e 3/3 passed; pre-existing unrelated failures: `test_llm_dropdowns` needs an external dev server, one `test_admin_ui` role-toggle fails on committed code too.)
 
 ### Task 9: Verify acceptance criteria
 

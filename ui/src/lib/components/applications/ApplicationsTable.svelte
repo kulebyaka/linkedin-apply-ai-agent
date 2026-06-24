@@ -8,9 +8,11 @@
 		onReview: (jobId: string) => void;
 		onDownload: (job: AdminJobRecord) => void;
 		onProceed: (job: AdminJobRecord) => void;
+		onApply: (job: AdminJobRecord) => void;
 	}
 
-	let { jobs, loading = false, onDelete, onReview, onDownload, onProceed }: Props = $props();
+	let { jobs, loading = false, onDelete, onReview, onDownload, onProceed, onApply }: Props =
+		$props();
 
 	/** Statuses that have a finished CV but no Review action — offer a download instead. */
 	const CV_DOWNLOAD_STATUSES = new Set(['approved', 'applied', 'completed']);
@@ -44,6 +46,8 @@
 			retrying: 'bg-orange-100 text-orange-900',
 			applying: 'bg-indigo-100 text-indigo-900',
 			applied: 'bg-emerald-300 text-emerald-900',
+			manual_required: 'bg-amber-200 text-amber-900',
+			needs_extension: 'bg-purple-100 text-purple-900',
 			failed: 'bg-red-200 text-red-900',
 			scrape_failed: 'bg-red-100 text-red-900',
 			filtered_out: 'bg-zinc-200 text-zinc-700',
@@ -176,6 +180,23 @@
 									>
 										Proceed Anyway
 									</button>
+								{:else if j.status === 'needs_extension'}
+									<button
+										type="button"
+										onclick={() => onApply(j)}
+										class="font-mono border-2 border-[var(--color-foreground)] bg-purple-200 px-2 py-1 text-[10px] uppercase tracking-wider text-purple-900 hover:-translate-y-0.5"
+									>
+										Apply now
+									</button>
+								{:else if j.status === 'manual_required' && jobUrl(j)}
+									<a
+										href={jobUrl(j)}
+										target="_blank"
+										rel="noopener noreferrer"
+										class="font-mono border-2 border-[var(--color-foreground)] bg-amber-200 px-2 py-1 text-[10px] uppercase tracking-wider text-amber-900 hover:-translate-y-0.5"
+									>
+										Finish manually
+									</a>
 								{/if}
 								{#if jobUrl(j)}
 									<a

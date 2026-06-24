@@ -5,6 +5,7 @@
 	import type { UserSearchPreferences } from '$lib/api/auth';
 	import type { UserFilterPreferences } from '$lib/types/index';
 	import ProfileSection from '$lib/components/settings/ProfileSection.svelte';
+	import ApplicationProfileSection from '$lib/components/settings/ApplicationProfileSection.svelte';
 	import CVUploadSection from '$lib/components/settings/CVUploadSection.svelte';
 	import SearchPreferencesSection from '$lib/components/settings/SearchPreferencesSection.svelte';
 	import FilterPreferencesSection from '$lib/components/settings/FilterPreferencesSection.svelte';
@@ -52,6 +53,7 @@
 			<div class="flex flex-col gap-6">
 				<ProfileSection user={auth.user} />
 				<CVUploadSection user={auth.user} />
+				<ApplicationProfileSection user={auth.user} />
 				{#if searchPrefs}
 					<SearchPreferencesSection prefs={searchPrefs} />
 				{/if}
