@@ -117,17 +117,17 @@ Triggering: HITL **approve** dispatches an apply; a new `user.auto_apply` flag l
 - Create: `src/services/linkedin/apply_bridge.py`
 - Modify: `src/context.py`
 
-- [ ] `apply_bridge.py`: `class ApplyBridge` constructed with `WsRelay` + settings. Async methods (the future MCP tool surface):
+- [x] `apply_bridge.py`: `class ApplyBridge` constructed with `WsRelay` + settings. Async methods (the future MCP tool surface):
   - `read_form_state(user_id) -> FormState` — RPC `serialize_form`; run `field_classifier` over each field; attach per-field `fill_plan` and a list of `unknown_fields`; detect daily-limit from `flags.page_text_excerpt` against `DAILY_LIMIT_PATTERNS`.
   - `fill_field(user_id, selector, value)` — RPC; raise on `error`.
   - `advance_step(user_id) -> {advanced, errors[]}` — RPC `click_button("next"|"review")`, wait, re-`serialize_form`, scan `[role=alert]`/inline errors (`:800-825`, `:1436-1477`).
   - `upload_file(user_id, selector, pdf_path)` — read the tailored PDF from `data/generated_cvs/{user_id}/{job_id}.pdf`, base64-encode, RPC `upload_file`.
   - `submit_form(user_id) -> {confirmed, screenshot_b64}` — RPC un-follow company (`:1377-1408`), `click_button("submit")`, `find_and_click_done`, capture confirmation (`:1479-1545`).
   - `discard(user_id, reason)` — RPC `discard_application`.
-- [ ] All methods honor `apply_rpc_timeout_seconds`; translate `BridgeDisconnected` into a typed error the workflow maps to `needs_extension`.
-- [ ] Expose `ctx.apply_bridge` in `create_app_context()`.
-- [ ] Write unit tests with a mock `WsRelay`: `read_form_state` classification + unknown-field surfacing + daily-limit flag; `submit_form` un-follow-then-submit ordering; `upload_file` reads+encodes the right path; disconnect → typed error.
-- [ ] Run project test suite - must pass before task 6.
+- [x] All methods honor `apply_rpc_timeout_seconds`; translate `BridgeDisconnected` into a typed error the workflow maps to `needs_extension`.
+- [x] Expose `ctx.apply_bridge` in `create_app_context()`.
+- [x] Write unit tests with a mock `WsRelay`: `read_form_state` classification + unknown-field surfacing + daily-limit flag; `submit_form` un-follow-then-submit ordering; `upload_file` reads+encodes the right path; disconnect → typed error.
+- [x] Run project test suite - must pass before task 6.
 
 ### Task 6: Application workflow (deterministic LangGraph) + dispatcher
 

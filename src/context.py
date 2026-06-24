@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from src.services.jobs.job_queue import ConsumerManager, JobQueue
     from src.services.jobs.refinement_scheduler import RefinementScheduler
     from src.services.jobs.scheduler import LinkedInSearchScheduler
+    from src.services.linkedin.apply_bridge import ApplyBridge
     from src.services.linkedin.browser_automation import LinkedInAutomation
     from src.services.notifications.notification_repository import NotificationRepository
 
@@ -66,6 +67,7 @@ class AppContext:
     # Easy Apply browser bridge (extension WebSocket relay + session registry)
     session_store: SessionStore | None = None
     ws_relay: WsRelay | None = None
+    apply_bridge: ApplyBridge | None = None
 
     # Lock for LinkedIn search/browser initialization (manual trigger path).
     linkedin_init_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
@@ -143,6 +145,7 @@ def create_app_context(
     from src.services.jobs.hitl_processor import HITLProcessor
     from src.services.jobs.job_orchestrator import JobOrchestrator
     from src.services.jobs.job_queue import ConsumerManager, JobQueue
+    from src.services.linkedin.apply_bridge import ApplyBridge
     from src.services.notifications.notification_repository import NotificationRepository
 
     if settings is None:
@@ -165,6 +168,7 @@ def create_app_context(
 
     session_store = SessionStore()
     ws_relay = WsRelay(session_store, auth_service)
+    apply_bridge = ApplyBridge(ws_relay, settings)
 
     ctx = AppContext(
         repository=repository,
@@ -182,6 +186,7 @@ def create_app_context(
         consumer_manager=ConsumerManager(),
         session_store=session_store,
         ws_relay=ws_relay,
+        apply_bridge=apply_bridge,
     )
 
     # Wire domain services (they need the full context)
