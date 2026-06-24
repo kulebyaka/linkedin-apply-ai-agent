@@ -36,8 +36,12 @@ src/
 ├── agents/                     # LangGraph workflow definitions (async-native)
 │   ├── _shared.py              # Shared workflow utilities (LLM init, CV compose, PDF gen)
 │   ├── preparation_workflow.py # Main pipeline: job → CV → PDF → DB
-│   ├── application_workflow.py # Apply to jobs after HITL approval (stubs)
+│   ├── application_workflow.py # Deterministic Easy Apply over the WS bridge (no LLM)
+│   ├── dispatcher.py           # WorkflowDispatcher: track + recover preparation/retry/application runs
 │   └── retry_workflow.py       # Re-compose CV with user feedback
+├── bridge/                     # WebSocket bridge to the Chrome extension actuator
+│   ├── session_store.py        # user_id → WebSocket registry (newest wins, asyncio.Lock)
+│   └── ws_relay.py             # WsRelay: JWT auth, RPC correlation, timeout/disconnect handling
 ├── llm/                        # LLM provider integrations
 │   └── provider.py             # Abstract base + provider implementations
 ├── services/                   # Business logic services (grouped by domain)
@@ -61,10 +65,13 @@ src/
 │   │   ├── job_queue.py        # Async job queue + ConsumerManager for lifecycle
 │   │   ├── job_fixtures.py     # Record/replay scraped jobs for testing
 │   │   └── scheduler.py        # APScheduler-based per-user LinkedIn search scheduler
-│   └── linkedin/               # LinkedIn scraping & browser automation
+│   └── linkedin/               # LinkedIn scraping, browser automation & Easy Apply
 │       ├── browser_automation.py # Playwright stealth browser with cookie auth
 │       ├── linkedin_scraper.py # LinkedIn job search results scraper
-│       └── linkedin_search.py  # LinkedIn search URL builder + filters
+│       ├── linkedin_search.py  # LinkedIn search URL builder + filters
+│       ├── easy_apply_selectors.py # Ported AutoApplyMax selectors + daily-limit/Done patterns
+│       ├── field_classifier.py # Multilingual label→profile-value classifier (Unknown = abort)
+│       └── apply_bridge.py     # ApplyBridge: deterministic per-field tools over WsRelay
 ├── models/                     # Pydantic data models
 │   ├── job.py                  # Job posting models
 │   ├── cv.py                   # CV data models
@@ -79,6 +86,12 @@ src/
 │   └── settings.py             # Pydantic settings with env vars
 └── utils/                      # Utilities
     └── logger.py               # Logging setup
+
+extension/                      # Chrome MV3 extension (dumb DOM actuator)
+├── manifest.json               # MV3; on-demand injection, externally_connectable for /extension-auth
+├── background.js               # WS bridge to /ws/extension, JWT auth, routes RPC to LinkedIn tab
+├── content_script.js           # DOM primitives: serialize_form, fill_field, upload, click, discard
+└── popup/                      # Connection status + Pause/Resume + last-apply result
 
 data/
 ├── cv/                         # Legacy master CV location (now stored in User DB record)
@@ -144,7 +157,7 @@ The system uses a **two-workflow pipeline** split at the HITL boundary, enabling
 |----------|------|-------------|
 | Preparation | `src/agents/preparation_workflow.py` | Main pipeline: job input → CV PDF → DB |
 | Retry | `src/agents/retry_workflow.py` | Re-compose CV with user feedback |
-| Application | `src/agents/application_workflow.py` | Apply to job (stubs only) |
+| Application | `src/agents/application_workflow.py` | Deterministic Easy Apply over the WS bridge (no LLM) |
 | Shared | `src/agents/_shared.py` | Common utilities: LLM init, CV compose, PDF gen, master CV loading |
 
 ## Key Design Patterns
@@ -251,12 +264,16 @@ See `src/llm/provider.py` module documentation for detailed implementation.
 3. **generate_pdf_node**: Regenerates PDF
 4. **update_db_node**: Updates record, returns to pending status
 
-### Application Workflow Nodes (Stubs)
-1. **load_from_db_node**: Loads approved job
-2. **apply_deep_agent_node**: Browser automation via Playwright (not implemented)
-3. **apply_linkedin_node**: LinkedIn Easy Apply automation (not implemented)
-4. **apply_manual_node**: Marks job for manual application
-5. **update_db_node**: Records application result
+### Application Workflow Nodes (Deterministic Easy Apply, no LLM)
+The apply workflow drives the LinkedIn Easy Apply modal field-by-field over the WebSocket
+bridge (`ApplyBridge` → `WsRelay` → extension content script). No LLM is involved; field
+values come straight from the user's `ApplyProfile` + CV `ContactInfo` via `field_classifier`.
+1. **open_easy_apply_node**: Navigate + click Easy Apply (handles the safety-reminder modal); verify the modal opened. On `BridgeDisconnected`/`ExtensionUnavailable` → `needs_extension`.
+2. **fill_step_node**: Loop (max 10 steps). `read_form_state` → if any `unknown_fields` (unrecognized question, or recognized field with no profile value) → `discard` + `manual_required` (never guess). Otherwise `upload_file` for file inputs + `fill_field` per `fill_plan`, then `advance_step`. Unfixable validation errors → `discard` + `manual_required`. Daily-limit flag → stop without submit. Submit button present → go to submit.
+3. **submit_node**: `submit_form` (un-follow company, click Submit, find-and-click Done, capture confirmation). `confirmed` → `applied`, else `failed`.
+4. **finalize_node**: Persists the terminal state (`APPLIED` + application_url + saved confirmation screenshot, `MANUAL_REQUIRED` + reason, `NEEDS_EXTENSION`, or `FAILED` + error), respecting `ALLOWED_TRANSITIONS`.
+
+Cross-cutting: per-app wall-clock timeout (`apply_per_app_timeout_seconds`) → discard + fail; mid-apply bridge drop → `needs_extension`.
 
 ### Master CV Format
 - Stored as JSON in each user's DB record (`UserTable.master_cv_json`)
@@ -281,7 +298,8 @@ See `src/llm/provider.py` module documentation for detailed implementation.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| PUT | `/api/users/me` | Update user profile (display_name, master_cv_json, search_preferences) |
+| PUT | `/api/users/me` | Update user profile (display_name, master_cv_json, search_preferences, apply_profile, auto_apply) |
+| GET | `/api/auth/extension-token` | Mint a short-lived JWT for the Chrome extension (session JWT is httpOnly; `/extension-auth` posts this to the extension) |
 | GET | `/api/users/me/search-preferences` | Get current search preferences |
 | PUT | `/api/users/me/search-preferences` | Update search preferences |
 | GET | `/api/users/me/filter-preferences` | Get current filter preferences |
@@ -297,9 +315,16 @@ See `src/llm/provider.py` module documentation for detailed implementation.
 | GET | `/api/jobs/{job_id}/pdf` | Download generated CV PDF |
 | GET | `/api/jobs/{job_id}/html` | Get generated CV as HTML |
 | GET | `/api/hitl/pending` | Get all jobs pending HITL review |
-| POST | `/api/hitl/{job_id}/decide` | Submit HITL decision (approve/decline/retry) |
+| POST | `/api/hitl/{job_id}/decide` | Submit HITL decision (approve/decline/retry) — approve dispatches the apply (or sets `needs_extension`) |
+| POST | `/api/jobs/{job_id}/apply` | (Re-)trigger Easy Apply for a job in `needs_extension`/`approved` — used by the "Apply now" button after connecting the extension |
 | GET | `/api/hitl/history` | Get application history |
 | DELETE | `/api/jobs/cleanup` | Clean up old job records |
+
+### Extension Bridge (auth via JWT in first WS frame)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| WS | `/ws/extension` | Chrome extension WebSocket; first frame `{"type":"auth","token":...}`, then JSON-RPC tool calls relayed to the LinkedIn tab |
 
 ### System (public)
 
@@ -331,12 +356,13 @@ All routes depend on `get_admin_user`, which raises 403 for non-admin callers.
 ### User & Auth Models (`src/models/user.py`)
 
 - `UserRole` - Enum of role values: `TRIAL = "trial"`, `PREMIUM = "premium"`, `ADMIN = "admin"`. Extensible.
-- `User` - User entity: id, email, display_name, `role` (`UserRole`, default `trial`), master_cv_json, search_preferences, filter_preferences, timestamps
+- `User` - User entity: id, email, display_name, `role` (`UserRole`, default `trial`), master_cv_json, search_preferences, filter_preferences, `apply_profile` (`ApplyProfile | None`), `auto_apply` (bool, default False), timestamps
+- `ApplyProfile` - Structured answers for Easy Apply screening fields (all optional; absence = "unknown" → abort to `manual_required`): `phone_country_code`, `years_experience`, `expected_salary`, `needs_visa_sponsorship`, `legally_authorized`, `willing_to_relocate`, `drivers_license`. Helper `is_complete_for(required_kinds)` used by the classifier/abort logic.
 - `LoginRequest` - Email input for magic link request
 - `LoginResponse` - Success message after magic link sent
 - `VerifyRequest` - Token for magic link verification
 - `AuthResponse` - User object + message after successful auth
-- `UserUpdateRequest` - Optional fields for profile update (display_name, master_cv_json, search_preferences, filter_preferences)
+- `UserUpdateRequest` - Optional fields for profile update (display_name, master_cv_json, search_preferences, filter_preferences, apply_profile, auto_apply)
 - `UserSearchPreferences` - Mirrors LinkedInSearchParams: keywords, location, remote_filter, date_posted, experience_level, job_type, easy_apply_only, max_jobs
 
 ### Core Models (`src/models/unified.py`)
@@ -352,8 +378,11 @@ All routes depend on `get_admin_user`, which raises 403 for non-admin callers.
 
 ### State Machine (`src/models/state_machine.py`)
 
-- `BusinessState` - Job lifecycle states: queued, processing, cv_ready, pending_review, approved, declined, retrying, applying, applied, failed, filtered_out
+- `BusinessState` - Job lifecycle states: queued, processing, cv_ready, pending_review, approved, declined, retrying, applying, applied, failed, filtered_out, needs_extension, manual_required
   - `filtered_out`: terminal state for LLM-rejected jobs (score below reject threshold or hard disqualifier); reachable from `queued` and `processing`
+  - `needs_extension`: recoverable state when an apply fires but no extension WebSocket is connected (or it drops mid-apply); user re-triggers via `POST /api/jobs/{id}/apply`. Transitions to `applying` or `failed`.
+  - `manual_required`: terminal state when the apply hits an unrecognized/unanswerable field; the modal is discarded cleanly and the user finishes manually on LinkedIn.
+  - `auto_apply` save path: `queued`/`processing` may go straight to `approved` (skipping HITL) when `user.auto_apply` is set.
 - `WorkflowStep` - Transient step tracking: extracting, filtering, composing_cv, generating_pdf, etc.
 - `ALLOWED_TRANSITIONS` - Valid state change map, enforced by repository
 - `InvalidStateTransitionError` - Raised on illegal transitions
@@ -400,7 +429,13 @@ All routes depend on `get_admin_user`, which raises 403 for non-admin callers.
 | **Async Job Queue** | ✅ Complete | `src/services/job_queue.py` - queue with ConsumerManager, user_id tagging |
 | **LinkedIn Search Scheduler** | ✅ Complete | `src/services/scheduler.py` - per-user search with APScheduler |
 | **HITL Frontend UI** | ✅ Complete | Svelte 5 SPA with Tinder-like review interface |
-| **Application Workflow** | 🟡 Stubs | `src/agents/application_workflow.py` - stubs only |
+| **Application Workflow** | ✅ Complete | `src/agents/application_workflow.py` — deterministic Easy Apply (no LLM); aborts to `manual_required` on unknown fields |
+| **WebSocket Bridge** | ✅ Complete | `src/bridge/` — `SessionStore` + `WsRelay` (JWT auth, RPC correlation, timeout/disconnect handling) |
+| **Chrome MV3 Extension** | ✅ Complete | `extension/` — DOM actuator (on-demand inject, content-script primitives, popup, `/extension-auth` flow) |
+| **Easy Apply Selectors** | ✅ Complete | `src/services/linkedin/easy_apply_selectors.py` — ported AutoApplyMax selectors + daily-limit/Done patterns |
+| **Field Classifier** | ✅ Complete | `src/services/linkedin/field_classifier.py` — multilingual label→profile-value matching; `Unknown` ⇒ abort (no guessing) |
+| **Apply Bridge** | ✅ Complete | `src/services/linkedin/apply_bridge.py` — deterministic per-field tools (MCP-wrap-ready for the LLM sprint) |
+| **Apply Triggers** | ✅ Complete | `src/services/jobs/apply_trigger.py` — HITL approve + `auto_apply` save-path dispatch; `needs_extension` fail-fast |
 | **Job Filter (LLM)** | ✅ Complete | `src/services/job_filter.py` — two-threshold routing, hidden disqualifier detection, per-user prompt, HITL badge |
 | **Admin Role & Admin Page** | ✅ Complete | `UserRole` enum + `role` column, `get_admin_user` dependency, `/api/admin/*` endpoints, `/admin` UI (jobs / queue / errors / users), `scripts/promote_user.py` CLI |
 
@@ -443,6 +478,13 @@ All settings in `.env`:
   - `JOB_FILTER_ENABLED=true` - enable LLM-based job filtering globally
   - `JOB_FILTER_REJECT_THRESHOLD=30` - jobs scoring below this are saved as `filtered_out` (skips CV generation)
   - `JOB_FILTER_WARNING_THRESHOLD=70` - jobs scoring below this show warning badge + red flags in HITL review
+- **Easy Apply / Extension Bridge Configuration:**
+  - `EASY_APPLY_ENABLED=true` - feature flag for deterministic Easy Apply automation
+  - `APPLY_PER_APP_TIMEOUT_SECONDS=180` - wall-clock budget for a single application (else discard + fail)
+  - `APPLY_STUCK_TIMEOUT_SECONDS=120` - no-progress watchdog within an application
+  - `APPLY_RPC_TIMEOUT_SECONDS=30` - per-RPC timeout over the WS bridge
+  - `APPLY_DAILY_LIMIT_DETECTION=true` - stop (do not retry) on LinkedIn daily-limit messages
+  - `EXTENSION_ID` - Chrome-assigned unpacked-extension id; the MV3 `externally_connectable` block lists the app origin and `/extension-auth` targets this id when handing over the JWT
 
 **Never commit `.env` or real CV data to git!**
 
@@ -489,8 +531,14 @@ All settings in `.env`:
 
 ## Next Steps
 
-1. **Implement Application Workflow** - Deep agent with Playwright MCP for browser automation
-2. **LinkedIn Easy Apply** - Automated application submission via browser automation
+The deterministic, no-LLM Easy Apply happy path is **shipped** (WS bridge + Chrome extension + field classifier + apply workflow). Remaining work is the deferred **LLM sprint**:
+
+1. **LLM form-fill agent** - wrap the existing `ApplyBridge` tools with `create_sdk_mcp_server`/`@tool` (the WS protocol is already MCP-wrap-ready) and drive non-deterministic screening questions instead of aborting to `manual_required`.
+2. **Vision fallback** - screenshot-driven field extraction for non-LinkedIn ATS (the `take_screenshot` primitive exists; only used for confirmation capture today).
+3. **Placeholder / PII substitution** - swap real values for tokens before tool results reach the LLM + Langfuse traces.
+4. **Post-submission notifications** - email/Telegram with the confirmation screenshot for `auto_apply` runs.
+
+See `docs/plans/completed/easy-apply-happy-path.md` ("Out of Scope") and `docs/plans/ARCHITECTURE-browser-agent.md` for details.
 
 ## Reference Implementations
 

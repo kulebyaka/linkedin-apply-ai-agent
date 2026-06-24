@@ -6,6 +6,39 @@
 
 ---
 
+## 0. Implementation status — what was actually built (no-LLM sprint)
+
+> **This is the source of truth for the shipped delta.** The sections below describe the
+> *target* architecture (with the LLM agent + vision); the Easy Apply happy-path sprint
+> (`docs/plans/completed/easy-apply-happy-path.md`) built a **deterministic, no-LLM** subset.
+> The bridge tool signatures are written **MCP-wrap-ready**, so the LLM layer is additive and
+> the WS protocol does not change when it lands.
+
+**Built (deterministic):**
+
+- **WS bridge** — `src/bridge/session_store.py` (`SessionStore`, one session/user) + `src/bridge/ws_relay.py` (`WsRelay`: JWT auth on first frame, RPC correlation ids, timeout/disconnect handling). Mounted at `WS /ws/extension`.
+- **Chrome MV3 extension** — `extension/` (manifest, background SW WS bridge, on-demand-injected `content_script.js` DOM primitives, popup). `/extension-auth` page + `GET /api/auth/extension-token` hand the JWT to the extension (`chrome.storage.session`).
+- **Deterministic classifier in place of the agent** — `src/services/linkedin/field_classifier.py` ports AutoApplyMax's multilingual label regexes and resolves values from `ApplyProfile` + CV `ContactInfo`. Selectors/patterns in `src/services/linkedin/easy_apply_selectors.py`.
+- **Apply bridge tools** — `src/services/linkedin/apply_bridge.py` (`ApplyBridge`): `read_form_state`, `fill_field`, `advance_step`, `upload_file`, `submit_form`, `discard`, `open_easy_apply`. Plain async methods (NOT `@tool`/`create_sdk_mcp_server` yet — YAGNI until there's an agent).
+- **Deterministic apply workflow** — `src/agents/application_workflow.py` (LangGraph, no LLM): `open_easy_apply → fill_step (loop) → submit → finalize`. Dispatched via `WorkflowDispatcher.dispatch_application`.
+- **Triggers** — `src/services/jobs/apply_trigger.py`: HITL approve and the `auto_apply` prep save-path both call `trigger_apply`.
+
+**New recovery states + tool not in the original design:**
+
+- `BusinessState.MANUAL_REQUIRED` (terminal) — any unrecognized/unanswerable field → **abort, discard the modal, never guess**. This replaces the original "AWAITING_APPROVAL edit" loop for unknowns.
+- `BusinessState.NEEDS_EXTENSION` (recoverable) — apply fired with no connected extension, or the WS dropped mid-apply. User re-triggers via `POST /api/jobs/{id}/apply`.
+- `discard` tool (ported from AutoApplyMax) — cleanly dismisses the Easy Apply modal on abort/timeout.
+
+**Deferred to the LLM sprint (described below but NOT built):**
+
+- The **Claude Agent SDK loop**, per-field LLM decisions, and the in-process **MCP server** (§5 `@tool`/`create_sdk_mcp_server`, §11 Phase 2).
+- The **vision subagent** / `take_screenshot`-driven extraction (§6, §11 Phase 3). The `take_screenshot` primitive exists but is used only for confirmation capture.
+- **Placeholder / PII substitution** (§7) — with no LLM there is no untrusted context to protect; the server already holds the real values and sends them straight to `fill_field`. The bridge layer marks where the swap will go.
+- **`await_user_approval` mid-apply preview** and post-submission notifications (§5, §9).
+- AutoApplyMax-style **"guess" answers** for unknown questions — deliberately excluded (we abort to `manual_required`).
+
+---
+
 ## 1. Design principles
 
 | Principle | Decision |

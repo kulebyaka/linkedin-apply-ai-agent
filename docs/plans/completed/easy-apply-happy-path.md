@@ -186,10 +186,10 @@ Triggering: HITL **approve** dispatches an apply; a new `user.auto_apply` flag l
 
 ### Task 10: Update documentation
 
-- [ ] Update `CLAUDE.md`: mark Application Workflow ✅ (deterministic, no-LLM); document the WS bridge, `ApplyProfile`/`auto_apply`, new `BusinessState`s (`manual_required`, `needs_extension`), the `extension/` directory, and the new endpoints (`WS /ws/extension`, `POST /api/jobs/{id}/apply`).
-- [ ] Amend `docs/plans/ARCHITECTURE-browser-agent.md` to record the no-LLM deltas actually built: recovery states + `discard` tool, deterministic classifier in place of the agent, MCP/placeholder/vision **deferred** to the LLM sprint (and note the bridge tool signatures are MCP-wrap-ready).
-- [ ] Update `README.md` if user-facing (extension install + connect steps).
-- [ ] Move this plan to `docs/plans/completed/`.
+- [x] Update `CLAUDE.md`: mark Application Workflow ✅ (deterministic, no-LLM); document the WS bridge, `ApplyProfile`/`auto_apply`, new `BusinessState`s (`manual_required`, `needs_extension`), the `extension/` directory, and the new endpoints (`WS /ws/extension`, `POST /api/jobs/{id}/apply`).
+- [x] Amend `docs/plans/ARCHITECTURE-browser-agent.md` to record the no-LLM deltas actually built: recovery states + `discard` tool, deterministic classifier in place of the agent, MCP/placeholder/vision **deferred** to the LLM sprint (and note the bridge tool signatures are MCP-wrap-ready).
+- [x] Update `README.md` if user-facing (extension install + connect steps).
+- [x] Move this plan to `docs/plans/completed/`.
 
 ## Out of Scope (deferred to the LLM sprint)
 
