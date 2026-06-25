@@ -62,13 +62,27 @@ class FakeWebSocket:
 
 
 class FakeAuthService:
-    """Decodes only the literal token 'good-token' → a fixed user_id."""
+    """Decodes a few literal tokens for the relay handshake tests.
+
+    - ``good-token`` → extension-scoped token (the only kind the bridge accepts).
+    - ``session-token`` → a normal session JWT (no ``scope``); must be rejected.
+    Anything else raises ``ValueError`` like a malformed/invalid JWT.
+    """
+
+    EXTENSION_SCOPE = "extension"
 
     def __init__(self, user_id: str = "user-1") -> None:
         self._user_id = user_id
 
     def decode_jwt(self, token: str) -> dict:
         if token == "good-token":
+            return {
+                "user_id": self._user_id,
+                "email": "u@example.com",
+                "scope": self.EXTENSION_SCOPE,
+            }
+        if token == "session-token":
+            # A valid session JWT, but not scoped for the extension bridge.
             return {"user_id": self._user_id, "email": "u@example.com"}
         raise ValueError("Invalid JWT token")
 
@@ -165,6 +179,19 @@ class TestWsRelayAuth:
 
         assert ws.closed_code == 4401
 
+    async def test_rejects_unscoped_session_token(self):
+        """A normal session JWT (no extension scope) must not open the bridge."""
+        store = SessionStore()
+        relay = WsRelay(store, FakeAuthService())
+        ws = FakeWebSocket()
+        ws.feed({"type": "auth", "token": "session-token"})
+
+        await relay.handle_connection(ws)
+
+        assert ws.closed_code == 4401
+        assert {"type": "ready"} not in ws.sent
+        assert await store.is_connected("user-1") is False
+
     async def test_displaces_previous_session(self):
         store = SessionStore()
         relay = WsRelay(store, FakeAuthService())
@@ -253,6 +280,37 @@ class TestWsRelayRpc:
             await relay.send_rpc("user-1", "serialize_form", {}, timeout=2)
 
         await ws._handler_task  # type: ignore[attr-defined]
+
+    async def test_displacement_fails_in_flight_rpc(self):
+        """A newer session displacing the old one must fail the old socket's
+        in-flight RPCs with BridgeDisconnected, not leave them hanging until
+        BridgeTimeout (which the apply bridge would treat as a hard failure)."""
+        store = SessionStore()
+        relay = WsRelay(store, FakeAuthService())
+        old = await self._connect(relay, store)
+
+        rpc_task = asyncio.create_task(relay.send_rpc("user-1", "serialize_form", {}, timeout=5))
+        # Wait until the RPC has been dispatched to the (soon-to-be) old socket.
+        for _ in range(50):
+            if any(f.get("type") == "rpc" for f in old.sent):
+                break
+            await asyncio.sleep(0)
+        assert any(f.get("type") == "rpc" for f in old.sent)
+
+        # A new session connects and displaces the old one.
+        new = FakeWebSocket()
+        new.feed({"type": "auth", "token": "good-token"})
+        new_task = asyncio.create_task(relay.handle_connection(new))
+
+        with pytest.raises(BridgeDisconnected):
+            await rpc_task
+
+        assert old.closed_code == 4000  # superseded
+
+        old.disconnect()
+        new.disconnect()
+        await old._handler_task  # type: ignore[attr-defined]
+        await new_task
 
     async def test_rpc_send_failure_is_disconnected(self):
         store = SessionStore()

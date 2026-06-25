@@ -197,6 +197,10 @@ class Settings(BaseSettings):
     magic_link_ttl_minutes: int = 15  # same for everyone
     jwt_secret: str = "change-me-in-production"
     jwt_expiry_days: int = 30  # same for everyone
+    # Extension WS-bridge token: short-lived + scoped so a leaked token can't be
+    # replayed as a full API session (it's handed to browser JS, unlike the
+    # httpOnly session cookie). Rejected by get_current_user/get_optional_user.
+    extension_token_ttl_minutes: int = 720  # 12h
 
     # Local-development auth bypass. When true, exposes POST /api/auth/dev-login
     # which mints a JWT for `dev_auth_email` without an email round-trip. Refuses

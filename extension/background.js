@@ -146,6 +146,18 @@ function reply(id, result, error) {
 }
 
 // ---- RPC routing to the active LinkedIn tab --------------------------------
+function isLinkedInUrl(url) {
+  try {
+    const u = new URL(url);
+    return (
+      u.protocol === 'https:' &&
+      (u.hostname === 'linkedin.com' || u.hostname.endsWith('.linkedin.com'))
+    );
+  } catch (_e) {
+    return false;
+  }
+}
+
 async function findLinkedInTab() {
   const tabs = await chrome.tabs.query({ url: 'https://www.linkedin.com/*' });
   // Prefer the active+focused tab if it's LinkedIn; else the first match.
@@ -213,7 +225,12 @@ async function routeRpc(method, params) {
 
   // Background may navigate before driving the form. Wait for the load to
   // complete so the Easy Apply button exists when the next RPC fires.
+  // Defense in depth: only ever navigate the LinkedIn tab to a LinkedIn URL so
+  // a stray/malformed target can't redirect the user's browser elsewhere.
   if (method === 'navigate' && params.url) {
+    if (!isLinkedInUrl(params.url)) {
+      return { error: 'refusing to navigate to non-LinkedIn URL' };
+    }
     const loaded = waitForTabLoad(tab.id);
     await chrome.tabs.update(tab.id, { url: params.url });
     await loaded;

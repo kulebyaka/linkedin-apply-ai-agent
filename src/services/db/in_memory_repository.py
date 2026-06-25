@@ -97,6 +97,27 @@ class InMemoryJobRepository(JobRepository):
             job.updated_at = datetime.now(tz=timezone.utc)
             return job
 
+    async def try_claim_for_apply(self, job_id: str) -> JobRecord | None:
+        claimable = (BusinessState.APPROVED, BusinessState.NEEDS_EXTENSION)
+        async with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                return None
+            status = job.status
+            if not isinstance(status, BusinessState):
+                status = BusinessState(status)
+            if status not in claimable:
+                return None
+            updated = job.model_copy(
+                update={
+                    "status": BusinessState.APPLYING,
+                    "error_message": None,
+                    "updated_at": datetime.now(tz=timezone.utc),
+                }
+            )
+            self._jobs[job_id] = updated
+            return updated
+
     async def delete_for_user(self, job_id: str, user_id: str) -> bool:
         pdf_paths: list[str] = []
         async with self._lock:

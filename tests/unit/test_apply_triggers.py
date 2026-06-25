@@ -52,7 +52,11 @@ def _make_job(job_id: str = "job-apply-1", *, status: str = "approved") -> JobRe
         source="linkedin",
         mode="full",
         status=status,
-        job_posting={"title": "Engineer", "company": "Acme", "url": "https://x/jobs/1"},
+        job_posting={
+            "title": "Engineer",
+            "company": "Acme",
+            "url": "https://www.linkedin.com/jobs/view/1/",
+        },
         current_pdf_path="/tmp/cv.pdf",
         created_at=now,
         updated_at=now,
@@ -102,6 +106,160 @@ class TestTriggerApply:
 
         asyncio.run(run())
 
+    def test_non_linkedin_job_diverts_to_manual_required(self):
+        """A manual/URL job must never start Easy Apply — park it manual_required."""
+
+        async def run():
+            repo = InMemoryJobRepository()
+            await repo.initialize()
+            job = _make_job(status="approved")
+            job.source = "manual"
+            job.job_posting = {"title": "Engineer", "company": "Acme"}  # no url
+            job.application_url = None
+            await repo.create(job)
+            # Even with a connected session, a non-LinkedIn job must not dispatch.
+            ctx = _make_trigger_ctx(repo, connected=True)
+
+            result = await trigger_apply(ctx, "job-apply-1", TEST_USER_ID)
+
+            assert result == BusinessState.MANUAL_REQUIRED
+            stored = await repo.get("job-apply-1")
+            assert stored.status == BusinessState.MANUAL_REQUIRED
+            ctx.workflow_dispatcher.dispatch_application.assert_not_called()
+
+        asyncio.run(run())
+
+    def test_linkedin_source_non_linkedin_url_diverts_to_manual_required(self):
+        """A ``linkedin``-source job whose URL isn't LinkedIn must not dispatch.
+
+        The extension refuses to navigate the tab to a non-LinkedIn URL, but that
+        refusal is swallowed by ApplyBridge — so the host is validated here to
+        avoid applying against whatever job is already open in the tab.
+        """
+
+        async def run():
+            repo = InMemoryJobRepository()
+            await repo.initialize()
+            job = _make_job(status="approved")
+            job.job_posting = {"title": "Engineer", "url": "https://evil.example.com/jobs/1"}
+            job.application_url = None
+            await repo.create(job)
+            ctx = _make_trigger_ctx(repo, connected=True)
+
+            result = await trigger_apply(ctx, "job-apply-1", TEST_USER_ID)
+
+            assert result == BusinessState.MANUAL_REQUIRED
+            stored = await repo.get("job-apply-1")
+            assert stored.status == BusinessState.MANUAL_REQUIRED
+            ctx.workflow_dispatcher.dispatch_application.assert_not_called()
+
+        asyncio.run(run())
+
+    def test_non_easy_apply_linkedin_job_diverts_to_manual_required(self):
+        """A LinkedIn job the scraper flagged ``easy_apply=False`` can't be driven.
+
+        The modal never opens for non-Easy-Apply postings, so rather than letting
+        the workflow fail at "modal did not open", park it manual_required up
+        front (CV stays downloadable).
+        """
+
+        async def run():
+            repo = InMemoryJobRepository()
+            await repo.initialize()
+            job = _make_job(status="approved")
+            job.job_posting = {
+                "title": "Engineer",
+                "url": "https://www.linkedin.com/jobs/view/1/",
+                "raw_data": {"easy_apply": False},
+            }
+            await repo.create(job)
+            ctx = _make_trigger_ctx(repo, connected=True)
+
+            result = await trigger_apply(ctx, "job-apply-1", TEST_USER_ID)
+
+            assert result == BusinessState.MANUAL_REQUIRED
+            stored = await repo.get("job-apply-1")
+            assert stored.status == BusinessState.MANUAL_REQUIRED
+            ctx.workflow_dispatcher.dispatch_application.assert_not_called()
+
+        asyncio.run(run())
+
+    def test_needs_extension_non_easy_apply_diverts_to_manual_required(self):
+        """Re-triggering a parked ``needs_extension`` non-Easy-Apply job must not 500.
+
+        Rows parked in ``needs_extension`` before the Easy Apply gate existed can
+        be non-drivable. Diverting them to ``manual_required`` is a valid
+        transition (``NEEDS_EXTENSION → MANUAL_REQUIRED``), not an illegal write.
+        """
+
+        async def run():
+            repo = InMemoryJobRepository()
+            await repo.initialize()
+            job = _make_job(status="needs_extension")
+            job.source = "manual"
+            job.job_posting = {"title": "Engineer", "company": "Acme"}  # no url
+            job.application_url = None
+            await repo.create(job)
+            ctx = _make_trigger_ctx(repo, connected=True)
+
+            result = await trigger_apply(ctx, "job-apply-1", TEST_USER_ID)
+
+            assert result == BusinessState.MANUAL_REQUIRED
+            stored = await repo.get("job-apply-1")
+            assert stored.status == BusinessState.MANUAL_REQUIRED
+            ctx.workflow_dispatcher.dispatch_application.assert_not_called()
+
+        asyncio.run(run())
+
+    def test_easy_apply_true_still_dispatches(self):
+        """An explicit ``easy_apply=True`` flag must not block dispatch."""
+
+        async def run():
+            repo = InMemoryJobRepository()
+            await repo.initialize()
+            job = _make_job(status="approved")
+            job.job_posting = {
+                "title": "Engineer",
+                "url": "https://www.linkedin.com/jobs/view/1/",
+                "raw_data": {"easy_apply": True},
+            }
+            await repo.create(job)
+            ctx = _make_trigger_ctx(repo, connected=True)
+
+            result = await trigger_apply(ctx, "job-apply-1", TEST_USER_ID)
+
+            assert result == BusinessState.APPLYING
+            ctx.workflow_dispatcher.dispatch_application.assert_called_once()
+
+        asyncio.run(run())
+
+    def test_concurrent_applies_dispatch_once(self):
+        """Two concurrent apply requests for the same job coalesce to one dispatch.
+
+        ``try_claim_for_apply`` flips APPROVED → APPLYING atomically, so only the
+        winning request enqueues the workflow; the loser returns APPLYING without
+        re-dispatching.
+        """
+
+        async def run():
+            repo = InMemoryJobRepository()
+            await repo.initialize()
+            await repo.create(_make_job(status="approved"))
+            ctx = _make_trigger_ctx(repo, connected=True)
+
+            results = await asyncio.gather(
+                trigger_apply(ctx, "job-apply-1", TEST_USER_ID),
+                trigger_apply(ctx, "job-apply-1", TEST_USER_ID),
+            )
+
+            assert results == [BusinessState.APPLYING, BusinessState.APPLYING]
+            # Exactly one workflow dispatched despite two concurrent triggers.
+            ctx.workflow_dispatcher.dispatch_application.assert_called_once()
+            job = await repo.get("job-apply-1")
+            assert job.status == BusinessState.APPLYING
+
+        asyncio.run(run())
+
     def test_connected_dispatches_with_state(self):
         async def run():
             repo = InMemoryJobRepository()
@@ -120,7 +278,7 @@ class TestTriggerApply:
             assert kwargs["job_id"] == "job-apply-1"
             assert kwargs["user_id"] == TEST_USER_ID
             init = kwargs["initial_state"]
-            assert init["job_url"] == "https://x/jobs/1"
+            assert init["job_url"] == "https://www.linkedin.com/jobs/view/1/"
             assert init["pdf_path"] == "/tmp/cv.pdf"
             assert isinstance(init["apply_profile"], ApplyProfile)
             assert init["contact_info"].full_name == "Apply Tester"
@@ -156,7 +314,7 @@ class TestAutoApplyPrepBranch:
                 "job_id": "job-apply-1",
                 "user_id": TEST_USER_ID,
                 "mode": "full",
-                "job_posting": {"title": "Engineer", "url": "https://x/jobs/1"},
+                "job_posting": {"title": "Engineer", "url": "https://www.linkedin.com/jobs/view/1/"},
                 "tailored_cv_json": {"contact": {"full_name": "T"}},
                 "tailored_cv_pdf_path": "/tmp/cv.pdf",
             }
@@ -300,8 +458,12 @@ class TestApplyEndpoint:
 class TestWsHandshake:
     def _ws_relay(self, *, valid: bool) -> WsRelay:
         auth = MagicMock()
+        auth.EXTENSION_SCOPE = "extension"
         if valid:
-            auth.decode_jwt = MagicMock(return_value={"user_id": TEST_USER_ID})
+            # The bridge only accepts extension-scoped tokens.
+            auth.decode_jwt = MagicMock(
+                return_value={"user_id": TEST_USER_ID, "scope": "extension"}
+            )
         else:
             auth.decode_jwt = MagicMock(side_effect=ValueError("bad token"))
         return WsRelay(SessionStore(), auth)

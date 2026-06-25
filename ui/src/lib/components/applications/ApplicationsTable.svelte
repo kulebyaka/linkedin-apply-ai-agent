@@ -17,9 +17,21 @@
 	/** Statuses that have a finished CV but no Review action — offer a download instead. */
 	const CV_DOWNLOAD_STATUSES = new Set(['approved', 'applied', 'completed']);
 
+	/**
+	 * Statuses where the user finishes the application by hand and so still needs
+	 * the tailored CV — these have a primary action (Apply now / Finish manually)
+	 * AND a secondary "Download CV" button.
+	 */
+	const MANUAL_FINISH_STATUSES = new Set(['manual_required', 'needs_extension']);
+
 	/** True when the job has a generated CV PDF available to download. */
 	function hasDownloadableCv(j: AdminJobRecord): boolean {
 		return CV_DOWNLOAD_STATUSES.has(j.status) && Boolean(j.current_pdf_path);
+	}
+
+	/** True when the CV is downloadable alongside a manual-finish primary action. */
+	function canAlsoDownloadCv(j: AdminJobRecord): boolean {
+		return MANUAL_FINISH_STATUSES.has(j.status) && Boolean(j.current_pdf_path);
 	}
 
 	function formatDate(iso: string | null | undefined): string {
@@ -197,6 +209,15 @@
 									>
 										Finish manually
 									</a>
+								{/if}
+								{#if canAlsoDownloadCv(j)}
+									<button
+										type="button"
+										onclick={() => onDownload(j)}
+										class="font-mono border-2 border-[var(--color-foreground)] bg-[var(--color-primary)] px-2 py-1 text-[10px] uppercase tracking-wider text-[var(--color-primary-foreground)] hover:-translate-y-0.5"
+									>
+										Download CV
+									</button>
 								{/if}
 								{#if jobUrl(j)}
 									<a

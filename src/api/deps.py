@@ -54,6 +54,10 @@ async def get_current_user(
     except ValueError:
         raise HTTPException(401, "Invalid or expired token") from None
 
+    # Extension-scoped tokens are WS-bridge-only; never accept them as a session.
+    if claims.get("scope") == "extension":
+        raise HTTPException(401, "Invalid or expired token")
+
     user = await ctx.user_repository.get_by_id(claims["user_id"])
     if user is None:
         raise HTTPException(401, "User not found")
@@ -81,6 +85,10 @@ async def get_optional_user(
     try:
         claims = ctx.auth_service.decode_jwt(auth_token)
     except ValueError:
+        return None
+
+    # Extension-scoped tokens are WS-bridge-only; never accept them as a session.
+    if claims.get("scope") == "extension":
         return None
 
     return await ctx.user_repository.get_by_id(claims["user_id"])

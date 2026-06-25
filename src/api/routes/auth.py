@@ -111,13 +111,15 @@ async def auth_extension_token(request: Request, user: CurrentUser) -> Extension
     The app's session JWT lives in an httpOnly cookie that JS can't read, so
     the `/extension-auth` page calls this (with credentials) to obtain a token
     string it can hand to the extension via ``chrome.runtime.sendMessage``.
-    The token is identical in shape/claims to the session cookie and is
-    validated by ``WsRelay`` via ``auth_service.decode_jwt``.
+    The minted token is **scoped to the extension WS bridge** and short-lived:
+    it carries ``scope="extension"`` so ``get_current_user`` rejects it as an
+    API session, limiting the blast radius if it leaks (XSS / extension
+    compromise). ``WsRelay`` validates it via ``auth_service.decode_jwt``.
     """
     ctx = get_ctx(request)
     if ctx.auth_service is None:
         raise HTTPException(500, "Auth service not initialized")
-    token = ctx.auth_service.create_jwt(user.id, user.email)
+    token = ctx.auth_service.create_extension_token(user.id, user.email)
     return ExtensionTokenResponse(token=token)
 
 

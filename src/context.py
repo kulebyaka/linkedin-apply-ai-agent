@@ -82,10 +82,21 @@ class AppContext:
     _workflow_threads: dict[str, dict] = field(default_factory=dict)
     # Background task references to prevent GC of fire-and-forget tasks
     _background_tasks: set[asyncio.Task] = field(default_factory=set)
+    # Per-user serialization of Easy Apply runs. One extension session drives a
+    # single LinkedIn tab, so concurrent application workflows for the same user
+    # would interleave navigate/fill/submit RPCs and apply with the wrong form.
+    # dispatch_application holds this lock for the whole run so applies run one
+    # at a time per user (auto_apply batches + double-triggers queue, not race).
+    _apply_locks: dict[str, asyncio.Lock] = field(default_factory=dict)
+    _apply_locks_guard: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     async def register_workflow(
-        self, job_id: str, thread_id: str, workflow_type: str,
-        *, user_id: str = "",
+        self,
+        job_id: str,
+        thread_id: str,
+        workflow_type: str,
+        *,
+        user_id: str = "",
     ) -> None:
         """Register an in-progress workflow for status tracking."""
         from datetime import datetime, timezone
@@ -112,6 +123,15 @@ class AppContext:
         """Get a snapshot of all tracked workflows."""
         async with self._tracking_lock:
             return dict(self._workflow_threads)
+
+    async def get_apply_lock(self, user_id: str) -> asyncio.Lock:
+        """Get (or create) the per-user lock serializing Easy Apply runs."""
+        async with self._apply_locks_guard:
+            lock = self._apply_locks.get(user_id)
+            if lock is None:
+                lock = asyncio.Lock()
+                self._apply_locks[user_id] = lock
+            return lock
 
     def create_background_task(self, coro) -> asyncio.Task:
         """Create an asyncio task and keep a reference to prevent GC."""

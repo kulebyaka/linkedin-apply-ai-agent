@@ -12,7 +12,7 @@ import base64
 
 import pytest
 
-from src.bridge import BridgeDisconnected
+from src.bridge import BridgeDisconnected, BridgeTimeout
 from src.config.settings import Settings
 from src.models.cv import ContactInfo
 from src.models.user import ApplyProfile
@@ -35,6 +35,7 @@ class MockRelay:
     def __init__(self, responses: dict | None = None) -> None:
         self.responses = responses or {}
         self.disconnect_methods: set[str] = set()
+        self.timeout_methods: set[str] = set()
         self.calls: list[tuple[str, dict]] = []
         self.timeouts: list[float] = []
 
@@ -45,6 +46,8 @@ class MockRelay:
         self.timeouts.append(timeout)
         if method in self.disconnect_methods:
             raise BridgeDisconnected(f"no session for {user_id}")
+        if method in self.timeout_methods:
+            raise BridgeTimeout(f"RPC '{method}' timed out for {user_id}")
         result = self.responses.get(method, {})
         if callable(result):
             result = result(params or {})
@@ -318,6 +321,61 @@ class TestSubmitForm:
         result = await bridge.submit_form("u1")
         assert result.confirmed is False
 
+    async def test_done_disconnect_after_confirmation_still_confirmed(self):
+        # The Done click is pure cleanup that runs AFTER confirmation is captured.
+        # A dropped/timed-out extension on that final RPC must NOT propagate —
+        # otherwise submit_node would route a confirmed submission to the
+        # retryable NEEDS_EXTENSION and a re-trigger could duplicate the apply.
+        for drop in ("disconnect", "timeout"):
+            relay = MockRelay(
+                {
+                    "unfollow_company": {"unfollowed": True},
+                    "click_button": {"clicked": True},
+                    "capture_visible": {"screenshot_b64": "data:image/png;base64,AAA"},
+                    "take_screenshot": {"confirmation_text": "Application sent"},
+                    "find_and_click_done": {"clicked": True},
+                }
+            )
+            if drop == "disconnect":
+                relay.disconnect_methods.add("find_and_click_done")
+            else:
+                relay.timeout_methods.add("find_and_click_done")
+            bridge = ApplyBridge(relay, _settings())
+            result = await bridge.submit_form("u1")
+            assert result.confirmed is True, drop
+            assert result.confirmation_text == "Application sent", drop
+            # The gate is still closed on every exit path.
+            assert "end_session" in relay.methods, drop
+
+    async def test_capture_disconnect_after_submit_does_not_propagate(self):
+        # A bridge drop AFTER the Submit click but during confirmation capture
+        # (capture_visible / take_screenshot) must NOT raise ExtensionUnavailable:
+        # the application may already have been accepted, so submit_node must not
+        # route to the retryable NEEDS_EXTENSION (a re-trigger could duplicate the
+        # apply). The drop is swallowed and the unconfirmed result routes to
+        # terminal FAILED instead.
+        for drop_method in ("capture_visible", "take_screenshot"):
+            for drop in ("disconnect", "timeout"):
+                relay = MockRelay(
+                    {
+                        "unfollow_company": {"unfollowed": True},
+                        "click_button": {"clicked": True},
+                        "capture_visible": {"screenshot_b64": "data:image/png;base64,AAA"},
+                        "take_screenshot": {"confirmation_text": "Application sent"},
+                        "find_and_click_done": {"clicked": True},
+                    }
+                )
+                if drop == "disconnect":
+                    relay.disconnect_methods.add(drop_method)
+                else:
+                    relay.timeout_methods.add(drop_method)
+                bridge = ApplyBridge(relay, _settings())
+                # Must not raise — and a lost confirmation yields confirmed=False.
+                result = await bridge.submit_form("u1")
+                assert result.confirmed is False, (drop_method, drop)
+                # The gate is still closed on every exit path.
+                assert "end_session" in relay.methods, (drop_method, drop)
+
     async def test_not_confirmed_when_clicked_but_no_confirmation_text(self):
         # The Submit button was clicked but LinkedIn never showed the
         # "Application sent" modal — a click alone must not mark the job APPLIED.
@@ -360,3 +418,12 @@ class TestDiscardAndDisconnect:
         bridge = ApplyBridge(relay, _settings())
         with pytest.raises(ExtensionUnavailable):
             await bridge.fill_field("u1", "#x", "v")
+
+    async def test_timeout_becomes_extension_unavailable(self):
+        """A stalled/unanswered RPC (BridgeTimeout — e.g. a silent network drop
+        or a session displaced mid-apply) is recoverable, not a hard failure."""
+        relay = MockRelay({"serialize_form": {"fields": [], "flags": {}}})
+        relay.timeout_methods.add("serialize_form")
+        bridge = ApplyBridge(relay, _settings())
+        with pytest.raises(ExtensionUnavailable):
+            await bridge.read_form_state("u1", ApplyProfile(), None)

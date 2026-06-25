@@ -27,8 +27,13 @@ TEST_THREAD_ID = "thread-1"
 
 
 def _make_ctx(
-    *, prep_result=None, prep_exc=None, retry_result=None, retry_exc=None,
-    apply_result=None, apply_exc=None,
+    *,
+    prep_result=None,
+    prep_exc=None,
+    retry_result=None,
+    retry_exc=None,
+    apply_result=None,
+    apply_exc=None,
 ):
     """Build an AppContext with mock workflows + repository.
 
@@ -41,25 +46,19 @@ def _make_ctx(
     if prep_exc is not None:
         prep_workflow.ainvoke = AsyncMock(side_effect=prep_exc)
     else:
-        prep_workflow.ainvoke = AsyncMock(
-            return_value=prep_result or {"current_step": "completed"}
-        )
+        prep_workflow.ainvoke = AsyncMock(return_value=prep_result or {"current_step": "completed"})
 
     retry_workflow = MagicMock()
     if retry_exc is not None:
         retry_workflow.ainvoke = AsyncMock(side_effect=retry_exc)
     else:
-        retry_workflow.ainvoke = AsyncMock(
-            return_value=retry_result or {"current_step": "pending"}
-        )
+        retry_workflow.ainvoke = AsyncMock(return_value=retry_result or {"current_step": "pending"})
 
     apply_workflow = MagicMock()
     if apply_exc is not None:
         apply_workflow.ainvoke = AsyncMock(side_effect=apply_exc)
     else:
-        apply_workflow.ainvoke = AsyncMock(
-            return_value=apply_result or {"current_step": "applied"}
-        )
+        apply_workflow.ainvoke = AsyncMock(return_value=apply_result or {"current_step": "applied"})
 
     ctx = AppContext(
         repository=repo,
@@ -235,15 +234,10 @@ class TestFailedTransitionBlocked:
         but FILTERED_OUT → FAILED is not allowed, so a late exception must not
         clobber a job that was correctly filtered out.
         """
-        assert (
-            BusinessState.FAILED
-            not in ALLOWED_TRANSITIONS[BusinessState.FILTERED_OUT]
-        )
+        assert BusinessState.FAILED not in ALLOWED_TRANSITIONS[BusinessState.FILTERED_OUT]
 
         ctx = _make_ctx(prep_exc=RuntimeError("oops"))
-        ctx.repository.get = AsyncMock(
-            return_value=_make_record(BusinessState.FILTERED_OUT)
-        )
+        ctx.repository.get = AsyncMock(return_value=_make_record(BusinessState.FILTERED_OUT))
         dispatcher = ctx.workflow_dispatcher
 
         await dispatcher.dispatch_preparation(
@@ -515,3 +509,76 @@ class TestApplicationDispatch:
         )
 
         ctx.repository.update.assert_not_called()
+
+    async def test_same_user_applies_are_serialized(self):
+        """Two concurrent applies for one user must not interleave (one tab)."""
+        import asyncio
+
+        ctx = _make_ctx()
+        active = 0
+        max_active = 0
+
+        async def fake_ainvoke(_state, _config):
+            nonlocal active, max_active
+            active += 1
+            max_active = max(max_active, active)
+            await asyncio.sleep(0.02)
+            active -= 1
+            return {"current_step": "applied"}
+
+        ctx.apply_workflow.ainvoke = AsyncMock(side_effect=fake_ainvoke)
+        dispatcher = ctx.workflow_dispatcher
+
+        await asyncio.gather(
+            dispatcher.dispatch_application(
+                job_id="job-a",
+                thread_id="t-a",
+                initial_state={"job_id": "job-a"},
+                user_id=TEST_USER_ID,
+            ),
+            dispatcher.dispatch_application(
+                job_id="job-b",
+                thread_id="t-b",
+                initial_state={"job_id": "job-b"},
+                user_id=TEST_USER_ID,
+            ),
+        )
+
+        assert max_active == 1  # never two applies running for the same user
+        assert ctx.apply_workflow.ainvoke.await_count == 2
+
+    async def test_different_users_apply_concurrently(self):
+        """Applies for different users use distinct locks and may overlap."""
+        import asyncio
+
+        ctx = _make_ctx()
+        active = 0
+        max_active = 0
+
+        async def fake_ainvoke(_state, _config):
+            nonlocal active, max_active
+            active += 1
+            max_active = max(max_active, active)
+            await asyncio.sleep(0.02)
+            active -= 1
+            return {"current_step": "applied"}
+
+        ctx.apply_workflow.ainvoke = AsyncMock(side_effect=fake_ainvoke)
+        dispatcher = ctx.workflow_dispatcher
+
+        await asyncio.gather(
+            dispatcher.dispatch_application(
+                job_id="job-a",
+                thread_id="t-a",
+                initial_state={"job_id": "job-a"},
+                user_id="user-1",
+            ),
+            dispatcher.dispatch_application(
+                job_id="job-b",
+                thread_id="t-b",
+                initial_state={"job_id": "job-b"},
+                user_id="user-2",
+            ),
+        )
+
+        assert max_active == 2  # distinct users → distinct locks → concurrent

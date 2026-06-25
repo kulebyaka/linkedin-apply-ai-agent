@@ -279,6 +279,43 @@ class SQLiteJobRepository(SQLiteAdminQueriesMixin, JobRepository):
 
         return await self.get(job_id)
 
+    async def try_claim_for_apply(self, job_id: str) -> JobRecord | None:
+        """Atomic {APPROVED, NEEDS_EXTENSION} → APPLYING claim (multi-worker safe).
+
+        The plain ``update()`` is a SELECT-then-UPDATE with no conditional guard,
+        so two concurrent applies could both read a claimable status and both
+        dispatch. Here the UPDATE itself carries the ``status IN (...)`` predicate
+        and ``RETURNING`` reports whether *this* statement flipped the row, so
+        only the first racing claim wins; the rest get ``None`` and skip dispatch.
+        """
+        self._ensure_initialized()
+        from .tables import Job
+
+        claimable = [BusinessState.APPROVED.value, BusinessState.NEEDS_EXTENSION.value]
+        async with Job._meta.db.transaction():
+            existing = await Job.select().where(Job.job_id == job_id).first().run()
+            if not existing:
+                return None
+            if existing.get("status") not in claimable:
+                return None
+            claimed = await (
+                Job.update(
+                    {
+                        Job.status: BusinessState.APPLYING.value,
+                        Job.error_message: None,
+                        Job.updated_at: datetime.now(tz=timezone.utc),
+                    }
+                )
+                .where(Job.job_id == job_id)
+                .where(Job.status.is_in(claimable))
+                .returning(Job.job_id)
+                .run()
+            )
+            if not claimed:
+                return None
+
+        return await self.get(job_id)
+
     async def delete_for_user(self, job_id: str, user_id: str) -> bool:
         self._ensure_initialized()
         from .tables import Job

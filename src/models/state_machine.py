@@ -144,6 +144,10 @@ ALLOWED_TRANSITIONS: dict[BusinessState, set[BusinessState]] = {
         # Recoverable: once the extension connects, the user re-triggers apply.
         BusinessState.APPLYING,
         BusinessState.FAILED,
+        # Re-trigger may discover the job isn't a drivable LinkedIn Easy Apply
+        # posting (e.g. rows parked before the Easy Apply gate existed) — park it
+        # in manual_required rather than 500 on the illegal write.
+        BusinessState.MANUAL_REQUIRED,
     },
     BusinessState.MANUAL_REQUIRED: set(),  # Terminal — finished by hand on LinkedIn
 }

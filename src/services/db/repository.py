@@ -112,6 +112,18 @@ class JobRepository(ABC):
         pass
 
     @abstractmethod
+    async def try_claim_for_apply(self, job_id: str) -> "JobRecord | None":
+        """Atomic {APPROVED, NEEDS_EXTENSION} → APPLYING claim before dispatch.
+
+        Returns the claimed record (now APPLYING) on success, or ``None`` when
+        the job is gone or not in a claimable state — including when a concurrent
+        request already claimed it. Callers must only dispatch the application
+        workflow when this returns non-``None``, so two racing
+        ``POST /api/jobs/{id}/apply`` requests coalesce into a single run.
+        """
+        pass
+
+    @abstractmethod
     async def delete_cascade(self, job_id: str) -> bool:
         """Cascade-delete a job record without ownership check (admin path)."""
         pass

@@ -77,9 +77,7 @@ class WorkflowDispatcher:
         }
 
         if track:
-            await self._ctx.register_workflow(
-                job_id, thread_id, "preparation", user_id=user_id
-            )
+            await self._ctx.register_workflow(job_id, thread_id, "preparation", user_id=user_id)
 
         try:
             result = await self._ctx.prep_workflow.ainvoke(initial_state, config)
@@ -137,9 +135,7 @@ class WorkflowDispatcher:
                     {"status": BusinessState.FAILED, "error_message": str(exc)},
                 )
             except Exception:
-                logger.warning(
-                    "Failed to mark job %s as FAILED in repository", job_id
-                )
+                logger.warning("Failed to mark job %s as FAILED in repository", job_id)
         finally:
             await self._ctx.unregister_workflow(job_id)
 
@@ -171,12 +167,15 @@ class WorkflowDispatcher:
             }
         }
 
-        await self._ctx.register_workflow(
-            job_id, thread_id, "application", user_id=user_id
-        )
+        await self._ctx.register_workflow(job_id, thread_id, "application", user_id=user_id)
+
+        # Serialize per user: one extension session = one LinkedIn tab, so two
+        # concurrent applies would interleave RPCs and submit the wrong form.
+        apply_lock = await self._ctx.get_apply_lock(user_id)
 
         try:
-            result = await self._ctx.apply_workflow.ainvoke(initial_state, config)
+            async with apply_lock:
+                result = await self._ctx.apply_workflow.ainvoke(initial_state, config)
             logger.info(
                 "Application workflow for job %s completed: %s",
                 job_id,
@@ -194,9 +193,7 @@ class WorkflowDispatcher:
                         {"status": BusinessState.FAILED, "error_message": str(exc)},
                     )
             except Exception:
-                logger.warning(
-                    "Failed to mark job %s as FAILED in repository", job_id
-                )
+                logger.warning("Failed to mark job %s as FAILED in repository", job_id)
         finally:
             await self._ctx.unregister_workflow(job_id)
 
@@ -222,7 +219,9 @@ class WorkflowDispatcher:
         """
         logger.error(
             "Preparation workflow for job %s failed: %s",
-            job_id, exc, exc_info=True,
+            job_id,
+            exc,
+            exc_info=True,
         )
 
         try:
@@ -239,22 +238,23 @@ class WorkflowDispatcher:
                 else:
                     logger.info(
                         "Skipping FAILED transition for job %s (current status %s is terminal)",
-                        job_id, existing.status,
+                        job_id,
+                        existing.status,
                     )
             elif create_record_if_missing:
                 now = datetime.now(tz=timezone.utc)
-                await self._ctx.repository.create(JobRecord(
-                    job_id=job_id,
-                    user_id=user_id or initial_state.get("user_id", ""),
-                    source=initial_state.get("source", "url"),
-                    mode=initial_state.get("mode", "mvp"),
-                    status=BusinessState.FAILED,
-                    raw_input=initial_state.get("raw_input") or {},
-                    error_message=str(exc),
-                    created_at=now,
-                    updated_at=now,
-                ))
+                await self._ctx.repository.create(
+                    JobRecord(
+                        job_id=job_id,
+                        user_id=user_id or initial_state.get("user_id", ""),
+                        source=initial_state.get("source", "url"),
+                        mode=initial_state.get("mode", "mvp"),
+                        status=BusinessState.FAILED,
+                        raw_input=initial_state.get("raw_input") or {},
+                        error_message=str(exc),
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
         except Exception:
-            logger.warning(
-                "Failed to persist failure record for job %s", job_id, exc_info=True
-            )
+            logger.warning("Failed to persist failure record for job %s", job_id, exc_info=True)

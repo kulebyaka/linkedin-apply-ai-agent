@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
-from src.bridge import BridgeDisconnected
+from src.bridge import BridgeDisconnected, BridgeTimeout
 from src.services.linkedin.easy_apply_selectors import (
     CONFIRMATION_PATTERNS,
     DAILY_LIMIT_PATTERNS,
@@ -62,8 +62,8 @@ class ExtensionUnavailable(Exception):  # noqa: N818 — name is part of the too
     """The extension session dropped mid-apply.
 
     The apply workflow maps this to the recoverable ``NEEDS_EXTENSION`` state
-    (vs. ``FAILED`` for other errors). Translated from ``BridgeDisconnected`` so
-    callers never have to know about the transport layer.
+    (vs. ``FAILED`` for other errors). Translated from ``BridgeDisconnected`` and
+    ``BridgeTimeout`` so callers never have to know about the transport layer.
     """
 
 
@@ -219,19 +219,52 @@ class ApplyBridge:
         Submit click so we never silently follow employers (AutoApplyMax
         :1377-1408). Confirmation is a best-effort screenshot + modal text grab.
         """
-        # 1. Un-follow before submit (best-effort).
-        await self._rpc_best_effort(user_id, "unfollow_company")
-        # 2. Submit.
-        submit_frame = await self._rpc(user_id, "click_button", {"role": "submit"})
-        submit_result, submit_error = self._unwrap(submit_frame)
-        # 3. Capture the confirmation BEFORE dismissing it: clicking Done closes
-        #    the "Application sent" modal, so the screenshot/text must be grabbed
-        #    while it's still on screen.
-        capture = await self._rpc_best_effort(user_id, "capture_visible")
-        shot = await self._rpc_best_effort(user_id, "take_screenshot")
-        # 4. Final Done / confirmation control (best-effort — may be auto-shown).
-        await self._rpc_best_effort(user_id, "find_and_click_done")
-        await self.end_session(user_id)
+        # The whole submit sequence runs under a cleanup wrapper: any RPC below
+        # can raise ExtensionUnavailable (a BridgeTimeout after the content
+        # script already processed the call, or a mid-submit drop). The mutation
+        # gate may be open, so end_session() must be attempted on every exit
+        # path — finally guarantees that without masking the original error
+        # (end_session is best-effort and never raises).
+        #
+        # Defaults stand in for an unconfirmed submission: if transport is lost
+        # at/after the submit click we leave these unset, so the confirmation
+        # check below evaluates to confirmed=False and the workflow routes to
+        # terminal FAILED rather than retryable NEEDS_EXTENSION.
+        submit_result: dict | None = None
+        submit_error: str | None = None
+        capture: dict | None = None
+        shot: dict | None = None
+        try:
+            # 1. Un-follow before submit (best-effort). This is PRE-submit — a
+            #    disconnect here legitimately means nothing was submitted, so we
+            #    let ExtensionUnavailable propagate to the recoverable
+            #    NEEDS_EXTENSION (no risk of a duplicate apply).
+            await self._rpc_best_effort(user_id, "unfollow_company")
+            # 2. Submit and capture the confirmation. Everything from the submit
+            #    click onward is wrapped: once the Submit RPC has been *attempted*
+            #    LinkedIn may already have accepted the application (a BridgeTimeout
+            #    can fire after the content script clicked Submit), so a transport
+            #    loss in this window must NOT surface as the recoverable
+            #    ExtensionUnavailable — submit_node() would map that to
+            #    NEEDS_EXTENSION and a user re-trigger could duplicate an
+            #    already-sent application. Swallow the drop and fall through to the
+            #    confirmation check, which (lacking captured confirmation text)
+            #    yields confirmed=False → terminal FAILED, not retryable.
+            try:
+                submit_frame = await self._rpc(user_id, "click_button", {"role": "submit"})
+                submit_result, submit_error = self._unwrap(submit_frame)
+                # Capture the confirmation BEFORE dismissing it: clicking Done
+                # closes the "Application sent" modal, so the screenshot/text must
+                # be grabbed while it's still on screen.
+                capture = await self._rpc_best_effort(user_id, "capture_visible")
+                shot = await self._rpc_best_effort(user_id, "take_screenshot")
+                # Final Done / confirmation control — pure cleanup that only
+                # dismisses the "Application sent" modal after capture.
+                await self._rpc_best_effort(user_id, "find_and_click_done")
+            except ExtensionUnavailable:
+                pass
+        finally:
+            await self.end_session(user_id)
         confirmation_text = (shot or {}).get("confirmation_text", "")
         # A Submit-button click alone is NOT proof the application was accepted
         # (LinkedIn may re-show the form with a validation error). Require the
@@ -249,8 +282,15 @@ class ApplyBridge:
     async def discard(self, user_id: str, reason: str = "") -> dict:
         """Discard the in-progress application (X → confirm → ESC → scan)."""
         logger.info("Discarding Easy Apply for user %s: %s", user_id, reason or "(no reason)")
-        result = await self._rpc_best_effort(user_id, "discard_application")
-        await self.end_session(user_id)
+        # discard_application can raise ExtensionUnavailable (a BridgeTimeout
+        # after the content script already discarded, or a mid-discard drop).
+        # The mutation gate may be open, so end_session() must be attempted even
+        # on that path — finally guarantees it without masking the original error
+        # (end_session is best-effort and never raises).
+        try:
+            result = await self._rpc_best_effort(user_id, "discard_application")
+        finally:
+            await self.end_session(user_id)
         return result
 
     async def open_easy_apply(self, user_id: str, job_url: str | None = None) -> bool:
@@ -263,12 +303,37 @@ class ApplyBridge:
         safety-reminder dialog ("Continue applying", AutoApplyMax :665-687) and
         reports whether the Easy Apply modal became visible. Returns True only
         when the modal actually opened so the workflow can fail fast otherwise.
+
+        ``navigate`` is a **hard** step (``_rpc_result``): the extension refuses
+        to navigate the tab to a non-LinkedIn URL, and swallowing that refusal
+        would proceed to click Easy Apply on whatever job is already open. A
+        rejected navigation raises ``ApplyBridgeError`` so the workflow aborts
+        rather than applying against the wrong posting.
         """
-        await self._rpc_best_effort(user_id, "begin_session")
-        if job_url:
-            await self._rpc_best_effort(user_id, "navigate", {"url": job_url})
-        result = await self._rpc_result(user_id, "open_easy_apply")
-        return bool(result.get("opened"))
+        try:
+            # begin_session is inside the cleanup wrapper: the extension sets
+            # sessionActive=true / opens the content-script gate the moment it
+            # *processes* the RPC (background.js routeRpc), so a lost reply or a
+            # timeout on this very call (ExtensionUnavailable) can leave the gate
+            # armed. Closing it here covers that path too.
+            await self._rpc_best_effort(user_id, "begin_session")
+            if job_url:
+                await self._rpc_result(user_id, "navigate", {"url": job_url})
+            result = await self._rpc_result(user_id, "open_easy_apply")
+            opened = bool(result.get("opened"))
+        except Exception:
+            # begin_session/navigate/open raised (rejected navigation,
+            # content-script error, or a dropped/timed-out session). Close the
+            # mutation gate we may have opened so the actuator is not left armed
+            # beyond this aborted apply, then re-raise for the workflow to route.
+            # end_session is best-effort (never raises, swallows
+            # ExtensionUnavailable).
+            await self.end_session(user_id)
+            raise
+        if not opened:
+            # Modal never appeared — same cleanup so the gate does not stay open.
+            await self.end_session(user_id)
+        return opened
 
     async def end_session(self, user_id: str) -> dict:
         """Close the mutation gate at the end of an apply run.
@@ -337,7 +402,12 @@ class ApplyBridge:
                 params or {},
                 timeout=self._settings.apply_rpc_timeout_seconds,
             )
-        except BridgeDisconnected as exc:
+        except (BridgeDisconnected, BridgeTimeout) as exc:
+            # A dropped session (BridgeDisconnected) or a stalled/unanswered RPC
+            # (BridgeTimeout — e.g. a silent network drop or a session displaced
+            # mid-apply) both mean the extension can no longer drive this apply.
+            # Surface as the recoverable ExtensionUnavailable so the workflow
+            # routes to NEEDS_EXTENSION instead of a hard FAILED.
             raise ExtensionUnavailable(str(exc)) from exc
 
     async def _rpc_result(self, user_id: str, method: str, params: dict | None = None) -> dict:

@@ -5,10 +5,12 @@ expired token rejection, and auto-create user on first login.
 """
 
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from fastapi import HTTPException
 
+from src.api.deps import get_current_user, get_optional_user
 from src.config.settings import Settings
 from src.models.user import User
 from src.services.auth.auth import AuthService
@@ -110,6 +112,64 @@ class TestJWT:
         assert delta.days >= settings.jwt_expiry_days - 1
         assert delta.days <= settings.jwt_expiry_days + 1
 
+    def test_session_jwt_has_no_extension_scope(self, auth_service):
+        """A normal session token must not carry the extension scope."""
+        claims = auth_service.decode_jwt(auth_service.create_jwt("u1", "a@b.com"))
+        assert claims.get("scope") != "extension"
+
+    def test_extension_token_is_scoped(self, auth_service):
+        """Extension tokens carry scope=extension so API auth can reject them."""
+        token = auth_service.create_extension_token("u1", "a@b.com")
+        claims = auth_service.decode_jwt(token)
+        assert claims["scope"] == "extension"
+        assert claims["user_id"] == "u1"
+
+    def test_extension_token_ttl_is_short(self, auth_service, settings):
+        """Extension token expiry tracks the short extension TTL, not 30 days."""
+        claims = auth_service.decode_jwt(auth_service.create_extension_token("u1", "a@b.com"))
+        exp = datetime.fromtimestamp(claims["exp"], tz=timezone.utc)
+        delta = exp - datetime.now(tz=timezone.utc)
+        expected_minutes = settings.extension_token_ttl_minutes
+        # Much shorter than the 30-day session, and ~the configured TTL.
+        assert delta.total_seconds() < settings.jwt_expiry_days * 86400
+        assert abs(delta.total_seconds() - expected_minutes * 60) < 120
+
+
+# =============================================================================
+# Session-auth rejection of extension-scoped tokens
+# =============================================================================
+
+
+def _request_with_token(auth_service, claims: dict) -> MagicMock:
+    """A mock Request whose app.state.ctx decodes a token to ``claims``."""
+    ctx = MagicMock()
+    ctx.auth_service = MagicMock()
+    ctx.auth_service.decode_jwt = MagicMock(return_value=claims)
+    user_repo = AsyncMock()
+    user_repo.get_by_id = AsyncMock(return_value=MagicMock())
+    ctx.user_repository = user_repo
+    request = MagicMock()
+    request.app.state.ctx = ctx
+    return request
+
+
+class TestExtensionScopeRejection:
+    async def test_get_current_user_rejects_extension_scope(self, auth_service):
+        request = _request_with_token(auth_service, {"user_id": "u1", "scope": "extension"})
+        with pytest.raises(HTTPException) as exc:
+            await get_current_user(request, auth_token="ext-token")
+        assert exc.value.status_code == 401
+
+    async def test_get_optional_user_rejects_extension_scope(self, auth_service):
+        request = _request_with_token(auth_service, {"user_id": "u1", "scope": "extension"})
+        result = await get_optional_user(request, auth_token="ext-token")
+        assert result is None
+
+    async def test_get_current_user_accepts_session_scope(self, auth_service):
+        request = _request_with_token(auth_service, {"user_id": "u1"})
+        user = await get_current_user(request, auth_token="session-token")
+        assert user is not None
+
 
 # =============================================================================
 # Magic Link Tests
@@ -162,9 +222,7 @@ class TestVerifyToken:
     @pytest.mark.asyncio
     async def test_verify_token_auto_creates_user(self, auth_service, user_repo, magic_link_repo):
         """verify_token should auto-create user on first login."""
-        new_user = User(
-            id="new-id", email="new@example.com", display_name="new"
-        )
+        new_user = User(id="new-id", email="new@example.com", display_name="new")
         magic_link_repo.peek_magic_link.return_value = "new@example.com"
         magic_link_repo.claim_magic_link.return_value = True
         user_repo.get_by_email.return_value = None  # No existing user
@@ -205,7 +263,9 @@ class TestVerifyToken:
         magic_link_repo.claim_magic_link.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_verify_token_raises_when_claim_lost(self, auth_service, user_repo, magic_link_repo):
+    async def test_verify_token_raises_when_claim_lost(
+        self, auth_service, user_repo, magic_link_repo
+    ):
         """If a concurrent request claimed the token first, surface invalid."""
         existing_user = User(
             id="existing-id", email="existing@example.com", display_name="Existing"

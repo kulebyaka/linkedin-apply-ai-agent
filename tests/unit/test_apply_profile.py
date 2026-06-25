@@ -95,6 +95,8 @@ def test_is_complete_for_false_bool_counts_as_known():
         (BusinessState.APPLYING, BusinessState.MANUAL_REQUIRED),
         (BusinessState.NEEDS_EXTENSION, BusinessState.APPLYING),
         (BusinessState.NEEDS_EXTENSION, BusinessState.FAILED),
+        # Re-trigger may find the parked job isn't a drivable Easy Apply posting.
+        (BusinessState.NEEDS_EXTENSION, BusinessState.MANUAL_REQUIRED),
         (BusinessState.QUEUED, BusinessState.APPROVED),
         (BusinessState.PROCESSING, BusinessState.APPROVED),
     ],
