@@ -112,9 +112,13 @@ _RE_PHONE_COUNTRY = re.compile(
     r"country\s*code|phone\s*country|code\s*pays|indicatif|landesvorwahl|prefijo",
     re.I,
 )
+# NOTE: a bare "num[ée]ro" is deliberately NOT matched — it is the generic
+# word for "number" in FR/ES/IT and would misclassify fields like "Numéro de
+# sécurité sociale" as a phone field, filling the candidate's phone number
+# where it doesn't belong. Real phone labels are caught by the phone/téléphone/
+# mobile/portable stems; anything ambiguous safely aborts to manual_required.
 _RE_PHONE = re.compile(
-    r"phone|t[ée]l[ée]phone|telefono|telefon|mobile|portable|\bcell\b|"
-    r"m[óo]vil|cellulare|num[ée]ro",
+    r"phone|t[ée]l[ée]phone|telefono|telefon|mobile|portable|\bcell\b|" r"m[óo]vil|cellulare",
     re.I,
 )
 _RE_CITY = re.compile(

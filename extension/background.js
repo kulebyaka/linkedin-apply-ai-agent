@@ -247,6 +247,7 @@ chrome.runtime.onMessageExternal.addListener((msg, _sender, sendResponse) => {
     if (msg && msg.type === 'SET_TOKEN' && msg.token) {
       await setToken(msg.token);
       if (msg.wsUrl) await chrome.storage.local.set({ wsUrl: msg.wsUrl });
+      if (msg.appOrigin) await chrome.storage.local.set({ appOrigin: msg.appOrigin });
       reconnectDelay = 1000;
       connect();
       sendResponse({ ok: true });
