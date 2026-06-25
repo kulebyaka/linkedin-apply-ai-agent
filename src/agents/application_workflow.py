@@ -240,6 +240,10 @@ async def fill_step_node(
         return _terminal(state, BusinessState.NEEDS_EXTENSION, error=str(exc))
     except Exception as exc:  # noqa: BLE001
         logger.error("read_form_state failed for %s: %s", user_id, exc, exc_info=True)
+        # serialize_form does not close the mutation gate on error — discard so
+        # the actuator is not left armed past this aborted apply (mirrors the
+        # timeout/unknown-field abort paths). _safe_discard calls end_session.
+        await _safe_discard(bridge, user_id, "read_form_state failed")
         return _terminal(state, BusinessState.FAILED, error=f"read_form_state failed: {exc}")
 
     # LinkedIn daily Easy Apply limit — stop and record, do NOT retry.
@@ -277,6 +281,10 @@ async def fill_step_node(
         return _terminal(state, BusinessState.NEEDS_EXTENSION, error=str(exc))
     except Exception as exc:  # noqa: BLE001
         logger.error("fill/advance failed for %s: %s", user_id, exc, exc_info=True)
+        # fill_field/upload_file/advance_step do not close the mutation gate on
+        # error — discard the in-progress modal so the actuator is not left armed
+        # past this aborted apply (mirrors the validation-error abort path).
+        await _safe_discard(bridge, user_id, "fill/advance failed")
         return _terminal(state, BusinessState.FAILED, error=f"fill_step failed: {exc}")
 
     # Validation errors we can't auto-correct — abort to manual.
