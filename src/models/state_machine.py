@@ -53,6 +53,8 @@ class BusinessState(StrEnum):
     FAILED = "failed"
     FILTERED_OUT = "filtered_out"
     SCRAPE_FAILED = "scrape_failed"  # Description missing/empty — retry-eligible
+    MANUAL_REQUIRED = "manual_required"  # Apply aborted (unknown field) — finish by hand
+    NEEDS_EXTENSION = "needs_extension"  # No connected extension — recoverable, user re-triggers
 
     def is_terminal(self) -> bool:
         """True if no further transitions are allowed from this state."""
@@ -82,6 +84,7 @@ ALLOWED_TRANSITIONS: dict[BusinessState, set[BusinessState]] = {
         BusinessState.PROCESSING,
         BusinessState.COMPLETED,
         BusinessState.PENDING,
+        BusinessState.APPROVED,  # auto_apply: skip HITL, go straight to apply
         BusinessState.FAILED,
         BusinessState.FILTERED_OUT,
         BusinessState.SCRAPE_FAILED,
@@ -89,6 +92,7 @@ ALLOWED_TRANSITIONS: dict[BusinessState, set[BusinessState]] = {
     BusinessState.PROCESSING: {
         BusinessState.COMPLETED,
         BusinessState.PENDING,
+        BusinessState.APPROVED,  # auto_apply: skip HITL, go straight to apply
         BusinessState.FAILED,
         BusinessState.FILTERED_OUT,
         BusinessState.SCRAPE_FAILED,
@@ -103,6 +107,8 @@ ALLOWED_TRANSITIONS: dict[BusinessState, set[BusinessState]] = {
         BusinessState.APPLYING,
         BusinessState.APPLIED,
         BusinessState.FAILED,
+        BusinessState.NEEDS_EXTENSION,
+        BusinessState.MANUAL_REQUIRED,
     },
     BusinessState.DECLINED: set(),  # Terminal
     BusinessState.RETRYING: {
@@ -112,6 +118,9 @@ ALLOWED_TRANSITIONS: dict[BusinessState, set[BusinessState]] = {
     BusinessState.APPLYING: {
         BusinessState.APPLIED,
         BusinessState.FAILED,
+        BusinessState.MANUAL_REQUIRED,
+        # Extension dropped mid-apply — recoverable; user re-triggers once reconnected.
+        BusinessState.NEEDS_EXTENSION,
     },
     BusinessState.APPLIED: set(),  # Terminal
     BusinessState.FAILED: {
@@ -131,6 +140,16 @@ ALLOWED_TRANSITIONS: dict[BusinessState, set[BusinessState]] = {
         BusinessState.FAILED,  # Cap exhausted
         BusinessState.FILTERED_OUT,
     },
+    BusinessState.NEEDS_EXTENSION: {
+        # Recoverable: once the extension connects, the user re-triggers apply.
+        BusinessState.APPLYING,
+        BusinessState.FAILED,
+        # Re-trigger may discover the job isn't a drivable LinkedIn Easy Apply
+        # posting (e.g. rows parked before the Easy Apply gate existed) — park it
+        # in manual_required rather than 500 on the illegal write.
+        BusinessState.MANUAL_REQUIRED,
+    },
+    BusinessState.MANUAL_REQUIRED: set(),  # Terminal — finished by hand on LinkedIn
 }
 
 

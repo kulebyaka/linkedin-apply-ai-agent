@@ -169,9 +169,31 @@ class AuthService:
         payload = {
             "user_id": user_id,
             "email": email,
-            "exp": datetime.now(tz=timezone.utc)
-            + timedelta(days=self._settings.jwt_expiry_days),
+            "exp": datetime.now(tz=timezone.utc) + timedelta(days=self._settings.jwt_expiry_days),
             "iat": datetime.now(tz=timezone.utc),
+        }
+        return jwt.encode(payload, self._settings.jwt_secret, algorithm="HS256")
+
+    # JWT "scope" claim marking a token as usable ONLY for the extension WS
+    # bridge handshake. The session-cookie path (get_current_user) rejects it.
+    EXTENSION_SCOPE = "extension"
+
+    def create_extension_token(self, user_id: str, email: str) -> str:
+        """Create a short-lived, WS-bridge-scoped JWT for the Chrome extension.
+
+        Unlike the session cookie (httpOnly, 30-day), this token is handed to
+        browser JS via ``/api/auth/extension-token`` so it must be both
+        short-lived and unusable as a normal API session. It carries
+        ``scope="extension"`` (rejected by ``get_current_user`` /
+        ``get_optional_user``) and a much shorter TTL.
+        """
+        now = datetime.now(tz=timezone.utc)
+        payload = {
+            "user_id": user_id,
+            "email": email,
+            "scope": self.EXTENSION_SCOPE,
+            "exp": now + timedelta(minutes=self._settings.extension_token_ttl_minutes),
+            "iat": now,
         }
         return jwt.encode(payload, self._settings.jwt_secret, algorithm="HS256")
 
@@ -188,9 +210,7 @@ class AuthService:
             ValueError: If token is invalid or expired.
         """
         try:
-            return jwt.decode(
-                token, self._settings.jwt_secret, algorithms=["HS256"]
-            )
+            return jwt.decode(token, self._settings.jwt_secret, algorithms=["HS256"])
         except jwt.ExpiredSignatureError:
             raise ValueError("JWT token has expired") from None
         except jwt.InvalidTokenError as e:

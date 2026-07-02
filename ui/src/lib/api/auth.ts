@@ -4,6 +4,23 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
 
 export type UserRole = 'trial' | 'premium' | 'admin';
 
+/**
+ * Structured answers reused to fill LinkedIn Easy Apply screening fields.
+ *
+ * Every field is optional; absence means "unknown" — the deterministic
+ * server-side classifier treats a required-but-missing value as an abort
+ * signal (the job lands in `manual_required`) rather than guessing.
+ */
+export interface ApplyProfile {
+	phone_country_code: string | null;
+	years_experience: number | null;
+	expected_salary: string | null;
+	needs_visa_sponsorship: boolean | null;
+	legally_authorized: boolean | null;
+	willing_to_relocate: boolean | null;
+	drivers_license: boolean | null;
+}
+
 export interface User {
 	id: string;
 	email: string;
@@ -13,6 +30,8 @@ export interface User {
 	search_preferences: UserSearchPreferences | null;
 	filter_preferences: UserFilterPreferences | null;
 	model_preferences: UserModelPreferences | null;
+	apply_profile: ApplyProfile | null;
+	auto_apply: boolean;
 	created_at: string;
 	updated_at: string;
 }
@@ -99,6 +118,19 @@ export async function getCurrentUser(): Promise<User> {
 	}
 
 	return response.json();
+}
+
+export async function getExtensionToken(): Promise<string> {
+	const response = await fetch(`${API_BASE}/api/auth/extension-token`, {
+		credentials: 'include',
+	});
+
+	if (!response.ok) {
+		throw new Error('Not authenticated');
+	}
+
+	const data = (await response.json()) as { token: string };
+	return data.token;
 }
 
 export async function logout(): Promise<void> {

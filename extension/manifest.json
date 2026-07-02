@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "LinkedIn Apply AI Agent — Bridge",
+  "version": "0.1.0",
+  "description": "DOM actuator bridge for the LinkedIn Apply AI Agent. The server orchestrates Easy Apply over a WebSocket; this extension only actuates the page in your own logged-in browser.",
+  "permissions": ["tabs", "storage", "scripting"],
+  "host_permissions": ["https://www.linkedin.com/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "LinkedIn Apply Bridge"
+  },
+  "externally_connectable": {
+    "matches": [
+      "http://localhost:5173/*",
+      "http://127.0.0.1:5173/*",
+      "https://*.kuule.cc/*"
+    ]
+  }
+}

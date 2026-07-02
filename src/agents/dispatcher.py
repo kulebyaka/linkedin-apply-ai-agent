@@ -71,13 +71,13 @@ class WorkflowDispatcher:
                 "thread_id": thread_id,
                 "repository": self._ctx.repository,
                 "user_repository": self._ctx.user_repository,
+                # Needed by save_to_db_node's auto_apply branch to trigger apply.
+                "ctx": self._ctx,
             }
         }
 
         if track:
-            await self._ctx.register_workflow(
-                job_id, thread_id, "preparation", user_id=user_id
-            )
+            await self._ctx.register_workflow(job_id, thread_id, "preparation", user_id=user_id)
 
         try:
             result = await self._ctx.prep_workflow.ainvoke(initial_state, config)
@@ -135,9 +135,65 @@ class WorkflowDispatcher:
                     {"status": BusinessState.FAILED, "error_message": str(exc)},
                 )
             except Exception:
-                logger.warning(
-                    "Failed to mark job %s as FAILED in repository", job_id
-                )
+                logger.warning("Failed to mark job %s as FAILED in repository", job_id)
+        finally:
+            await self._ctx.unregister_workflow(job_id)
+
+    # ------------------------------------------------------------------
+    # Application workflow (deterministic Easy Apply)
+    # ------------------------------------------------------------------
+
+    async def dispatch_application(
+        self,
+        *,
+        job_id: str,
+        thread_id: str,
+        initial_state: dict[str, Any],
+        user_id: str = "",
+    ) -> None:
+        """Invoke the deterministic Easy Apply workflow.
+
+        The workflow writes its own terminal status (APPLIED / MANUAL_REQUIRED /
+        NEEDS_EXTENSION / FAILED) in its ``finalize`` node. This dispatcher is a
+        backstop: on an *unexpected* exception it persists FAILED, but only when
+        ``ALLOWED_TRANSITIONS`` permits it (so a terminal write isn't clobbered).
+        """
+        config = {
+            "configurable": {
+                "thread_id": thread_id,
+                "repository": self._ctx.repository,
+                "apply_bridge": self._ctx.apply_bridge,
+                "settings": self._ctx.settings,
+            }
+        }
+
+        await self._ctx.register_workflow(job_id, thread_id, "application", user_id=user_id)
+
+        # Serialize per user: one extension session = one LinkedIn tab, so two
+        # concurrent applies would interleave RPCs and submit the wrong form.
+        apply_lock = await self._ctx.get_apply_lock(user_id)
+
+        try:
+            async with apply_lock:
+                result = await self._ctx.apply_workflow.ainvoke(initial_state, config)
+            logger.info(
+                "Application workflow for job %s completed: %s",
+                job_id,
+                result.get("current_step"),
+            )
+        except Exception as exc:
+            logger.exception("Application workflow for job %s failed", job_id)
+            try:
+                existing = await self._ctx.repository.get(job_id)
+                if existing is not None and BusinessState.FAILED in ALLOWED_TRANSITIONS.get(
+                    existing.status, set()
+                ):
+                    await self._ctx.repository.update(
+                        job_id,
+                        {"status": BusinessState.FAILED, "error_message": str(exc)},
+                    )
+            except Exception:
+                logger.warning("Failed to mark job %s as FAILED in repository", job_id)
         finally:
             await self._ctx.unregister_workflow(job_id)
 
@@ -163,7 +219,9 @@ class WorkflowDispatcher:
         """
         logger.error(
             "Preparation workflow for job %s failed: %s",
-            job_id, exc, exc_info=True,
+            job_id,
+            exc,
+            exc_info=True,
         )
 
         try:
@@ -180,22 +238,23 @@ class WorkflowDispatcher:
                 else:
                     logger.info(
                         "Skipping FAILED transition for job %s (current status %s is terminal)",
-                        job_id, existing.status,
+                        job_id,
+                        existing.status,
                     )
             elif create_record_if_missing:
                 now = datetime.now(tz=timezone.utc)
-                await self._ctx.repository.create(JobRecord(
-                    job_id=job_id,
-                    user_id=user_id or initial_state.get("user_id", ""),
-                    source=initial_state.get("source", "url"),
-                    mode=initial_state.get("mode", "mvp"),
-                    status=BusinessState.FAILED,
-                    raw_input=initial_state.get("raw_input") or {},
-                    error_message=str(exc),
-                    created_at=now,
-                    updated_at=now,
-                ))
+                await self._ctx.repository.create(
+                    JobRecord(
+                        job_id=job_id,
+                        user_id=user_id or initial_state.get("user_id", ""),
+                        source=initial_state.get("source", "url"),
+                        mode=initial_state.get("mode", "mvp"),
+                        status=BusinessState.FAILED,
+                        raw_input=initial_state.get("raw_input") or {},
+                        error_message=str(exc),
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
         except Exception:
-            logger.warning(
-                "Failed to persist failure record for job %s", job_id, exc_info=True
-            )
+            logger.warning("Failed to persist failure record for job %s", job_id, exc_info=True)

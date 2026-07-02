@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="popup.css" />
+    <title>LinkedIn Apply Bridge</title>
+  </head>
+  <body>
+    <header>
+      <h1>Apply Bridge</h1>
+      <span id="dot" class="dot dot--off" title="connection"></span>
+    </header>
+
+    <p id="statusLine" class="status">Checking connection…</p>
+
+    <div class="actions">
+      <button id="connectBtn" class="btn btn--primary">Connect</button>
+      <button id="pauseBtn" class="btn">Pause</button>
+    </div>
+
+    <section class="last-apply">
+      <h2>Last result</h2>
+      <p id="lastApply" class="muted">No applications yet.</p>
+    </section>
+
+    <footer>
+      <p class="muted small">
+        The form-fill profile lives in the app's Settings, not here.
+      </p>
+    </footer>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

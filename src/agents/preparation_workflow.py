@@ -633,14 +633,29 @@ async def save_to_db_node(state: PreparationWorkflowState, config: RunnableConfi
     """
     job_id = state.get("job_id", "unknown")
     mode = state.get("mode", "mvp")
+    user_id = state.get("user_id", "")
     logger.info(f"Saving job {job_id} to repository (mode: {mode})")
     state["current_step"] = WorkflowStep.SAVING
+
+    # auto_apply: in full mode, a user who opted in skips HITL — the CV-ready job
+    # goes straight to APPROVED and we dispatch the apply right after saving.
+    auto_apply = False
+    if mode != "mvp" and user_id and not state.get("error_message"):
+        user_repo = (config or {}).get("configurable", {}).get("user_repository")
+        if user_repo is not None:
+            try:
+                user = await user_repo.get_by_id(user_id)
+                auto_apply = bool(user and user.auto_apply)
+            except Exception:
+                logger.warning("Could not load auto_apply for user %s", user_id)
 
     # Determine final status
     if state.get("error_message") and not state.get("tailored_cv_pdf_path"):
         final_status = BusinessState.FAILED
     elif mode == "mvp":
         final_status = BusinessState.COMPLETED
+    elif auto_apply:
+        final_status = BusinessState.APPROVED
     else:
         final_status = BusinessState.PENDING
     state["target_status"] = final_status
@@ -678,6 +693,28 @@ async def save_to_db_node(state: PreparationWorkflowState, config: RunnableConfi
             )
             await repo.create_cv_attempt(attempt)
             logger.info(f"CV attempt #1 saved for job {job_id}")
+
+        # auto_apply: dispatch the deterministic Easy Apply run now that the
+        # job is saved as APPROVED. trigger_apply moves it to APPLYING (when an
+        # extension is connected) or NEEDS_EXTENSION (fail-fast, recoverable).
+        if final_status == BusinessState.APPROVED:
+            app_ctx = (config or {}).get("configurable", {}).get("ctx")
+            if app_ctx is not None:
+                from src.services.jobs.apply_trigger import trigger_apply
+                try:
+                    new_state = await trigger_apply(app_ctx, job_id, user_id)
+                    state["target_status"] = new_state
+                    logger.info(
+                        f"auto_apply dispatched for job {job_id}: {new_state}"
+                    )
+                except Exception:
+                    logger.exception(
+                        f"auto_apply trigger failed for job {job_id}; left APPROVED"
+                    )
+            else:
+                logger.warning(
+                    f"auto_apply set for job {job_id} but no ctx in config; left APPROVED"
+                )
 
         logger.info(f"Preparation workflow completed for job {job_id}: {final_status}")
 

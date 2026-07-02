@@ -1,4 +1,5 @@
 import type {
+	ApplyProfile,
 	LLMOperation,
 	ModelCatalogEntry,
 	ModelChoice,
@@ -13,6 +14,8 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
 export async function updateProfile(data: {
 	display_name?: string;
 	master_cv_json?: Record<string, unknown>;
+	apply_profile?: ApplyProfile;
+	auto_apply?: boolean;
 }): Promise<User> {
 	const response = await fetch(`${API_BASE}/api/users/me`, {
 		method: 'PUT',

@@ -27,8 +27,9 @@ The goal is a fully automated job application pipeline:
 | HITL Review UI | **Complete** | Tinder-like batch review interface |
 | Job Source Adapters | *Interface only* | URL extraction, manual input |
 | Job Filter (LLM) | **Complete** | Two-threshold routing, hidden disqualifier detection, per-user prompt, HITL badge |
-| Application Workflow | *Stubs only* | Browser automation pending |
-| LinkedIn Integration | *Not implemented* | Job fetching & Easy Apply |
+| Application Workflow | **Complete** | Deterministic LinkedIn Easy Apply (no LLM) via Chrome extension bridge |
+| Chrome Extension Bridge | **Complete** | MV3 DOM actuator + WebSocket relay; per-field server-orchestrated fill |
+| LLM Form-Fill Agent | *Deferred* | Agentic screening-question answering + vision fallback (next sprint) |
 
 ## Architecture
 
@@ -59,11 +60,18 @@ The goal is a fully automated job application pipeline:
 ┌─────────────────────┐  ┌─────────────────────┐  ┌─────────────────────┐
 │ APPLICATION WORKFLOW│  │   RETRY WORKFLOW    │  │      DECLINED       │
 │                     │  │                     │  │                     │
-│ Browser automation  │  │ Re-compose CV with  │  │ Archived, no action │
-│ via Playwright      │  │ user feedback       │  │                     │
-│ (not implemented)   │  │ (complete)          │  │                     │
+│ Deterministic Easy  │  │ Re-compose CV with  │  │ Archived, no action │
+│ Apply via Chrome    │  │ user feedback       │  │                     │
+│ extension bridge    │  │ (complete)          │  │                     │
+│ (complete, no LLM)  │  │                     │  │                     │
 └─────────────────────┘  └─────────────────────┘  └─────────────────────┘
 ```
+
+The Application Workflow drives the LinkedIn **Easy Apply** modal field-by-field over a
+WebSocket bridge to a Chrome MV3 extension running in your own logged-in browser — the server
+never sees your LinkedIn credentials. Field values come from your **Application Profile** and
+tailored CV; any unrecognized screening question aborts the application to `manual_required`
+(it never guesses). Enable `auto_apply` to skip the human checkpoint for filtered-in jobs.
 
 ## Tech Stack
 
@@ -72,7 +80,7 @@ The goal is a fully automated job application pipeline:
 - **Frontend**: SvelteKit, TailwindCSS
 - **PDF**: WeasyPrint + Jinja2
 - **Database**: SQLite (Piccolo ORM)
-- **Browser Automation**: Playwright (planned)
+- **Browser Automation**: Playwright (scraping) + Chrome MV3 extension bridge (Easy Apply)
 - **LLM**: Multi-provider (OpenAI, Anthropic, DeepSeek, Grok)
 
 ## What Works Today
@@ -90,7 +98,8 @@ This covers the core value proposition: AI-powered CV tailoring with professiona
 - [ ] Job source adapters (URL extraction, LinkedIn API)
 - [x] LLM-based job filtering for hidden disqualifiers
 - [x] Tinder-like HITL UI for batch review
-- [ ] Browser automation for LinkedIn Easy Apply
+- [x] Browser automation for LinkedIn Easy Apply (deterministic, via Chrome extension bridge)
+- [ ] LLM form-fill agent for novel screening questions + non-LinkedIn ATS (vision fallback)
 
 ## API Endpoints
 
@@ -100,7 +109,19 @@ This covers the core value proposition: AI-powered CV tailoring with professiona
 | GET | `/api/jobs/{job_id}/status` | Get job status |
 | GET | `/api/jobs/{job_id}/pdf` | Download generated PDF |
 | GET | `/api/hitl/pending` | Get pending approvals |
-| POST | `/api/hitl/{job_id}/decide` | Submit approval decision |
+| POST | `/api/hitl/{job_id}/decide` | Submit approval decision (approve triggers Easy Apply) |
+| POST | `/api/jobs/{job_id}/apply` | (Re-)trigger Easy Apply (e.g. after connecting the extension) |
+| WS | `/ws/extension` | Chrome extension bridge (JWT in first frame) |
+
+## Chrome Extension (Easy Apply)
+
+Automated Easy Apply runs inside your own browser via a Chrome MV3 extension, so the server
+never handles your LinkedIn credentials.
+
+1. **Load the extension**: open `chrome://extensions`, enable *Developer mode*, click *Load unpacked*, and select the `extension/` directory. Set the assigned extension ID as the frontend build var `VITE_EXTENSION_ID` (the `/extension-auth` page targets it; you can also append `?ext=<id>` to that URL). If your app origin isn't `localhost:5173` / `*.kuule.cc`, add it to the hardcoded `externally_connectable.matches` list in `extension/manifest.json`.
+2. **Fill your Application Profile**: in *Settings*, complete the *Application Profile* card (phone, years of experience, work authorization, etc.). Incomplete profiles cause applies to abort to *manual required* rather than guessing.
+3. **Connect**: click *Connect* in the extension popup (or open `/extension-auth` in the app) to hand the extension a session token. The popup shows the live connection status.
+4. **Apply**: approve a job in the HITL review (or enable *auto-apply* in Settings to skip the checkpoint). Jobs approved while the extension is disconnected land in `needs_extension`; connect and hit *Apply now*.
 
 ## Development
 

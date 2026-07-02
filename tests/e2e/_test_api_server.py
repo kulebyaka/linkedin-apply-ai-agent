@@ -167,11 +167,42 @@ def main():
         u = await ctx.user_repository.create_user(body["email"])
         return {"id": u.id, "email": u.email, "role": u.role.value}
 
-    # Pop the freshly added route and re-insert it at index 0 so it precedes
-    # any StaticFiles mount registered at module import time.
-    if app.router.routes:
-        seed_route = app.router.routes.pop()
-        app.router.routes.insert(0, seed_route)
+    # Test-only endpoint to materialize the static override user into the repo
+    # with its fixed id, so routes that persist by `user.id` (e.g. PUT
+    # /api/users/me) succeed instead of raising "user not found".
+    @app.post("/__test__/ensure-test-user")
+    async def _ensure_test_user(req: _FastApiRequest) -> dict:
+        from datetime import datetime, timezone
+
+        from src.services.db.tables import UserTable
+
+        existing = (
+            await UserTable.select().where(UserTable.id == _test_user.id).first().run()
+        )
+        if existing:
+            return {"id": _test_user.id, "created": False}
+        now = datetime.now(tz=timezone.utc)
+        await UserTable.insert(
+            UserTable(
+                id=_test_user.id,
+                email=_test_user.email,
+                display_name=_test_user.display_name,
+                role=_test_user.role.value,
+                master_cv_json=None,
+                search_preferences=None,
+                created_at=now,
+                updated_at=now,
+            )
+        ).run()
+        return {"id": _test_user.id, "created": True}
+
+    # Pop the freshly added test-only routes and re-insert them at the front of
+    # app.routes so they precede any StaticFiles mount registered at import time.
+    test_routes = [r for r in app.router.routes if getattr(r, "path", "").startswith("/__test__")]
+    for r in test_routes:
+        app.router.routes.remove(r)
+    for r in reversed(test_routes):
+        app.router.routes.insert(0, r)
 
     # Replace the CORS middleware to allow any localhost/127.0.0.1 origin.
     # The default cors_origins setting uses specific ports, but e2e tests use

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { listMyJobs, proceedAnyway, type MyJobsFilters } from '$lib/api/jobs';
+	import { applyJob, listMyJobs, proceedAnyway, type MyJobsFilters } from '$lib/api/jobs';
 	import { fetchJobStats, deleteJob, type JobStatusCounts } from '$lib/api/hitl';
 	import { downloadPDF, triggerDownload } from '$lib/api/client';
 	import type { AdminJobRecord, FilterResult } from '$lib/api/admin';
@@ -57,6 +57,8 @@
 				return 'success';
 			case 'pending':
 			case 'retrying':
+			case 'manual_required':
+			case 'needs_extension':
 				return 'warning';
 			case 'failed':
 			case 'scrape_failed':
@@ -69,6 +71,9 @@
 				return 'default';
 		}
 	}
+
+	/** True when any loaded job is parked waiting for the browser extension. */
+	const hasNeedsExtension = $derived(jobs.some((j) => j.status === 'needs_extension'));
 
 	const statCards = $derived(
 		Object.entries(stats)
@@ -167,6 +172,21 @@
 		}
 	}
 
+	async function handleApply(job: AdminJobRecord) {
+		try {
+			const resp = await applyJob(job.job_id);
+			if (resp.status === 'applying') {
+				showToast('Application started — watch this job for the result.', 'success');
+			} else {
+				showToast(resp.message || 'Connect the extension in your browser to apply.', 'info');
+			}
+			await fetchJobs({ silent: true });
+			await fetchStats();
+		} catch (err) {
+			showToast(err instanceof Error ? err.message : 'Failed to start application', 'error');
+		}
+	}
+
 	function handleProceed(job: AdminJobRecord) {
 		proceedJob = job;
 		proceedReason = '';
@@ -244,6 +264,23 @@
 		</button>
 	</header>
 
+	{#if hasNeedsExtension}
+		<div
+			class="flex flex-wrap items-center justify-between gap-3 border-4 border-[var(--color-foreground)] bg-purple-100 px-4 py-3 shadow-brutal"
+			role="status"
+		>
+			<p class="font-body text-sm text-purple-900">
+				Some jobs are waiting to apply. Connect the browser extension to finish them.
+			</p>
+			<a
+				href="/extension-auth"
+				class="font-mono border-2 border-[var(--color-foreground)] bg-purple-200 px-3 py-1.5 text-xs uppercase tracking-wider text-purple-900 shadow-brutal hover:-translate-y-0.5"
+			>
+				Connect extension
+			</a>
+		</div>
+	{/if}
+
 	{#if statCards.length > 0}
 		<div class="flex flex-wrap gap-3">
 			{#each statCards as [status, count]}
@@ -277,6 +314,7 @@
 		onReview={handleReview}
 		onDownload={handleDownload}
 		onProceed={handleProceed}
+		onApply={handleApply}
 		loading={loading && !initialLoadDone}
 	/>
 

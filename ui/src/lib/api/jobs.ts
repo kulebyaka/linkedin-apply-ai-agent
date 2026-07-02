@@ -71,3 +71,22 @@ export async function proceedAnyway(
 	});
 	return handle<ProceedResponse>(response, 'Proceed with job');
 }
+
+export interface ApplyResponse {
+	job_id: string;
+	status: string;
+	message: string;
+}
+
+/**
+ * (Re-)trigger an Easy Apply run for a job awaiting application.
+ * Used to recover a job parked in `needs_extension` once the browser
+ * extension is connected (or to re-run an `approved` job).
+ */
+export async function applyJob(jobId: string): Promise<ApplyResponse> {
+	const response = await fetch(`${API_BASE}/api/jobs/${jobId}/apply`, {
+		method: 'POST',
+		credentials: 'include',
+	});
+	return handle<ApplyResponse>(response, 'Apply to job');
+}

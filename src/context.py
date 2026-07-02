@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
 
     from src.agents.dispatcher import WorkflowDispatcher
+    from src.bridge import SessionStore, WsRelay
     from src.services.alerts import AdminAlertService
     from src.services.auth.auth import AuthService
     from src.services.auth.magic_link_repository import MagicLinkRepository
@@ -27,6 +28,7 @@ if TYPE_CHECKING:
     from src.services.jobs.job_queue import ConsumerManager, JobQueue
     from src.services.jobs.refinement_scheduler import RefinementScheduler
     from src.services.jobs.scheduler import LinkedInSearchScheduler
+    from src.services.linkedin.apply_bridge import ApplyBridge
     from src.services.linkedin.browser_automation import LinkedInAutomation
     from src.services.notifications.notification_repository import NotificationRepository
 
@@ -47,6 +49,7 @@ class AppContext:
     settings: Settings
     prep_workflow: CompiledStateGraph
     retry_workflow: CompiledStateGraph
+    apply_workflow: CompiledStateGraph | None = None
     user_repository: UserRepository | None = None
     magic_link_repository: MagicLinkRepository | None = None
     user_service: UserService | None = None
@@ -62,6 +65,10 @@ class AppContext:
     cv_extraction_registry: CVExtractionRegistry | None = None
     consumer_manager: ConsumerManager | None = None
     workflow_dispatcher: WorkflowDispatcher | None = None
+    # Easy Apply browser bridge (extension WebSocket relay + session registry)
+    session_store: SessionStore | None = None
+    ws_relay: WsRelay | None = None
+    apply_bridge: ApplyBridge | None = None
 
     # Lock for LinkedIn search/browser initialization (manual trigger path).
     linkedin_init_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
@@ -75,10 +82,21 @@ class AppContext:
     _workflow_threads: dict[str, dict] = field(default_factory=dict)
     # Background task references to prevent GC of fire-and-forget tasks
     _background_tasks: set[asyncio.Task] = field(default_factory=set)
+    # Per-user serialization of Easy Apply runs. One extension session drives a
+    # single LinkedIn tab, so concurrent application workflows for the same user
+    # would interleave navigate/fill/submit RPCs and apply with the wrong form.
+    # dispatch_application holds this lock for the whole run so applies run one
+    # at a time per user (auto_apply batches + double-triggers queue, not race).
+    _apply_locks: dict[str, asyncio.Lock] = field(default_factory=dict)
+    _apply_locks_guard: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     async def register_workflow(
-        self, job_id: str, thread_id: str, workflow_type: str,
-        *, user_id: str = "",
+        self,
+        job_id: str,
+        thread_id: str,
+        workflow_type: str,
+        *,
+        user_id: str = "",
     ) -> None:
         """Register an in-progress workflow for status tracking."""
         from datetime import datetime, timezone
@@ -106,6 +124,15 @@ class AppContext:
         async with self._tracking_lock:
             return dict(self._workflow_threads)
 
+    async def get_apply_lock(self, user_id: str) -> asyncio.Lock:
+        """Get (or create) the per-user lock serializing Easy Apply runs."""
+        async with self._apply_locks_guard:
+            lock = self._apply_locks.get(user_id)
+            if lock is None:
+                lock = asyncio.Lock()
+                self._apply_locks[user_id] = lock
+            return lock
+
     def create_background_task(self, coro) -> asyncio.Task:
         """Create an asyncio task and keep a reference to prevent GC."""
         task = asyncio.create_task(coro)
@@ -125,9 +152,11 @@ def create_app_context(
     Returns:
         AppContext with repository, workflows, and queue wired up.
     """
+    from src.agents.application_workflow import create_application_workflow
     from src.agents.dispatcher import WorkflowDispatcher
     from src.agents.preparation_workflow import create_preparation_workflow
     from src.agents.retry_workflow import create_retry_workflow
+    from src.bridge import SessionStore, WsRelay
     from src.services.alerts import AdminAlertService
     from src.services.auth.auth import AuthService
     from src.services.auth.magic_link_repository import MagicLinkRepository
@@ -138,6 +167,7 @@ def create_app_context(
     from src.services.jobs.hitl_processor import HITLProcessor
     from src.services.jobs.job_orchestrator import JobOrchestrator
     from src.services.jobs.job_queue import ConsumerManager, JobQueue
+    from src.services.linkedin.apply_bridge import ApplyBridge
     from src.services.notifications.notification_repository import NotificationRepository
 
     if settings is None:
@@ -150,6 +180,7 @@ def create_app_context(
 
     prep_workflow = create_preparation_workflow()  # type: ignore[arg-type]
     retry_workflow = create_retry_workflow()  # type: ignore[arg-type]
+    apply_workflow = create_application_workflow()  # type: ignore[arg-type]
     job_queue = JobQueue()
 
     user_repository = UserRepository()
@@ -158,11 +189,16 @@ def create_app_context(
     auth_service = AuthService(settings, user_repository, magic_link_repository)
     admin_alert_service = AdminAlertService(settings)
 
+    session_store = SessionStore()
+    ws_relay = WsRelay(session_store, auth_service)
+    apply_bridge = ApplyBridge(ws_relay, settings)
+
     ctx = AppContext(
         repository=repository,
         settings=settings,
         prep_workflow=prep_workflow,
         retry_workflow=retry_workflow,
+        apply_workflow=apply_workflow,
         user_repository=user_repository,
         magic_link_repository=magic_link_repository,
         user_service=user_service,
@@ -172,6 +208,9 @@ def create_app_context(
         notification_repository=NotificationRepository(),
         cv_extraction_registry=CVExtractionRegistry(),
         consumer_manager=ConsumerManager(),
+        session_store=session_store,
+        ws_relay=ws_relay,
+        apply_bridge=apply_bridge,
     )
 
     # Wire domain services (they need the full context)

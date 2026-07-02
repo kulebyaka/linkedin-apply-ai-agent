@@ -59,6 +59,37 @@ class UserSearchPreferences(BaseModel):
     max_jobs: int = Field(default=50, ge=1, le=500)
 
 
+class ApplyProfile(BaseModel):
+    """Structured answers reused to fill LinkedIn Easy Apply screening fields.
+
+    Every field is optional. Absence means "unknown" — the deterministic field
+    classifier treats a required-but-missing value as an abort signal
+    (``manual_required``) rather than guessing. Captured once in Settings and
+    reused across applications.
+    """
+
+    phone_country_code: str | None = None
+    years_experience: int | None = None
+    expected_salary: str | None = None
+    needs_visa_sponsorship: bool | None = None
+    legally_authorized: bool | None = None
+    willing_to_relocate: bool | None = None
+    drivers_license: bool | None = None
+
+    def is_complete_for(self, required_kinds: set[str]) -> bool:
+        """Return True iff every required field "kind" has a known value.
+
+        ``required_kinds`` are the classifier field-kind names (matching this
+        model's attribute names). A kind whose value is ``None`` — or any kind
+        with no corresponding attribute — makes the profile incomplete, which
+        the apply workflow maps to an abort (``manual_required``).
+        """
+        for kind in required_kinds:
+            if getattr(self, kind, None) is None:
+                return False
+        return True
+
+
 class User(BaseModel):
     """User entity stored in the database."""
 
@@ -70,6 +101,8 @@ class User(BaseModel):
     search_preferences: UserSearchPreferences | None = None
     filter_preferences: UserFilterPreferences | None = None
     model_preferences: UserModelPreferences | None = None
+    apply_profile: ApplyProfile | None = None
+    auto_apply: bool = False
     created_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
 
@@ -122,3 +155,5 @@ class UserUpdateRequest(BaseModel):
     search_preferences: UserSearchPreferences | None = None
     filter_preferences: UserFilterPreferences | None = None
     model_preferences: UserModelPreferences | None = None
+    apply_profile: ApplyProfile | None = None
+    auto_apply: bool | None = None

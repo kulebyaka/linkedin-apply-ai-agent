@@ -28,6 +28,7 @@ def _make_ctx(**overrides) -> AppContext:
         job_queue=MagicMock(),
     )
     from src.agents.dispatcher import WorkflowDispatcher
+
     ctx.workflow_dispatcher = WorkflowDispatcher(ctx)
     for k, v in overrides.items():
         setattr(ctx, k, v)
@@ -35,13 +36,16 @@ def _make_ctx(**overrides) -> AppContext:
 
 
 def _make_pending_job(job_id: str = "job-1") -> JobRecord:
+    # LinkedIn Easy Apply job (source + URL) so approve dispatches the apply.
+    # Non-LinkedIn jobs are diverted to manual_required by trigger_apply.
     return JobRecord(
         job_id=job_id,
         user_id=TEST_USER_ID,
-        source="manual",
+        source="linkedin",
         mode="full",
         status="pending",
         job_posting={"title": "Engineer", "company": "Acme"},
+        application_url="https://www.linkedin.com/jobs/view/1",
         current_cv_json={"name": "Test CV"},
         current_pdf_path="/tmp/test.pdf",
     )
@@ -50,20 +54,55 @@ def _make_pending_job(job_id: str = "job-1") -> JobRecord:
 class TestProcessDecision:
     """Test HITLProcessor.process_decision()."""
 
-    async def test_approve(self):
+    async def test_approve_no_extension_parks_needs_extension(self):
+        """Approve with no connected extension session → needs_extension (fail-fast)."""
         job = _make_pending_job()
         repo = AsyncMock()
         repo.get_for_user = AsyncMock(return_value=job)
-        ctx = _make_ctx(repository=repo)
+        session_store = AsyncMock()
+        session_store.is_connected = AsyncMock(return_value=False)
+        ctx = _make_ctx(repository=repo, session_store=session_store)
         processor = HITLProcessor(ctx)
 
         result = await processor.process_decision(
             "job-1", HITLDecision(decision="approved"), TEST_USER_ID
         )
 
-        assert result.status == "approved"
+        assert result.status == "needs_extension"
         assert result.job_id == "job-1"
-        repo.update.assert_awaited_once_with("job-1", {"status": "approved"})
+        # First sets APPROVED, then trigger_apply parks it in NEEDS_EXTENSION.
+        statuses = [c.args[1]["status"] for c in repo.update.await_args_list]
+        assert statuses == ["approved", "needs_extension"]
+
+    async def test_approve_connected_dispatches_apply(self):
+        """Approve with a connected session → APPLYING + apply workflow dispatched."""
+        job = _make_pending_job()
+        repo = AsyncMock()
+        repo.get_for_user = AsyncMock(return_value=job)
+        session_store = AsyncMock()
+        session_store.is_connected = AsyncMock(return_value=True)
+        user_repo = AsyncMock()
+        user_repo.get_by_id = AsyncMock(
+            return_value=MagicMock(
+                apply_profile=None, master_cv_json={"contact": {"full_name": "T"}}
+            )
+        )
+        ctx = _make_ctx(repository=repo, session_store=session_store, user_repository=user_repo)
+        ctx.workflow_dispatcher = MagicMock()
+        ctx.workflow_dispatcher.dispatch_application = AsyncMock()
+        processor = HITLProcessor(ctx)
+
+        result = await processor.process_decision(
+            "job-1", HITLDecision(decision="approved"), TEST_USER_ID
+        )
+
+        assert result.status == "applying"
+        # HITLProcessor sets APPROVED via update(); trigger_apply then claims the
+        # APPLYING transition atomically through try_claim_for_apply (not update).
+        statuses = [c.args[1]["status"] for c in repo.update.await_args_list]
+        assert statuses == ["approved"]
+        repo.try_claim_for_apply.assert_awaited_once_with("job-1")
+        ctx.workflow_dispatcher.dispatch_application.assert_called_once()
 
     async def test_decline(self):
         job = _make_pending_job()
@@ -85,9 +124,9 @@ class TestProcessDecision:
         repo.get_for_user = AsyncMock(return_value=job)
         repo.get_cv_attempts = AsyncMock(return_value=[])
         user_repo = AsyncMock()
-        user_repo.get_by_id = AsyncMock(return_value=MagicMock(
-            master_cv_json={"contact": {"full_name": "Test"}}
-        ))
+        user_repo.get_by_id = AsyncMock(
+            return_value=MagicMock(master_cv_json={"contact": {"full_name": "Test"}})
+        )
         ctx = _make_ctx(repository=repo, user_repository=user_repo)
         processor = HITLProcessor(ctx)
 
@@ -108,9 +147,7 @@ class TestProcessDecision:
         processor = HITLProcessor(ctx)
 
         with pytest.raises(ValueError, match="Feedback is required"):
-            await processor.process_decision(
-                "job-1", HITLDecision(decision="retry"), TEST_USER_ID
-            )
+            await processor.process_decision("job-1", HITLDecision(decision="retry"), TEST_USER_ID)
 
     async def test_job_not_found_raises(self):
         repo = AsyncMock()

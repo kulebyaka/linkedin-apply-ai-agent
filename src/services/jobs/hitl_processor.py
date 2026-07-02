@@ -106,13 +106,11 @@ class HITLProcessor:
                 )
 
             if decision.decision == "approved":
-                return await self._handle_approve(job_id)
+                return await self._handle_approve(job_id, user_id)
             elif decision.decision == "declined":
                 return await self._handle_decline(job_id, decision, job_record)
             elif decision.decision == "retry":
-                return await self._handle_retry(
-                    job_id, job_record, decision.feedback, user_id
-                )
+                return await self._handle_retry(job_id, job_record, decision.feedback, user_id)
             else:
                 raise ValueError(f"Invalid decision: {decision.decision}")
 
@@ -143,7 +141,9 @@ class HITLProcessor:
                         reject_threshold = user.filter_preferences.reject_threshold
                         warning_threshold = user.filter_preferences.warning_threshold
                 except Exception:
-                    logger.warning("Could not load filter preferences for user %s, using defaults", user_id)
+                    logger.warning(
+                        "Could not load filter preferences for user %s, using defaults", user_id
+                    )
 
             result = []
             for job in pending_jobs:
@@ -152,9 +152,7 @@ class HITLProcessor:
                     PendingApproval(
                         job_id=job.job_id,
                         status=str(job.status),
-                        workflow_step=(
-                            str(job.workflow_step) if job.workflow_step else None
-                        ),
+                        workflow_step=(str(job.workflow_step) if job.workflow_step else None),
                         job_posting=job.job_posting or {},
                         cv_json=job.current_cv_json or {},
                         pdf_path=job.current_pdf_path,
@@ -162,8 +160,7 @@ class HITLProcessor:
                         attempt_count=len(attempts),
                         created_at=job.created_at,
                         source=job.source,
-                        application_url=job.application_url
-                        or (job.job_posting or {}).get("url"),
+                        application_url=job.application_url or (job.job_posting or {}).get("url"),
                         reject_threshold=reject_threshold,
                         warning_threshold=warning_threshold,
                     )
@@ -185,12 +182,8 @@ class HITLProcessor:
             return [
                 ApplicationHistoryItem(
                     job_id=job.job_id,
-                    job_title=job.job_posting.get("title")
-                    if job.job_posting
-                    else None,
-                    company=job.job_posting.get("company")
-                    if job.job_posting
-                    else None,
+                    job_title=job.job_posting.get("title") if job.job_posting else None,
+                    company=job.job_posting.get("company") if job.job_posting else None,
                     status=job.status,
                     created_at=job.created_at,
                 )
@@ -204,14 +197,42 @@ class HITLProcessor:
     # Private helpers
     # =========================================================================
 
-    async def _handle_approve(self, job_id: str) -> HITLDecisionResponse:
-        logger.info("Job %s approved for application (workflow not implemented)", job_id)
+    async def _handle_approve(self, job_id: str, user_id: str) -> HITLDecisionResponse:
+        from src.services.jobs.apply_trigger import (
+            NEEDS_EXTENSION_MESSAGE,
+            NON_LINKEDIN_MESSAGE,
+            trigger_apply,
+        )
+
+        logger.info("Job %s approved; dispatching apply", job_id)
         await self._ctx.repository.update(job_id, {"status": BusinessState.APPROVED})
+
+        try:
+            result_state = await trigger_apply(self._ctx, job_id, user_id)
+        except Exception:
+            # Leave the job in APPROVED so the user can retry via
+            # POST /api/jobs/{id}/apply once their extension is connected.
+            logger.exception("Failed to trigger apply for job %s after approve", job_id)
+            return HITLDecisionResponse(
+                job_id=job_id,
+                status=BusinessState.APPROVED,
+                message=(
+                    "Job approved, but starting the application failed. "
+                    "Retry once your extension is connected."
+                ),
+            )
+
+        if result_state == BusinessState.APPLYING:
+            message = "Job approved. Application started."
+        elif result_state == BusinessState.MANUAL_REQUIRED:
+            message = NON_LINKEDIN_MESSAGE
+        else:
+            message = NEEDS_EXTENSION_MESSAGE
 
         return HITLDecisionResponse(
             job_id=job_id,
-            status=BusinessState.APPROVED,
-            message="Job approved. Application workflow not yet implemented.",
+            status=result_state,
+            message=message,
         )
 
     async def _handle_decline(
@@ -266,6 +287,7 @@ class HITLProcessor:
                     cv_model = user.model_preferences.cv_generation.model
             if not master_cv:
                 from src.agents._shared import load_master_cv
+
                 master_cv = load_master_cv()
 
             # Derive retry count from CV attempts
@@ -301,12 +323,12 @@ class HITLProcessor:
             # Rollback status to pending_review so the job isn't stuck in retrying
             logger.error(
                 "Failed to dispatch retry workflow for job %s, rolling back to pending: %s",
-                job_id, e, exc_info=True,
+                job_id,
+                e,
+                exc_info=True,
             )
             try:
-                await self._ctx.repository.update(
-                    job_id, {"status": BusinessState.PENDING}
-                )
+                await self._ctx.repository.update(job_id, {"status": BusinessState.PENDING})
             except Exception:
                 # Rollback to pending failed; try marking as failed so the job
                 # isn't stuck in RETRYING with no workflow running.
@@ -315,9 +337,7 @@ class HITLProcessor:
                     job_id,
                 )
                 try:
-                    await self._ctx.repository.update(
-                        job_id, {"status": BusinessState.FAILED}
-                    )
+                    await self._ctx.repository.update(job_id, {"status": BusinessState.FAILED})
                 except Exception:
                     logger.error(
                         "Job %s is stuck in RETRYING — both rollback and fail transition failed",
@@ -330,5 +350,3 @@ class HITLProcessor:
             status=BusinessState.RETRYING,
             message="CV regeneration started with your feedback.",
         )
-
-
