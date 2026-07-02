@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { ApplyProfile, User } from '$lib/api/auth';
+	import type { ApplyProfile, CustomAnswer, User } from '$lib/api/auth';
 	import { updateProfile } from '$lib/api/settings';
 	import { auth } from '$lib/stores/auth.svelte';
 
@@ -28,6 +28,13 @@
 	let willingToRelocate = $state(triToString(initial.willing_to_relocate));
 	let driversLicense = $state(triToString(initial.drivers_license));
 	let autoApply = $state(user.auto_apply ?? false);
+	// Reusable answers captured from manual_required aborts. Editable here so the
+	// user can review/remove stale entries; persisted on Save with the profile.
+	let customAnswers = $state<CustomAnswer[]>(initial.custom_answers ?? []);
+
+	function removeCustomAnswer(key: string) {
+		customAnswers = customAnswers.filter((a) => a.key !== key);
+	}
 
 	let saving = $state(false);
 	let saved = $state(false);
@@ -62,6 +69,9 @@
 			legally_authorized: triToBool(legallyAuthorized),
 			willing_to_relocate: triToBool(willingToRelocate),
 			drivers_license: triToBool(driversLicense),
+			// Preserve captured answers — omitting them here would wipe the store
+			// on the next save (the server replaces the whole apply_profile).
+			custom_answers: customAnswers,
 		};
 	}
 
@@ -190,6 +200,40 @@
 			</select>
 		</div>
 	</div>
+
+	{#if customAnswers.length > 0}
+		<div class="mt-5 border-t-2 border-dashed border-[var(--color-muted)] pt-4">
+			<h3 class="font-heading mb-1 text-sm tracking-tight">Saved answers</h3>
+			<p class="font-body mb-3 text-xs text-[var(--color-muted-foreground)]">
+				Captured from questions you answered when an application needed manual input. These
+				auto-fill matching questions on future applications. Remove any that are stale, then Save.
+			</p>
+			<ul class="flex flex-col gap-2">
+				{#each customAnswers as ans (ans.key)}
+					<li
+						class="flex items-start justify-between gap-3 border-2 border-[var(--color-foreground)] bg-[var(--color-muted)]/30 px-3 py-2"
+					>
+						<div class="min-w-0">
+							<div class="font-body truncate text-sm font-semibold" title={ans.label}>
+								{ans.label}
+							</div>
+							<div class="font-mono truncate text-xs text-[var(--color-muted-foreground)]">
+								{ans.value}
+							</div>
+						</div>
+						<button
+							type="button"
+							onclick={() => removeCustomAnswer(ans.key)}
+							disabled={saving}
+							class="font-mono shrink-0 border-2 border-[var(--color-foreground)] bg-red-100 px-2 py-1 text-[10px] uppercase tracking-wider text-red-900 hover:bg-red-200 disabled:opacity-50"
+						>
+							Remove
+						</button>
+					</li>
+				{/each}
+			</ul>
+		</div>
+	{/if}
 
 	<div class="mt-5 border-t-2 border-dashed border-[var(--color-muted)] pt-4">
 		<label class="flex items-start gap-3">

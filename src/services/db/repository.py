@@ -30,27 +30,30 @@ def _unlink_pdfs(paths: list[str], job_id: str) -> None:
             logger.warning("Failed to unlink PDF %s for job %s: %s", raw, job_id, exc)
 
 
-UPDATABLE_FIELDS = frozenset({
-    "status",
-    "workflow_step",
-    "job_posting",
-    "raw_input",
-    "current_cv_json",
-    "current_pdf_path",
-    "application_url",
-    "filter_result",
-    "decline_reason",
-    "override_reason",
-    "refine_signal_state",
-    "error_message",
-    "scrape_attempts",
-    "last_scrape_error",
-    "last_scrape_attempt_at",
-    "session_authenticated",
-    "recovery_attempts",
-    "last_recovery_attempt_at",
-    "updated_at",
-})
+UPDATABLE_FIELDS = frozenset(
+    {
+        "status",
+        "workflow_step",
+        "job_posting",
+        "raw_input",
+        "current_cv_json",
+        "current_pdf_path",
+        "application_url",
+        "filter_result",
+        "decline_reason",
+        "override_reason",
+        "refine_signal_state",
+        "error_message",
+        "pending_questions",
+        "scrape_attempts",
+        "last_scrape_error",
+        "last_scrape_attempt_at",
+        "session_authenticated",
+        "recovery_attempts",
+        "last_recovery_attempt_at",
+        "updated_at",
+    }
+)
 
 
 class RepositoryError(Exception):
@@ -224,9 +227,7 @@ class JobRepository(ABC):
         pass
 
     @abstractmethod
-    async def count_by_status_global(
-        self, window_hours: int | None = None
-    ) -> dict[str, int]:
+    async def count_by_status_global(self, window_hours: int | None = None) -> dict[str, int]:
         pass
 
     @abstractmethod
@@ -290,7 +291,9 @@ class JobRepository(ABC):
     # =========================================================================
 
     @abstractmethod
-    async def find_by_application_url(self, url: str, user_id: str | None = None) -> JobRecord | None:
+    async def find_by_application_url(
+        self, url: str, user_id: str | None = None
+    ) -> JobRecord | None:
         pass
 
     @abstractmethod

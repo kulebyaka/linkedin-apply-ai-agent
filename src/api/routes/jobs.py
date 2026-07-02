@@ -20,10 +20,13 @@ from src.api.deps import (
 from src.config.settings import get_settings
 from src.models.state_machine import BusinessState, WorkflowStep
 from src.models.unified import (
+    AnswerQuestionsRequest,
     JobStatusResponse,
     JobSubmitRequest,
     JobSubmitResponse,
 )
+from src.models.user import ApplyProfile, CustomAnswer
+from src.services.linkedin.field_classifier import normalize_question_label
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -369,6 +372,90 @@ async def proceed_filtered_out_job(
         raise HTTPException(500, "Failed to proceed with job") from None
 
 
+# ApplyProfile attributes that a parked question's answer can populate directly,
+# keyed by the classifier field-kind (== the ApplyProfile attribute name).
+_PROFILE_STR_KINDS = {"phone_country_code", "expected_salary"}
+_PROFILE_INT_KINDS = {"years_experience"}
+_PROFILE_BOOL_KINDS = {
+    "needs_visa_sponsorship",
+    "legally_authorized",
+    "willing_to_relocate",
+    "drivers_license",
+}
+_YES_TOKENS = {"true", "yes", "y", "1", "oui", "si", "sí", "ja"}
+_NO_TOKENS = {"false", "no", "n", "0", "non", "nein"}
+
+
+def _coerce_bool(value: str) -> bool | None:
+    token = (value or "").strip().lower()
+    if token in _YES_TOKENS:
+        return True
+    if token in _NO_TOKENS:
+        return False
+    return None
+
+
+def _apply_answer_to_profile(profile: ApplyProfile, ans) -> None:
+    """Route one answer into the typed ApplyProfile field or custom-answers.
+
+    Falls back to the generic custom-answers store when the answer can't be
+    coerced into its typed field (so it is never silently dropped).
+    """
+    kind = ans.kind
+    if kind in _PROFILE_STR_KINDS and ans.value.strip():
+        setattr(profile, kind, ans.value.strip())
+        return
+    if kind in _PROFILE_INT_KINDS:
+        try:
+            setattr(profile, kind, int(ans.value.strip()))
+            return
+        except (TypeError, ValueError):
+            pass
+    elif kind in _PROFILE_BOOL_KINDS:
+        parsed = _coerce_bool(ans.value)
+        if parsed is not None:
+            setattr(profile, kind, parsed)
+            return
+    # Unrecognized label, or a typed field we couldn't coerce → reusable custom
+    # answer keyed by the normalized question label.
+    profile.upsert_custom_answer(
+        CustomAnswer(
+            key=normalize_question_label(ans.label),
+            label=ans.label,
+            field_type=ans.field_type,
+            value=ans.value,
+            options=ans.options,
+        )
+    )
+
+
+@router.post("/api/jobs/{job_id}/answer-questions", response_model=ApplyProfile)
+async def answer_questions(
+    job_id: str, body: AnswerQuestionsRequest, request: Request, user: CurrentUser
+) -> ApplyProfile:
+    """Save the user's answers to a job's parked ``manual_required`` questions.
+
+    Answers for recognized typed kinds (e.g. ``years_experience``) update the
+    corresponding ``ApplyProfile`` field; everything else is stored in the
+    generic custom-answers store, keyed by normalized question label, so the
+    same question auto-fills on future applications. The job stays in
+    ``manual_required``; the caller re-dispatches via ``POST /api/jobs/{id}/apply``.
+    """
+    ctx = get_ctx(request)
+    job = await ctx.repository.get_for_user(job_id, user.id)
+    if job is None:
+        raise HTTPException(404, f"Job {job_id} not found")
+    if not body.answers:
+        raise HTTPException(400, "No answers provided")
+
+    profile = user.apply_profile or ApplyProfile()
+    for ans in body.answers:
+        _apply_answer_to_profile(profile, ans)
+
+    updated = await ctx.user_repository.update(user.id, {"apply_profile": profile})
+    return updated.apply_profile or profile
+
+
 @router.post("/api/jobs/{job_id}/apply", response_model=JobSubmitResponse)
 async def apply_job(job_id: str, request: Request, user: CurrentUser) -> JobSubmitResponse:
     """Manually (re-)trigger an Easy Apply run for a job awaiting application.
@@ -389,7 +476,13 @@ async def apply_job(job_id: str, request: Request, user: CurrentUser) -> JobSubm
     if job is None:
         raise HTTPException(404, f"Job {job_id} not found")
 
-    retriable = {BusinessState.NEEDS_EXTENSION, BusinessState.APPROVED}
+    # MANUAL_REQUIRED is retriable too: the user answered the parked questions
+    # in-app, so their now-complete profile can drive the apply automatically.
+    retriable = {
+        BusinessState.NEEDS_EXTENSION,
+        BusinessState.APPROVED,
+        BusinessState.MANUAL_REQUIRED,
+    }
     if job.status not in retriable:
         raise HTTPException(409, f"Job is not awaiting application (status: {job.status})")
 

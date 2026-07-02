@@ -8,9 +8,9 @@ without any WebSocket / browser. Terminal state is asserted against a real
 
 from __future__ import annotations
 
-import pytest
-
 from pathlib import Path
+
+import pytest
 
 from src.agents.application_workflow import (
     create_application_workflow,
@@ -108,7 +108,9 @@ class StubBridge:
         return {}
 
 
-async def _run(bridge: StubBridge, *, settings: Settings | None = None, status=BusinessState.APPLYING):
+async def _run(
+    bridge: StubBridge, *, settings: Settings | None = None, status=BusinessState.APPLYING
+):
     repo = InMemoryJobRepository()
     await repo.create(
         JobRecord(job_id=JOB_ID, user_id=USER_ID, source="linkedin", mode="full", status=status)
@@ -142,8 +144,14 @@ class TestHappyPath:
     async def test_three_step_form_reaches_applied(self):
         # Two steps that advance, then a final step with no Next/Review → submit.
         forms = [
-            FormState(step=1, total=3, fill_plan=[FieldFill(selector="#a", value="x", kind="email")]),
-            FormState(step=2, total=3, fill_plan=[FieldFill(selector="#b", value="5", kind="years_experience")]),
+            FormState(
+                step=1, total=3, fill_plan=[FieldFill(selector="#a", value="x", kind="email")]
+            ),
+            FormState(
+                step=2,
+                total=3,
+                fill_plan=[FieldFill(selector="#b", value="5", kind="years_experience")],
+            ),
             FormState(step=3, total=3),
         ]
         advances = [
@@ -166,12 +174,24 @@ class TestHappyPath:
         assert final["current_step"] == str(BusinessState.APPLIED)
 
     async def test_uploads_pdf_when_file_field_present(self):
-        forms = [FormState(step=1, total=1, skipped=[Skip(selector="#cv", reason="file upload handled by upload_file")])]
+        forms = [
+            FormState(
+                step=1,
+                total=1,
+                skipped=[Skip(selector="#cv", reason="file upload handled by upload_file")],
+            )
+        ]
         advances = [AdvanceResult(advanced=False)]
         bridge = StubBridge(form_states=forms, advance_results=advances)
         repo = InMemoryJobRepository()
         await repo.create(
-            JobRecord(job_id=JOB_ID, user_id=USER_ID, source="linkedin", mode="full", status=BusinessState.APPLYING)
+            JobRecord(
+                job_id=JOB_ID,
+                user_id=USER_ID,
+                source="linkedin",
+                mode="full",
+                status=BusinessState.APPLYING,
+            )
         )
         workflow = create_application_workflow()
         config = {
@@ -183,7 +203,8 @@ class TestHappyPath:
             }
         }
         await workflow.ainvoke(
-            {"job_id": JOB_ID, "user_id": USER_ID, "job_url": JOB_URL, "pdf_path": "/tmp/cv.pdf"}, config
+            {"job_id": JOB_ID, "user_id": USER_ID, "job_url": JOB_URL, "pdf_path": "/tmp/cv.pdf"},
+            config,
         )
         assert bridge.uploaded == [("#cv", "/tmp/cv.pdf")]
 
@@ -197,7 +218,9 @@ class TestUnknownField:
             FormState(
                 step=1,
                 total=2,
-                unknown_fields=[Unknown(selector="#q", label="Why us?", reason="unrecognized field")],
+                unknown_fields=[
+                    Unknown(selector="#q", label="Why us?", reason="unrecognized field")
+                ],
             )
         ]
         bridge = StubBridge(form_states=forms)
@@ -208,6 +231,54 @@ class TestUnknownField:
         assert "discard" in bridge.calls
         assert "submit_form" not in bridge.calls
         assert "Why us?" in (record.error_message or "")
+
+    async def test_unknown_field_captures_structured_pending_questions(self):
+        from src.services.linkedin.field_classifier import SerializedField
+
+        forms = [
+            FormState(
+                step=1,
+                total=2,
+                fields=[
+                    SerializedField(
+                        selector="#shift",
+                        label="Preferred shift",
+                        type="select",
+                        options=["Day", "Night"],
+                        required=True,
+                    ),
+                    SerializedField(selector="#yrs", label="Years of experience", type="number"),
+                ],
+                unknown_fields=[
+                    Unknown(
+                        selector="#shift", label="Preferred shift", reason="unrecognized dropdown"
+                    ),
+                    Unknown(
+                        selector="#yrs",
+                        label="Years of experience",
+                        reason="profile value missing: years_experience",
+                        kind="years_experience",
+                    ),
+                ],
+            )
+        ]
+        bridge = StubBridge(form_states=forms)
+
+        final, record = await _run(bridge)
+
+        from src.models.unified import PendingQuestion
+
+        assert record.status == BusinessState.MANUAL_REQUIRED
+        assert record.pending_questions is not None
+        # The in-memory repo stores the raw dicts; normalize to models to assert.
+        pqs = [PendingQuestion(**q) if isinstance(q, dict) else q for q in record.pending_questions]
+        by_selector = {q.selector: q for q in pqs}
+        assert by_selector["#shift"].field_type == "select"
+        assert by_selector["#shift"].options == ["Day", "Night"]
+        assert by_selector["#shift"].required is True
+        assert by_selector["#shift"].kind is None
+        assert by_selector["#yrs"].field_type == "number"
+        assert by_selector["#yrs"].kind == "years_experience"
 
 
 # ---------------------------------------------------------------------------
@@ -328,9 +399,7 @@ class TestGenericErrors:
     async def test_generic_submit_error_is_failed(self):
         forms = [FormState(step=1, total=1)]
         advances = [AdvanceResult(advanced=False)]
-        bridge = StubBridge(
-            form_states=forms, advance_results=advances, error_on={"submit_form"}
-        )
+        bridge = StubBridge(form_states=forms, advance_results=advances, error_on={"submit_form"})
 
         final, record = await _run(bridge)
 
@@ -356,9 +425,7 @@ class TestConfirmationScreenshot:
             ),
         )
 
-        final, record = await _run(
-            bridge, settings=_settings(generated_cvs_dir=str(tmp_path))
-        )
+        final, record = await _run(bridge, settings=_settings(generated_cvs_dir=str(tmp_path)))
 
         assert record.status == BusinessState.APPLIED
         shot = final["confirmation_screenshot_path"]

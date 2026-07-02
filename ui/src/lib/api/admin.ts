@@ -33,6 +33,17 @@ export interface FilterResult {
 	reasoning: string;
 }
 
+/** An Easy Apply field the classifier couldn't fill (parked on manual_required). */
+export interface PendingQuestion {
+	selector: string;
+	label: string;
+	field_type: string;
+	options: string[];
+	required: boolean;
+	/** Set when the field is a recognized profile kind whose value was missing. */
+	kind?: string | null;
+}
+
 export interface AdminJobRecord {
 	job_id: string;
 	user_id: string | null;
@@ -50,6 +61,8 @@ export interface AdminJobRecord {
 	/** Denormalized path of the generated CV PDF (set once a CV is composed). */
 	current_pdf_path?: string | null;
 	error_message?: string | null;
+	/** Easy Apply fields the classifier couldn't fill; populated on manual_required. */
+	pending_questions?: PendingQuestion[] | null;
 	last_scrape_error?: string | null;
 	/** LLM filter evaluation. Populated for filtered_out jobs (and others when filtering ran). */
 	filter_result?: FilterResult | null;

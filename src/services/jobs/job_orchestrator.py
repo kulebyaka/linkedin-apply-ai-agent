@@ -155,8 +155,7 @@ class JobOrchestrator:
                     status=BusinessState.QUEUED,
                     job_posting=job_posting_preview,
                     raw_input=raw_input,
-                    application_url=request.application_url
-                    or job_posting_preview.get("url"),
+                    application_url=request.application_url or job_posting_preview.get("url"),
                     created_at=now,
                     updated_at=now,
                 )
@@ -169,7 +168,10 @@ class JobOrchestrator:
             raise
 
         await self._ctx.register_workflow(
-            job_id, thread_id, "preparation", user_id=user_id,
+            job_id,
+            thread_id,
+            "preparation",
+            user_id=user_id,
         )
         self._ctx.create_background_task(
             dispatcher.dispatch_preparation(
@@ -215,9 +217,7 @@ class JobOrchestrator:
             raise KeyError(f"Job {job_id} not found")
 
         if job_record.status != BusinessState.FILTERED_OUT:
-            raise RuntimeError(
-                f"Job {job_id} is not filtered out (status: {job_record.status})"
-            )
+            raise RuntimeError(f"Job {job_id} is not filtered out (status: {job_record.status})")
 
         dispatcher = self._ctx.workflow_dispatcher
         if dispatcher is None:
@@ -278,7 +278,10 @@ class JobOrchestrator:
             }
 
             await self._ctx.register_workflow(
-                job_id, thread_id, "preparation", user_id=user_id,
+                job_id,
+                thread_id,
+                "preparation",
+                user_id=user_id,
             )
             self._ctx.create_background_task(
                 dispatcher.dispatch_preparation(
@@ -297,13 +300,9 @@ class JobOrchestrator:
                 exc_info=True,
             )
             try:
-                await self._ctx.repository.update(
-                    job_id, {"status": BusinessState.FILTERED_OUT}
-                )
+                await self._ctx.repository.update(job_id, {"status": BusinessState.FILTERED_OUT})
             except Exception:
-                logger.error(
-                    "Failed to roll back job %s to filtered_out", job_id
-                )
+                logger.error("Failed to roll back job %s to filtered_out", job_id)
             raise
 
         logger.info("Job %s proceeded past filter (proceed anyway)", job_id)
@@ -390,6 +389,7 @@ class JobOrchestrator:
                 pdf_path=job_record.current_pdf_path,
                 attempt_count=len(attempts),
                 error_message=job_record.error_message,
+                pending_questions=job_record.pending_questions,
                 created_at=job_record.created_at,
                 updated_at=job_record.updated_at,
             )

@@ -316,7 +316,8 @@ Cross-cutting: per-app wall-clock timeout (`apply_per_app_timeout_seconds`) → 
 | GET | `/api/jobs/{job_id}/html` | Get generated CV as HTML |
 | GET | `/api/hitl/pending` | Get all jobs pending HITL review |
 | POST | `/api/hitl/{job_id}/decide` | Submit HITL decision (approve/decline/retry) — approve dispatches the apply (or sets `needs_extension`) |
-| POST | `/api/jobs/{job_id}/apply` | (Re-)trigger Easy Apply for a job in `needs_extension`/`approved` — used by the "Apply now" button after connecting the extension |
+| POST | `/api/jobs/{job_id}/apply` | (Re-)trigger Easy Apply for a job in `needs_extension`/`approved`/`manual_required` — used by the "Apply now" button after connecting the extension or answering parked questions |
+| POST | `/api/jobs/{job_id}/answer-questions` | Save answers to a `manual_required` job's parked questions into the user's `ApplyProfile` (typed field by `kind`, else `custom_answers`); job stays `manual_required` until re-dispatched via `/apply` |
 | GET | `/api/hitl/history` | Get application history |
 | DELETE | `/api/jobs/cleanup` | Clean up old job records |
 
@@ -357,7 +358,8 @@ All routes depend on `get_admin_user`, which raises 403 for non-admin callers.
 
 - `UserRole` - Enum of role values: `TRIAL = "trial"`, `PREMIUM = "premium"`, `ADMIN = "admin"`. Extensible.
 - `User` - User entity: id, email, display_name, `role` (`UserRole`, default `trial`), master_cv_json, search_preferences, filter_preferences, `apply_profile` (`ApplyProfile | None`), `auto_apply` (bool, default False), timestamps
-- `ApplyProfile` - Structured answers for Easy Apply screening fields (all optional; absence = "unknown" → abort to `manual_required`): `phone_country_code`, `years_experience`, `expected_salary`, `needs_visa_sponsorship`, `legally_authorized`, `willing_to_relocate`, `drivers_license`. Helper `is_complete_for(required_kinds)` used by the classifier/abort logic.
+- `ApplyProfile` - Structured answers for Easy Apply screening fields (all optional; absence = "unknown" → abort to `manual_required`): `phone_country_code`, `years_experience`, `expected_salary`, `needs_visa_sponsorship`, `legally_authorized`, `willing_to_relocate`, `drivers_license`. Helper `is_complete_for(required_kinds)` used by the classifier/abort logic. Also carries `custom_answers: list[CustomAnswer]` — reusable answers to arbitrary screening questions, captured in-app after a `manual_required` abort and matched by normalized question label on future applications (the classifier consults these before returning `Unknown`).
+- `CustomAnswer` - One reusable answer keyed by normalized question label: `key`, `label`, `field_type`, `value`, `options` (options snapshot for choice/radio re-validation).
 - `LoginRequest` - Email input for magic link request
 - `LoginResponse` - Success message after magic link sent
 - `VerifyRequest` - Token for magic link verification
@@ -381,7 +383,7 @@ All routes depend on `get_admin_user`, which raises 403 for non-admin callers.
 - `BusinessState` - Job lifecycle states: queued, processing, cv_ready, pending_review, approved, declined, retrying, applying, applied, failed, filtered_out, needs_extension, manual_required
   - `filtered_out`: terminal state for LLM-rejected jobs (score below reject threshold or hard disqualifier); reachable from `queued` and `processing`
   - `needs_extension`: recoverable state when an apply fires but no extension WebSocket is connected (or it drops mid-apply); user re-triggers via `POST /api/jobs/{id}/apply`. Transitions to `applying` or `failed`.
-  - `manual_required`: terminal state when the apply hits an unrecognized/unanswerable field; the modal is discarded cleanly and the user finishes manually on LinkedIn.
+  - `manual_required`: recoverable state when the apply hits an unrecognized/unanswerable field; the modal is discarded cleanly and the field questions are captured on the job record (`pending_questions`). The user answers them in-app (`POST /api/jobs/{id}/answer-questions`, saved to `ApplyProfile.custom_answers`) and re-dispatches via `POST /api/jobs/{id}/apply` (transitions to `applying`/`needs_extension`), or finishes manually on LinkedIn.
   - `auto_apply` save path: `queued`/`processing` may go straight to `approved` (skipping HITL) when `user.auto_apply` is set.
 - `WorkflowStep` - Transient step tracking: extracting, filtering, composing_cv, generating_pdf, etc.
 - `ALLOWED_TRANSITIONS` - Valid state change map, enforced by repository

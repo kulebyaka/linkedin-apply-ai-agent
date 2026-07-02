@@ -1,13 +1,21 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { applyJob, listMyJobs, proceedAnyway, type MyJobsFilters } from '$lib/api/jobs';
+	import {
+		answerQuestions,
+		applyJob,
+		listMyJobs,
+		proceedAnyway,
+		type MyJobsFilters,
+		type QuestionAnswer
+	} from '$lib/api/jobs';
 	import { fetchJobStats, deleteJob, type JobStatusCounts } from '$lib/api/hitl';
 	import { downloadPDF, triggerDownload } from '$lib/api/client';
 	import type { AdminJobRecord, FilterResult } from '$lib/api/admin';
 	import { POLL_INTERVAL_MS } from '$lib/config';
 	import ApplicationsFilterBar from '$lib/components/applications/ApplicationsFilterBar.svelte';
 	import ApplicationsTable from '$lib/components/applications/ApplicationsTable.svelte';
+	import AnswerQuestionsModal from '$lib/components/applications/AnswerQuestionsModal.svelte';
 	import StatCard from '$lib/components/admin/StatCard.svelte';
 	import ToastNotification from '$lib/components/ToastNotification.svelte';
 
@@ -34,6 +42,10 @@
 	let proceedJob = $state<AdminJobRecord | null>(null);
 	let proceedSubmitting = $state(false);
 	let proceedReason = $state('');
+
+	// "Answer questions" modal state (manual_required jobs with parked questions).
+	let answerJob = $state<AdminJobRecord | null>(null);
+	let answerSubmitting = $state(false);
 
 	const proceedFilter = $derived<FilterResult | null>(
 		proceedJob?.filter_result && typeof proceedJob.filter_result === 'object'
@@ -187,6 +199,38 @@
 		}
 	}
 
+	function handleAnswer(job: AdminJobRecord) {
+		answerJob = job;
+	}
+
+	function cancelAnswer() {
+		if (answerSubmitting) return;
+		answerJob = null;
+	}
+
+	async function submitAnswers(answers: QuestionAnswer[]) {
+		if (!answerJob) return;
+		const jobId = answerJob.job_id;
+		answerSubmitting = true;
+		try {
+			await answerQuestions(jobId, answers);
+			// Profile now holds the answers — re-dispatch the aborted apply.
+			const resp = await applyJob(jobId);
+			if (resp.status === 'applying') {
+				showToast('Answers saved — application started.', 'success');
+			} else {
+				showToast(resp.message || 'Answers saved. Connect the extension to apply.', 'info');
+			}
+			answerJob = null;
+			await fetchJobs({ silent: true });
+			await fetchStats();
+		} catch (err) {
+			showToast(err instanceof Error ? err.message : 'Failed to save answers', 'error');
+		} finally {
+			answerSubmitting = false;
+		}
+	}
+
 	function handleProceed(job: AdminJobRecord) {
 		proceedJob = job;
 		proceedReason = '';
@@ -315,6 +359,7 @@
 		onDownload={handleDownload}
 		onProceed={handleProceed}
 		onApply={handleApply}
+		onAnswer={handleAnswer}
 		loading={loading && !initialLoadDone}
 	/>
 
@@ -424,6 +469,15 @@
 			</div>
 		</div>
 	</div>
+{/if}
+
+{#if answerJob}
+	<AnswerQuestionsModal
+		job={answerJob}
+		submitting={answerSubmitting}
+		onCancel={cancelAnswer}
+		onSubmit={submitAnswers}
+	/>
 {/if}
 
 {#if toast}

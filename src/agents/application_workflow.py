@@ -44,6 +44,7 @@ from langgraph.graph import END, StateGraph
 from ..config.settings import Settings, get_settings
 from ..models.cv import ContactInfo
 from ..models.state_machine import ALLOWED_TRANSITIONS, BusinessState
+from ..models.unified import PendingQuestion
 from ..models.user import ApplyProfile
 from ..services.linkedin.apply_bridge import ApplyBridge, ExtensionUnavailable
 from ._shared import get_repository_from_config
@@ -73,6 +74,7 @@ class ApplyWorkflowState(TypedDict, total=False):
     # Outcome
     final_status: str
     manual_reason: str | None
+    pending_questions: list[dict] | None
     application_url: str | None
     confirmation_screenshot_path: str | None
     confirmation_text: str
@@ -113,6 +115,7 @@ def _terminal(
     *,
     error: str | None = None,
     manual_reason: str | None = None,
+    pending_questions: list[dict] | None = None,
 ) -> ApplyWorkflowState:
     """Record a terminal outcome and route the graph to ``finalize``."""
     state["final_status"] = str(status)
@@ -121,6 +124,8 @@ def _terminal(
         state["error_message"] = error
     if manual_reason is not None:
         state["manual_reason"] = manual_reason
+    if pending_questions is not None:
+        state["pending_questions"] = pending_questions
     return state
 
 
@@ -255,14 +260,28 @@ async def fill_step_node(
             error="LinkedIn daily Easy Apply limit reached",
         )
 
-    # Unknown / missing-value field — never guess. Abort to manual_required.
+    # Unknown / missing-value field — never guess. Abort to manual_required,
+    # capturing the questions structurally so the user can answer them in-app.
     if form.unknown_fields:
         await _safe_discard(bridge, user_id, "unknown fields")
         labels = "; ".join(u.label or u.reason for u in form.unknown_fields)
+        by_selector = {sf.selector: sf for sf in form.fields}
+        pending = [
+            PendingQuestion(
+                selector=u.selector,
+                label=u.label,
+                field_type=(by_selector[u.selector].type if u.selector in by_selector else "text"),
+                options=(by_selector[u.selector].options if u.selector in by_selector else []),
+                required=(by_selector[u.selector].required if u.selector in by_selector else False),
+                kind=u.kind,
+            ).model_dump()
+            for u in form.unknown_fields
+        ]
         return _terminal(
             state,
             BusinessState.MANUAL_REQUIRED,
             manual_reason=f"Unrecognized or unanswerable fields: {labels}",
+            pending_questions=pending,
         )
 
     try:
@@ -352,8 +371,12 @@ async def finalize_node(
         if state.get("application_url"):
             updates["application_url"] = state["application_url"]
         updates["error_message"] = None
+        # A prior manual_required abort may have parked questions; clear them
+        # now that the application went through.
+        updates["pending_questions"] = None
     elif target == BusinessState.MANUAL_REQUIRED:
         updates["error_message"] = state.get("manual_reason") or "Manual application required"
+        updates["pending_questions"] = state.get("pending_questions")
     elif state.get("error_message"):
         updates["error_message"] = state["error_message"]
 

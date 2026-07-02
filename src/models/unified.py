@@ -17,47 +17,51 @@ from .state_machine import BusinessState, WorkflowStep
 
 class JobDescriptionInput(BaseModel):
     """User input for CV generation."""
+
     title: str = Field(..., description="Job title")
     company: str = Field(..., description="Company name")
     description: str = Field(..., description="Full job description")
     requirements: str | None = Field(None, description="Job requirements section")
-    template_name: str | None = Field(None, description="CV template: modern, compact, classic, minimal, profile-card")
-    llm_provider: Literal["openai", "anthropic"] | None = Field(None, description="LLM provider: openai, anthropic")
-    llm_model: str | None = Field(None, description="LLM model name (e.g., gpt-4.1-nano, claude-haiku-4.5)")
+    template_name: str | None = Field(
+        None, description="CV template: modern, compact, classic, minimal, profile-card"
+    )
+    llm_provider: Literal["openai", "anthropic"] | None = Field(
+        None, description="LLM provider: openai, anthropic"
+    )
+    llm_model: str | None = Field(
+        None, description="LLM model name (e.g., gpt-4.1-nano, claude-haiku-4.5)"
+    )
+
 
 # =============================================================================
 # Job Submission Models
 # =============================================================================
+
 
 class JobSubmitRequest(BaseModel):
     """Unified job submission request.
 
     Supports multiple sources (URL or manual input) and modes (MVP or full).
     """
+
     source: Literal["url", "manual"] = Field(
-        ...,
-        description="Job source: 'url' for external URLs, 'manual' for textarea input"
+        ..., description="Job source: 'url' for external URLs, 'manual' for textarea input"
     )
     mode: Literal["mvp", "full"] = Field(
-        ...,
-        description="Workflow mode: 'mvp' (just PDF) or 'full' (PDF + HITL + apply)"
+        ..., description="Workflow mode: 'mvp' (just PDF) or 'full' (PDF + HITL + apply)"
     )
-    url: str | None = Field(
-        None,
-        description="Job posting URL (required if source='url')"
-    )
+    url: str | None = Field(None, description="Job posting URL (required if source='url')")
     job_description: JobDescriptionInput | None = Field(
-        None,
-        description="Manual job description (required if source='manual')"
+        None, description="Manual job description (required if source='manual')"
     )
     application_url: str | None = Field(
-        None,
-        description="URL to apply (defaults to job URL if not provided)"
+        None, description="URL to apply (defaults to job URL if not provided)"
     )
 
 
 class JobSubmitResponse(BaseModel):
     """Response after job submission."""
+
     job_id: str
     status: str = BusinessState.QUEUED
     message: str = "Job submitted successfully"
@@ -67,28 +71,24 @@ class JobSubmitResponse(BaseModel):
 # HITL (Human-in-the-Loop) Models
 # =============================================================================
 
+
 class HITLDecision(BaseModel):
     """User decision from HITL review."""
+
     decision: Literal["approved", "declined", "retry"] = Field(
-        ...,
-        description="User's decision: approve, decline, or retry with feedback"
+        ..., description="User's decision: approve, decline, or retry with feedback"
     )
-    feedback: str | None = Field(
-        None,
-        description="User feedback (required if decision='retry')"
-    )
+    feedback: str | None = Field(None, description="User feedback (required if decision='retry')")
     decided_at: datetime = Field(
         default_factory=lambda: datetime.now(tz=timezone.utc),
-        description="Timestamp of the decision"
+        description="Timestamp of the decision",
     )
-    reasoning: str | None = Field(
-        None,
-        description="Optional reasoning for the decision"
-    )
+    reasoning: str | None = Field(None, description="Optional reasoning for the decision")
 
 
 class HITLDecisionResponse(BaseModel):
     """Response after HITL decision submission."""
+
     job_id: str
     status: str
     message: str
@@ -102,11 +102,14 @@ class PendingApproval(BaseModel):
     in-flight statuses (QUEUED, PROCESSING, RETRYING) for the dashboard's
     read-only progress cards.
     """
+
     job_id: str
     status: str = Field(BusinessState.PENDING, description="Current business state")
     workflow_step: str | None = Field(None, description="Current workflow step (in-flight only)")
     job_posting: dict = Field(..., description="Normalized job posting data")
-    cv_json: dict = Field(default_factory=dict, description="Generated tailored CV as JSON (empty when in-flight)")
+    cv_json: dict = Field(
+        default_factory=dict, description="Generated tailored CV as JSON (empty when in-flight)"
+    )
     pdf_path: str | None = Field(None, description="Path to generated PDF file")
     filter_result: dict | None = Field(None, description="LLM filter evaluation result")
     attempt_count: int = Field(0, description="Number of CV composition attempts")
@@ -114,12 +117,50 @@ class PendingApproval(BaseModel):
     source: Literal["url", "manual", "linkedin"]
     application_url: str | None = None
     reject_threshold: int = Field(30, description="User's reject threshold for filter score badge")
-    warning_threshold: int = Field(70, description="User's warning threshold for filter score badge")
+    warning_threshold: int = Field(
+        70, description="User's warning threshold for filter score badge"
+    )
 
 
 # =============================================================================
 # Job Record Models (for DB persistence)
 # =============================================================================
+
+
+class PendingQuestion(BaseModel):
+    """An Easy Apply field that aborted the apply to ``manual_required``.
+
+    Captured when the deterministic classifier can't fill a field, so the user
+    can answer it in-app (the answer is then stored on their ``ApplyProfile``
+    and reused on future applications). ``kind`` is set when the field is a
+    recognized profile kind whose value is missing (routes the answer to the
+    typed ``ApplyProfile`` attribute); ``None`` means the label was unrecognized
+    (routes to the generic custom-answers store).
+    """
+
+    selector: str
+    label: str
+    field_type: str = "text"
+    options: list[str] = Field(default_factory=list)
+    required: bool = False
+    kind: str | None = None
+
+
+class QuestionAnswer(BaseModel):
+    """One user-supplied answer to a parked ``PendingQuestion``."""
+
+    label: str
+    field_type: str = "text"
+    value: str
+    options: list[str] = Field(default_factory=list)
+    kind: str | None = None  # echoed from the PendingQuestion; routes typed answers
+
+
+class AnswerQuestionsRequest(BaseModel):
+    """Answers to the questions that parked a job in ``manual_required``."""
+
+    answers: list[QuestionAnswer]
+
 
 class JobRecord(BaseModel):
     """Job record for database persistence.
@@ -129,6 +170,7 @@ class JobRecord(BaseModel):
     The current_cv_json and current_pdf_path fields are denormalized
     quick-access copies of the latest CV attempt data.
     """
+
     job_id: str
     user_id: str = ""
     source: Literal["url", "manual", "linkedin"]
@@ -161,6 +203,10 @@ class JobRecord(BaseModel):
     # Error tracking
     error_message: str | None = None
 
+    # Easy Apply fields the classifier couldn't fill (populated on manual_required).
+    # The user answers these in-app; answers are saved to their ApplyProfile.
+    pending_questions: list[PendingQuestion] | None = None
+
     # Scrape failure tracking (for retry-eligible records in SCRAPE_FAILED state)
     scrape_attempts: int = 0
     last_scrape_error: str | None = None
@@ -185,8 +231,10 @@ class JobRecord(BaseModel):
 # API Response Models
 # =============================================================================
 
+
 class JobStatusResponse(BaseModel):
     """Comprehensive job status response."""
+
     job_id: str
     source: Literal["url", "manual", "linkedin"] | None = None
     mode: Literal["mvp", "full"] | None = None
@@ -195,6 +243,7 @@ class JobStatusResponse(BaseModel):
     cv_json: dict | None = None
     pdf_path: str | None = None
     error_message: str | None = None
+    pending_questions: list[PendingQuestion] | None = None
     attempt_count: int = 0
     created_at: datetime
     updated_at: datetime
@@ -202,6 +251,7 @@ class JobStatusResponse(BaseModel):
 
 class ApplicationHistoryItem(BaseModel):
     """Item in application history list."""
+
     job_id: str
     job_title: str | None = None
     company: str | None = None

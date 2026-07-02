@@ -176,8 +176,8 @@ async def trigger_apply(ctx: AppContext, job_id: str, user_id: str) -> BusinessS
         return BusinessState.NEEDS_EXTENSION
 
     # Atomically claim the job for application before doing any dispatch. The
-    # claim flips a claimable status (APPROVED / NEEDS_EXTENSION) to APPLYING in
-    # a single conditional write, so two concurrent apply requests for the same
+    # claim flips a claimable status (APPROVED / NEEDS_EXTENSION / MANUAL_REQUIRED)
+    # to APPLYING in a single conditional write, so two concurrent apply requests for the same
     # job coalesce: only the winner gets the record back, the loser sees None and
     # returns APPLYING without enqueueing a duplicate workflow.
     claimed = await ctx.repository.try_claim_for_apply(job_id)

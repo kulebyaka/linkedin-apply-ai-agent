@@ -314,7 +314,10 @@ class TestAutoApplyPrepBranch:
                 "job_id": "job-apply-1",
                 "user_id": TEST_USER_ID,
                 "mode": "full",
-                "job_posting": {"title": "Engineer", "url": "https://www.linkedin.com/jobs/view/1/"},
+                "job_posting": {
+                    "title": "Engineer",
+                    "url": "https://www.linkedin.com/jobs/view/1/",
+                },
                 "tailored_cv_json": {"contact": {"full_name": "T"}},
                 "tailored_cv_pdf_path": "/tmp/cv.pdf",
             }
@@ -453,6 +456,82 @@ class TestApplyEndpoint:
             resp = client.post("/api/jobs/nope/apply")
 
         assert resp.status_code == 404
+
+    def test_apply_manual_required_redispatches(self):
+        # After the user answers the parked questions in-app, re-applying a
+        # manual_required job claims it and dispatches (no longer terminal).
+        repo = InMemoryJobRepository()
+        asyncio.run(_seed(repo, _make_job(status="manual_required")))
+        ctx = _make_api_ctx(repo, connected=True)
+
+        with _patched_client(_make_user(), ctx) as client:
+            resp = client.post("/api/jobs/job-apply-1/apply")
+
+        assert resp.status_code == 200
+        assert resp.json()["status"] == BusinessState.APPLYING.value
+        ctx.workflow_dispatcher.dispatch_application.assert_called_once()
+
+
+class TestAnswerQuestionsEndpoint:
+    def test_missing_job_404(self):
+        repo = InMemoryJobRepository()
+        asyncio.run(repo.initialize())
+        ctx = _make_api_ctx(repo, connected=True)
+
+        with _patched_client(_make_user(), ctx) as client:
+            resp = client.post(
+                "/api/jobs/nope/answer-questions",
+                json={"answers": [{"label": "X", "field_type": "text", "value": "y"}]},
+            )
+
+        assert resp.status_code == 404
+
+    def test_routes_typed_and_custom_answers(self):
+        repo = InMemoryJobRepository()
+        asyncio.run(_seed(repo, _make_job(status="manual_required")))
+        ctx = _make_api_ctx(repo, connected=True)
+        ctx.user_repository.update = AsyncMock(return_value=_make_user())
+
+        with _patched_client(_make_user(), ctx) as client:
+            resp = client.post(
+                "/api/jobs/job-apply-1/answer-questions",
+                json={
+                    "answers": [
+                        {
+                            "label": "Years of experience",
+                            "field_type": "number",
+                            "value": "9",
+                            "kind": "years_experience",
+                        },
+                        {
+                            "label": "Willing to work night shifts?",
+                            "field_type": "radio",
+                            "value": "Yes",
+                            "options": ["Yes", "No"],
+                            "kind": None,
+                        },
+                    ]
+                },
+            )
+
+        assert resp.status_code == 200
+        ctx.user_repository.update.assert_called_once()
+        saved_profile = ctx.user_repository.update.call_args.args[1]["apply_profile"]
+        assert saved_profile.years_experience == 9
+        assert len(saved_profile.custom_answers) == 1
+        ans = saved_profile.custom_answers[0]
+        assert ans.key == "willing to work night shifts"
+        assert ans.value == "Yes"
+
+    def test_empty_answers_400(self):
+        repo = InMemoryJobRepository()
+        asyncio.run(_seed(repo, _make_job(status="manual_required")))
+        ctx = _make_api_ctx(repo, connected=True)
+
+        with _patched_client(_make_user(), ctx) as client:
+            resp = client.post("/api/jobs/job-apply-1/answer-questions", json={"answers": []})
+
+        assert resp.status_code == 400
 
 
 class TestWsHandshake:
