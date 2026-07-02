@@ -13,15 +13,13 @@
 
 	const questions = $derived<PendingQuestion[]>(job.pending_questions ?? []);
 
-	// One editable value per question, keyed by selector. Seeded once from the job.
-	let values = $state<Record<string, string>>({});
-	$effect(() => {
-		const seed: Record<string, string> = {};
-		for (const q of questions) {
-			seed[q.selector] = values[q.selector] ?? '';
-		}
-		values = seed;
-	});
+	// One editable value per question, keyed by selector. Seeded once at mount
+	// from the job (the modal is recreated per open, so a fresh {} is correct).
+	// Do NOT seed inside an $effect that also reads `values` — reassigning a
+	// $state the effect reads re-invalidates it and loops (effect_update_depth).
+	let values = $state<Record<string, string>>(
+		Object.fromEntries((job.pending_questions ?? []).map((q) => [q.selector, '']))
+	);
 
 	function isChoice(q: PendingQuestion): boolean {
 		return (
@@ -105,7 +103,13 @@
 					{:else}
 						<input
 							id={`q-${q.selector}`}
-							type={q.field_type === 'number' ? 'number' : 'text'}
+							type={q.field_type === 'number'
+								? 'number'
+								: q.field_type === 'email'
+									? 'email'
+									: q.field_type === 'tel'
+										? 'tel'
+										: 'text'}
 							bind:value={values[q.selector]}
 							disabled={submitting}
 							class="font-body w-full border-2 border-[var(--color-foreground)] bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] disabled:opacity-50"
