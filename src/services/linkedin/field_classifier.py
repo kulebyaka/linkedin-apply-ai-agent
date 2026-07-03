@@ -167,6 +167,27 @@ _RE_PROFICIENCY = re.compile(
 _RE_YES = re.compile(r"^(yes|oui|s[íi]|ja|s[ìi])$", re.I)
 _RE_NO = re.compile(r"^(no|non|nein)$", re.I)
 
+# Programmatic truthy/falsy tokens (checkbox "true"/"false", numeric flags) that
+# aren't natural-language yes/no words.
+_YES_EXTRA = frozenset({"true", "1", "y", "t"})
+_NO_EXTRA = frozenset({"false", "0", "n", "f"})
+
+
+def parse_bool_answer(value: str) -> bool | None:
+    """Parse a user/option string into a boolean, or None if unrecognized.
+
+    The single source of truth for yes/no interpretation — reuses the
+    multilingual ``_RE_YES``/``_RE_NO`` matchers plus programmatic true/false/1/0
+    tokens. Returns ``None`` (never guesses) for anything it can't map.
+    """
+    token = (value or "").strip()
+    if _RE_YES.match(token) or token.lower() in _YES_EXTRA:
+        return True
+    if _RE_NO.match(token) or token.lower() in _NO_EXTRA:
+        return False
+    return None
+
+
 # Language-proficiency tier preference: Native > Fluent > Professional.
 _PROFICIENCY_TIERS: tuple[tuple[str, ...], ...] = (
     ("native", "bilingual", "bilingue", "langue maternelle", "muttersprache", "madrelingua"),

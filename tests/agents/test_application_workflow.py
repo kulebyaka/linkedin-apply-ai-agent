@@ -266,13 +266,10 @@ class TestUnknownField:
 
         final, record = await _run(bridge)
 
-        from src.models.unified import PendingQuestion
-
         assert record.status == BusinessState.MANUAL_REQUIRED
         assert record.pending_questions is not None
-        # The in-memory repo stores the raw dicts; normalize to models to assert.
-        pqs = [PendingQuestion(**q) if isinstance(q, dict) else q for q in record.pending_questions]
-        by_selector = {q.selector: q for q in pqs}
+        # Both repos coerce list[dict] -> list[PendingQuestion] on load.
+        by_selector = {q.selector: q for q in record.pending_questions}
         assert by_selector["#shift"].field_type == "select"
         assert by_selector["#shift"].options == ["Day", "Night"]
         assert by_selector["#shift"].required is True

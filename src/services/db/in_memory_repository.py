@@ -75,7 +75,13 @@ class InMemoryJobRepository(JobRepository):
                 validate_transition(current_status, new_status, job_id)
 
             updates["updated_at"] = datetime.now(tz=timezone.utc)
-            self._jobs[job_id] = self._jobs[job_id].model_copy(update=updates)
+            # Re-validate the merged record (rather than model_copy, which skips
+            # validation) so model-typed fields updated from raw dicts — e.g.
+            # pending_questions: list[PendingQuestion] persisted as list[dict] —
+            # are coerced to their models, matching the SQLite repo's load path.
+            merged = self._jobs[job_id].model_dump()
+            merged.update(updates)
+            self._jobs[job_id] = JobRecord.model_validate(merged)
 
     async def delete(self, job_id: str) -> bool:
         async with self._lock:
