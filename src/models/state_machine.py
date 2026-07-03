@@ -149,7 +149,12 @@ ALLOWED_TRANSITIONS: dict[BusinessState, set[BusinessState]] = {
         # in manual_required rather than 500 on the illegal write.
         BusinessState.MANUAL_REQUIRED,
     },
-    BusinessState.MANUAL_REQUIRED: set(),  # Terminal — finished by hand on LinkedIn
+    BusinessState.MANUAL_REQUIRED: {
+        # Recoverable: after the user answers the parked questions in-app, the
+        # completed profile lets us re-dispatch the Easy Apply automatically.
+        BusinessState.APPLYING,
+        BusinessState.NEEDS_EXTENSION,
+    },
 }
 
 

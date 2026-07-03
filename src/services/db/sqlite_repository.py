@@ -106,6 +106,11 @@ class SQLiteJobRepository(SQLiteAdminQueriesMixin, JobRepository):
             "override_reason": job.override_reason,
             "refine_signal_state": job.refine_signal_state,
             "error_message": job.error_message,
+            "pending_questions": (
+                [q.model_dump() for q in job.pending_questions]
+                if job.pending_questions is not None
+                else None
+            ),
             "scrape_attempts": job.scrape_attempts,
             "last_scrape_error": job.last_scrape_error,
             "last_scrape_attempt_at": job.last_scrape_attempt_at,
@@ -131,7 +136,7 @@ class SQLiteJobRepository(SQLiteAdminQueriesMixin, JobRepository):
             return None
         if isinstance(dt, str):
             dt = datetime.fromisoformat(dt)
-        if hasattr(dt, 'replace') and dt.tzinfo is None:
+        if hasattr(dt, "replace") and dt.tzinfo is None:
             return dt.replace(tzinfo=timezone.utc)
         return dt
 
@@ -152,6 +157,7 @@ class SQLiteJobRepository(SQLiteAdminQueriesMixin, JobRepository):
             override_reason=row.get("override_reason"),
             refine_signal_state=row.get("refine_signal_state"),
             error_message=row.get("error_message"),
+            pending_questions=self._parse_json_field(row.get("pending_questions")),
             scrape_attempts=row.get("scrape_attempts") or 0,
             last_scrape_error=row.get("last_scrape_error"),
             last_scrape_attempt_at=self._normalize_datetime(row.get("last_scrape_attempt_at")),
@@ -159,8 +165,10 @@ class SQLiteJobRepository(SQLiteAdminQueriesMixin, JobRepository):
             recovery_attempts=row.get("recovery_attempts") or 0,
             last_recovery_attempt_at=self._normalize_datetime(row.get("last_recovery_attempt_at")),
             workflow_step=WorkflowStep(row["workflow_step"]) if row.get("workflow_step") else None,
-            created_at=self._normalize_datetime(row.get("created_at")) or datetime.now(tz=timezone.utc),
-            updated_at=self._normalize_datetime(row.get("updated_at")) or datetime.now(tz=timezone.utc),
+            created_at=self._normalize_datetime(row.get("created_at"))
+            or datetime.now(tz=timezone.utc),
+            updated_at=self._normalize_datetime(row.get("updated_at"))
+            or datetime.now(tz=timezone.utc),
         )
 
     def _cv_attempt_to_row(self, attempt: CVCompositionAttempt) -> dict:
@@ -182,7 +190,8 @@ class SQLiteJobRepository(SQLiteAdminQueriesMixin, JobRepository):
             user_feedback=row.get("user_feedback"),
             cv_json=self._parse_json_field(row.get("cv_json")) or {},
             pdf_path=row.get("pdf_path"),
-            created_at=self._normalize_datetime(row.get("created_at")) or datetime.now(tz=timezone.utc),
+            created_at=self._normalize_datetime(row.get("created_at"))
+            or datetime.now(tz=timezone.utc),
         )
 
     # =========================================================================
@@ -280,7 +289,7 @@ class SQLiteJobRepository(SQLiteAdminQueriesMixin, JobRepository):
         return await self.get(job_id)
 
     async def try_claim_for_apply(self, job_id: str) -> JobRecord | None:
-        """Atomic {APPROVED, NEEDS_EXTENSION} → APPLYING claim (multi-worker safe).
+        """Atomic {APPROVED, NEEDS_EXTENSION, MANUAL_REQUIRED} → APPLYING claim (multi-worker safe).
 
         The plain ``update()`` is a SELECT-then-UPDATE with no conditional guard,
         so two concurrent applies could both read a claimable status and both
@@ -291,7 +300,12 @@ class SQLiteJobRepository(SQLiteAdminQueriesMixin, JobRepository):
         self._ensure_initialized()
         from .tables import Job
 
-        claimable = [BusinessState.APPROVED.value, BusinessState.NEEDS_EXTENSION.value]
+        claimable = [
+            BusinessState.APPROVED.value,
+            BusinessState.NEEDS_EXTENSION.value,
+            # Re-apply after the user answered the parked questions in-app.
+            BusinessState.MANUAL_REQUIRED.value,
+        ]
         async with Job._meta.db.transaction():
             existing = await Job.select().where(Job.job_id == job_id).first().run()
             if not existing:
@@ -303,6 +317,7 @@ class SQLiteJobRepository(SQLiteAdminQueriesMixin, JobRepository):
                     {
                         Job.status: BusinessState.APPLYING.value,
                         Job.error_message: None,
+                        Job.pending_questions: None,
                         Job.updated_at: datetime.now(tz=timezone.utc),
                     }
                 )
@@ -335,12 +350,7 @@ class SQLiteJobRepository(SQLiteAdminQueriesMixin, JobRepository):
         self._ensure_initialized()
         from .tables import Job
 
-        existing = (
-            await Job.select()
-            .where(Job.job_id == job_id)
-            .first()
-            .run()
-        )
+        existing = await Job.select().where(Job.job_id == job_id).first().run()
         if not existing:
             return False
         return await self._cascade_delete_existing(job_id, existing)
@@ -555,9 +565,7 @@ class SQLiteJobRepository(SQLiteAdminQueriesMixin, JobRepository):
 
         row_data = self._cv_attempt_to_row(attempt)
         await CVAttemptTable.insert(CVAttemptTable(**row_data)).run()
-        logger.debug(
-            f"Created CV attempt {attempt.attempt_number} for job {attempt.job_id}"
-        )
+        logger.debug(f"Created CV attempt {attempt.attempt_number} for job {attempt.job_id}")
 
     async def get_cv_attempts(self, job_id: str) -> list[CVCompositionAttempt]:
         self._ensure_initialized()
@@ -590,7 +598,9 @@ class SQLiteJobRepository(SQLiteAdminQueriesMixin, JobRepository):
     # Specialized Methods
     # =========================================================================
 
-    async def find_by_application_url(self, url: str, user_id: str | None = None) -> JobRecord | None:
+    async def find_by_application_url(
+        self, url: str, user_id: str | None = None
+    ) -> JobRecord | None:
         self._ensure_initialized()
         from .tables import Job
 
@@ -619,7 +629,11 @@ class SQLiteJobRepository(SQLiteAdminQueriesMixin, JobRepository):
 
         cutoff_date = datetime.now(tz=timezone.utc) - timedelta(days=older_than_days)
 
-        query = Job.select(Job.job_id).where(Job.status.is_in(statuses)).where(Job.created_at < cutoff_date)
+        query = (
+            Job.select(Job.job_id)
+            .where(Job.status.is_in(statuses))
+            .where(Job.created_at < cutoff_date)
+        )
         if user_id is not None:
             query = query.where(Job.user_id == user_id)
 
@@ -629,11 +643,7 @@ class SQLiteJobRepository(SQLiteAdminQueriesMixin, JobRepository):
         if count > 0:
             job_ids = [row["job_id"] for row in to_delete]
             async with Job._meta.db.transaction():
-                await (
-                    CVAttemptTable.delete()
-                    .where(CVAttemptTable.job_id.is_in(job_ids))
-                    .run()
-                )
+                await CVAttemptTable.delete().where(CVAttemptTable.job_id.is_in(job_ids)).run()
                 await Job.delete().where(Job.job_id.is_in(job_ids)).run()
 
         logger.info(f"Cleanup: deleted {count} jobs older than {older_than_days} days")

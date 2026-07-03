@@ -76,10 +76,7 @@ def test_is_complete_for_unknown_kind_is_incomplete():
 def test_is_complete_for_false_bool_counts_as_known():
     """A boolean answer of False is a known value, not 'unknown'."""
     profile = ApplyProfile(needs_visa_sponsorship=False, willing_to_relocate=False)
-    assert (
-        profile.is_complete_for({"needs_visa_sponsorship", "willing_to_relocate"})
-        is True
-    )
+    assert profile.is_complete_for({"needs_visa_sponsorship", "willing_to_relocate"}) is True
 
 
 # =============================================================================
@@ -108,8 +105,8 @@ def test_new_valid_transitions(current, target):
 @pytest.mark.parametrize(
     "current,target",
     [
-        # MANUAL_REQUIRED is terminal.
-        (BusinessState.MANUAL_REQUIRED, BusinessState.APPLYING),
+        # MANUAL_REQUIRED can re-apply (user answered the parked questions) but
+        # cannot jump straight to a finished state.
         (BusinessState.MANUAL_REQUIRED, BusinessState.APPLIED),
         (BusinessState.MANUAL_REQUIRED, BusinessState.FAILED),
         # NEEDS_EXTENSION cannot jump straight to applied.
@@ -121,8 +118,14 @@ def test_new_invalid_transitions_raise(current, target):
         validate_transition(current, target)
 
 
-def test_manual_required_is_terminal():
-    assert BusinessState.MANUAL_REQUIRED.is_terminal() is True
+def test_manual_required_can_reapply():
+    # After answering parked questions in-app, the job re-dispatches.
+    assert validate_transition(BusinessState.MANUAL_REQUIRED, BusinessState.APPLYING) is True
+
+
+def test_manual_required_is_not_terminal():
+    # Recoverable: the user can supply the missing answers and re-apply.
+    assert BusinessState.MANUAL_REQUIRED.is_terminal() is False
 
 
 def test_needs_extension_is_not_terminal():
@@ -164,9 +167,7 @@ async def test_save_and_load_apply_profile_and_auto_apply(repo):
     assert user.auto_apply is False
 
     profile = ApplyProfile(years_experience=4, legally_authorized=True)
-    updated = await repo.update(
-        user.id, {"apply_profile": profile, "auto_apply": True}
-    )
+    updated = await repo.update(user.id, {"apply_profile": profile, "auto_apply": True})
     assert updated.apply_profile == profile
     assert updated.auto_apply is True
 
@@ -178,9 +179,7 @@ async def test_save_and_load_apply_profile_and_auto_apply(repo):
 @pytest.mark.asyncio
 async def test_update_apply_profile_as_dict(repo):
     user = await repo.create_user("dict@example.com")
-    updated = await repo.update(
-        user.id, {"apply_profile": {"expected_salary": "90000"}}
-    )
+    updated = await repo.update(user.id, {"apply_profile": {"expected_salary": "90000"}})
     assert updated.apply_profile == ApplyProfile(expected_salary="90000")
 
 
@@ -202,8 +201,7 @@ async def test_migration_adds_apply_columns_to_old_db(tmp_path):
     db_path = tmp_path / "legacy_apply.db"
 
     raw = sqlite3.connect(db_path)
-    raw.execute(
-        """
+    raw.execute("""
         CREATE TABLE "user" (
             "id" VARCHAR(36) PRIMARY KEY NOT NULL,
             "email" VARCHAR(255) NOT NULL UNIQUE,
@@ -214,20 +212,17 @@ async def test_migration_adds_apply_columns_to_old_db(tmp_path):
             "created_at" TIMESTAMP NOT NULL,
             "updated_at" TIMESTAMP NOT NULL
         )
-        """
-    )
-    raw.execute(
-        """
+        """)
+    raw.execute("""
         CREATE TABLE "magic_link" (
             "token" VARCHAR(64) PRIMARY KEY NOT NULL,
             "email" VARCHAR(255) NOT NULL,
             "expires_at" TIMESTAMP NOT NULL,
             "used" INTEGER NOT NULL DEFAULT 0
         )
-        """
-    )
+        """)
     raw.execute(
-        "INSERT INTO \"user\" (id, email, display_name, role, master_cv_json, "
+        'INSERT INTO "user" (id, email, display_name, role, master_cv_json, '
         "search_preferences, created_at, updated_at) VALUES "
         "('legacy-id', 'legacy@example.com', 'Legacy', 'trial', NULL, NULL, "
         "'2024-01-01 00:00:00', '2024-01-01 00:00:00')"

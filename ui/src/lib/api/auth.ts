@@ -11,6 +11,14 @@ export type UserRole = 'trial' | 'premium' | 'admin';
  * server-side classifier treats a required-but-missing value as an abort
  * signal (the job lands in `manual_required`) rather than guessing.
  */
+export interface CustomAnswer {
+	key: string;
+	label: string;
+	field_type: string;
+	value: string;
+	options?: string[];
+}
+
 export interface ApplyProfile {
 	phone_country_code: string | null;
 	years_experience: number | null;
@@ -19,6 +27,8 @@ export interface ApplyProfile {
 	legally_authorized: boolean | null;
 	willing_to_relocate: boolean | null;
 	drivers_license: boolean | null;
+	/** Reusable answers to arbitrary screening questions, keyed by normalized label. */
+	custom_answers?: CustomAnswer[];
 }
 
 export interface User {

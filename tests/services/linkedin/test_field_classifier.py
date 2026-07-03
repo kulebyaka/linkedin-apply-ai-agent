@@ -378,3 +378,94 @@ def test_accepts_pydantic_serialized_field(profile, contact):
     r = classify_field(sf, profile, contact)
     assert isinstance(r, FieldFill)
     assert r.kind == "email"
+
+
+# ---------------------------------------------------------------------------
+# Question-label normalization
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_question_label():
+    from src.services.linkedin.field_classifier import normalize_question_label
+
+    assert normalize_question_label("  Years of Python* ") == "years of python"
+    assert normalize_question_label("Willing to work nights?") == "willing to work nights"
+    assert normalize_question_label("Notice period :") == "notice period"
+    assert normalize_question_label("Do   you   agree") == "do you agree"
+    assert normalize_question_label("") == ""
+
+
+# ---------------------------------------------------------------------------
+# Custom-answer reuse (unmatched fields answered previously in-app)
+# ---------------------------------------------------------------------------
+
+
+def _profile_with(answers) -> ApplyProfile:
+    return ApplyProfile(custom_answers=answers)
+
+
+def test_custom_answer_fills_unrecognized_text_field():
+    from src.models.user import CustomAnswer
+
+    prof = _profile_with(
+        [CustomAnswer(key="years of python", label="Years of Python", field_type="text", value="5")]
+    )
+    r = classify_field(_field("Years of Python"), prof, None)
+    assert isinstance(r, FieldFill)
+    assert r.value == "5"
+    assert r.kind == "custom"
+
+
+def test_custom_answer_choice_revalidated_against_current_options():
+    from src.models.user import CustomAnswer
+
+    prof = _profile_with(
+        [
+            CustomAnswer(
+                key="shift",
+                label="Shift",
+                field_type="select",
+                value="Night",
+                options=["Day", "Night"],
+            )
+        ]
+    )
+    # Option still present -> fill.
+    ok = classify_field(_field("Shift", type_="select", options=["Day", "Night"]), prof, None)
+    assert isinstance(ok, FieldFill)
+    assert ok.value == "Night"
+    # Options changed and stored value no longer offered -> never guess.
+    stale = classify_field(
+        _field("Shift", type_="select", options=["Morning", "Evening"]), prof, None
+    )
+    assert isinstance(stale, Unknown)
+
+
+def test_custom_answer_requires_exact_normalized_label():
+    from src.models.user import CustomAnswer
+
+    prof = _profile_with(
+        [CustomAnswer(key="years of python", label="Years of Python", field_type="text", value="5")]
+    )
+    # Different wording does not match — deterministic, never guesses.
+    r = classify_field(_field("How many years of Python do you have"), prof, None)
+    assert isinstance(r, Unknown)
+
+
+def test_custom_answer_ignored_when_type_incompatible():
+    from src.models.user import CustomAnswer
+
+    prof = _profile_with(
+        [CustomAnswer(key="agree", label="Agree", field_type="text", value="whatever")]
+    )
+    # Stored a text answer; the field is now a radio -> not compatible, stays Unknown.
+    r = classify_field(_field("Agree", type_="radio", options=["Yes", "No"]), prof, None)
+    assert isinstance(r, Unknown)
+
+
+def test_missing_typed_kind_marks_unknown_kind(profile):
+    # A recognized kind with no profile value should carry `kind` for routing.
+    empty = ApplyProfile()
+    r = classify_field(_field("Years of experience"), empty, None)
+    assert isinstance(r, Unknown)
+    assert r.kind == "years_experience"

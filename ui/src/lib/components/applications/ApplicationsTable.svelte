@@ -9,10 +9,24 @@
 		onDownload: (job: AdminJobRecord) => void;
 		onProceed: (job: AdminJobRecord) => void;
 		onApply: (job: AdminJobRecord) => void;
+		onAnswer: (job: AdminJobRecord) => void;
 	}
 
-	let { jobs, loading = false, onDelete, onReview, onDownload, onProceed, onApply }: Props =
-		$props();
+	let {
+		jobs,
+		loading = false,
+		onDelete,
+		onReview,
+		onDownload,
+		onProceed,
+		onApply,
+		onAnswer
+	}: Props = $props();
+
+	/** True when a manual_required job has captured questions the user can answer in-app. */
+	function hasPendingQuestions(j: AdminJobRecord): boolean {
+		return Array.isArray(j.pending_questions) && j.pending_questions.length > 0;
+	}
 
 	/** Statuses that have a finished CV but no Review action — offer a download instead. */
 	const CV_DOWNLOAD_STATUSES = new Set(['approved', 'applied', 'completed']);
@@ -200,15 +214,26 @@
 									>
 										Apply now
 									</button>
-								{:else if j.status === 'manual_required' && jobUrl(j)}
-									<a
-										href={jobUrl(j)}
-										target="_blank"
-										rel="noopener noreferrer"
-										class="font-mono border-2 border-[var(--color-foreground)] bg-amber-200 px-2 py-1 text-[10px] uppercase tracking-wider text-amber-900 hover:-translate-y-0.5"
-									>
-										Finish manually
-									</a>
+								{:else if j.status === 'manual_required'}
+									{#if hasPendingQuestions(j)}
+										<button
+											type="button"
+											onclick={() => onAnswer(j)}
+											class="font-mono border-2 border-[var(--color-foreground)] bg-amber-200 px-2 py-1 text-[10px] uppercase tracking-wider text-amber-900 hover:-translate-y-0.5"
+										>
+											Answer questions ({j.pending_questions?.length})
+										</button>
+									{/if}
+									{#if jobUrl(j)}
+										<a
+											href={jobUrl(j)}
+											target="_blank"
+											rel="noopener noreferrer"
+											class="font-mono border-2 border-[var(--color-foreground)] bg-white px-2 py-1 text-[10px] uppercase tracking-wider hover:bg-[var(--color-muted)]"
+										>
+											Finish manually
+										</a>
+									{/if}
 								{/if}
 								{#if canAlsoDownloadCv(j)}
 									<button

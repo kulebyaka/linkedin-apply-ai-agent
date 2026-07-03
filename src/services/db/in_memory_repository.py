@@ -75,7 +75,13 @@ class InMemoryJobRepository(JobRepository):
                 validate_transition(current_status, new_status, job_id)
 
             updates["updated_at"] = datetime.now(tz=timezone.utc)
-            self._jobs[job_id] = self._jobs[job_id].model_copy(update=updates)
+            # Re-validate the merged record (rather than model_copy, which skips
+            # validation) so model-typed fields updated from raw dicts — e.g.
+            # pending_questions: list[PendingQuestion] persisted as list[dict] —
+            # are coerced to their models, matching the SQLite repo's load path.
+            merged = self._jobs[job_id].model_dump()
+            merged.update(updates)
+            self._jobs[job_id] = JobRecord.model_validate(merged)
 
     async def delete(self, job_id: str) -> bool:
         async with self._lock:
@@ -98,7 +104,12 @@ class InMemoryJobRepository(JobRepository):
             return job
 
     async def try_claim_for_apply(self, job_id: str) -> JobRecord | None:
-        claimable = (BusinessState.APPROVED, BusinessState.NEEDS_EXTENSION)
+        claimable = (
+            BusinessState.APPROVED,
+            BusinessState.NEEDS_EXTENSION,
+            # Re-apply after the user answered the parked questions in-app.
+            BusinessState.MANUAL_REQUIRED,
+        )
         async with self._lock:
             job = self._jobs.get(job_id)
             if job is None:
@@ -112,6 +123,7 @@ class InMemoryJobRepository(JobRepository):
                 update={
                     "status": BusinessState.APPLYING,
                     "error_message": None,
+                    "pending_questions": None,
                     "updated_at": datetime.now(tz=timezone.utc),
                 }
             )
@@ -168,7 +180,8 @@ class InMemoryJobRepository(JobRepository):
 
     async def get_pending(self, user_id: str) -> list[JobRecord]:
         jobs = [
-            j for j in self._jobs.values()
+            j
+            for j in self._jobs.values()
             if j.status == BusinessState.PENDING and j.user_id == user_id
         ]
         jobs.sort(key=lambda j: j.created_at, reverse=True)
@@ -183,24 +196,22 @@ class InMemoryJobRepository(JobRepository):
         order_by: str = "created_at",
         order_desc: bool = True,
     ) -> list[JobRecord]:
-        jobs = [
-            j for j in self._jobs.values()
-            if j.status == status and j.user_id == user_id
-        ]
+        jobs = [j for j in self._jobs.values() if j.status == status and j.user_id == user_id]
 
         if order_by == "updated_at":
             jobs.sort(key=lambda j: j.updated_at, reverse=order_desc)
         else:
             jobs.sort(key=lambda j: j.created_at, reverse=order_desc)
 
-        return jobs[offset:offset + limit]
+        return jobs[offset : offset + limit]
 
     async def get_all(self, user_id: str, limit: int = 100, offset: int = 0) -> list[JobRecord]:
         jobs = sorted(
             [j for j in self._jobs.values() if j.user_id == user_id],
-            key=lambda j: j.created_at, reverse=True,
+            key=lambda j: j.created_at,
+            reverse=True,
         )
-        return jobs[offset:offset + limit]
+        return jobs[offset : offset + limit]
 
     async def get_history(
         self,
@@ -223,9 +234,9 @@ class InMemoryJobRepository(JobRepository):
     ) -> list[JobRecord]:
         state_values = {str(s) for s in states}
         jobs = [
-            j for j in self._jobs.values()
-            if str(j.status) in state_values
-            and (user_id is None or j.user_id == user_id)
+            j
+            for j in self._jobs.values()
+            if str(j.status) in state_values and (user_id is None or j.user_id == user_id)
         ]
         jobs.sort(key=lambda j: j.updated_at, reverse=True)
         return jobs[:limit]
@@ -243,7 +254,8 @@ class InMemoryJobRepository(JobRepository):
         self, user_id: str, state: str, limit: int = 50
     ) -> list[JobRecord]:
         jobs = [
-            j for j in self._jobs.values()
+            j
+            for j in self._jobs.values()
             if j.user_id == user_id and j.refine_signal_state == state
         ]
         jobs.sort(key=lambda j: j.updated_at, reverse=True)
@@ -310,7 +322,8 @@ class InMemoryJobRepository(JobRepository):
         offset: int = 0,
     ) -> list[JobRecord]:
         matches = [
-            j for j in self._jobs.values()
+            j
+            for j in self._jobs.values()
             if self._matches_admin_filters(
                 j,
                 user_ids=user_ids,
@@ -322,7 +335,7 @@ class InMemoryJobRepository(JobRepository):
             )
         ]
         matches.sort(key=lambda j: j.created_at, reverse=True)
-        return matches[offset:offset + limit]
+        return matches[offset : offset + limit]
 
     async def count_all_jobs(
         self,
@@ -335,7 +348,8 @@ class InMemoryJobRepository(JobRepository):
         search: str | None = None,
     ) -> int:
         return sum(
-            1 for j in self._jobs.values()
+            1
+            for j in self._jobs.values()
             if self._matches_admin_filters(
                 j,
                 user_ids=user_ids,
@@ -347,9 +361,7 @@ class InMemoryJobRepository(JobRepository):
             )
         )
 
-    async def count_by_status_global(
-        self, window_hours: int | None = None
-    ) -> dict[str, int]:
+    async def count_by_status_global(self, window_hours: int | None = None) -> dict[str, int]:
         cutoff: datetime | None = None
         if window_hours is not None:
             cutoff = datetime.now(tz=timezone.utc) - timedelta(hours=window_hours)
@@ -363,7 +375,8 @@ class InMemoryJobRepository(JobRepository):
 
     async def get_latest_session_auth(self) -> dict | None:
         candidates = [
-            j for j in self._jobs.values()
+            j
+            for j in self._jobs.values()
             if j.source == "linkedin" and j.session_authenticated is not None
         ]
         if not candidates:
@@ -381,15 +394,12 @@ class InMemoryJobRepository(JobRepository):
         offset: int = 0,
         since: datetime | None = None,
     ) -> list[JobRecord]:
-        matches = [
-            j for j in self._jobs.values()
-            if (j.error_message or j.last_scrape_error)
-        ]
+        matches = [j for j in self._jobs.values() if (j.error_message or j.last_scrape_error)]
         if since is not None:
             since_aware = since if since.tzinfo else since.replace(tzinfo=timezone.utc)
             matches = [j for j in matches if j.updated_at and j.updated_at >= since_aware]
         matches.sort(key=lambda j: j.updated_at, reverse=True)
-        return matches[offset:offset + limit]
+        return matches[offset : offset + limit]
 
     # =========================================================================
     # CV Attempt Methods
@@ -415,7 +425,9 @@ class InMemoryJobRepository(JobRepository):
     # Specialized Methods
     # =========================================================================
 
-    async def find_by_application_url(self, url: str, user_id: str | None = None) -> JobRecord | None:
+    async def find_by_application_url(
+        self, url: str, user_id: str | None = None
+    ) -> JobRecord | None:
         for job in self._jobs.values():
             if job.application_url == url and (user_id is None or job.user_id == user_id):
                 return job

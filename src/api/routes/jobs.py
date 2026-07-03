@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import typing
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated
@@ -20,10 +21,13 @@ from src.api.deps import (
 from src.config.settings import get_settings
 from src.models.state_machine import BusinessState, WorkflowStep
 from src.models.unified import (
+    AnswerQuestionsRequest,
     JobStatusResponse,
     JobSubmitRequest,
     JobSubmitResponse,
 )
+from src.models.user import ApplyProfile, CustomAnswer
+from src.services.linkedin.field_classifier import normalize_question_label, parse_bool_answer
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -369,6 +373,94 @@ async def proceed_filtered_out_job(
         raise HTTPException(500, "Failed to proceed with job") from None
 
 
+def _profile_answer_kind(annotation: object) -> str | None:
+    """Classify an ApplyProfile field annotation as a scalar answer target.
+
+    Returns "bool" / "int" / "str" for the scalar screening fields, or None for
+    anything else (e.g. ``custom_answers: list[CustomAnswer]``). ``bool`` is
+    checked before ``int`` since ``bool`` is an ``int`` subclass.
+    """
+    args = [a for a in typing.get_args(annotation) if a is not type(None)]
+    base = args[0] if args else annotation
+    if base is bool:
+        return "bool"
+    if base is int:
+        return "int"
+    if base is str:
+        return "str"
+    return None
+
+
+# kind -> "bool"/"int"/"str", derived from the ApplyProfile model so a new typed
+# field is routed automatically (no hand-maintained field lists to drift).
+_PROFILE_ANSWER_KINDS: dict[str, str] = {
+    name: kind
+    for name, field in ApplyProfile.model_fields.items()
+    if (kind := _profile_answer_kind(field.annotation)) is not None
+}
+
+
+def _apply_answer_to_profile(profile: ApplyProfile, ans) -> None:
+    """Route one answer into the typed ApplyProfile field or custom-answers.
+
+    Falls back to the generic custom-answers store when the answer can't be
+    coerced into its typed field (so it is never silently dropped).
+    """
+    category = _PROFILE_ANSWER_KINDS.get(ans.kind) if ans.kind else None
+    if category == "str" and ans.value.strip():
+        setattr(profile, ans.kind, ans.value.strip())
+        return
+    if category == "int":
+        try:
+            setattr(profile, ans.kind, int(ans.value.strip()))
+            return
+        except (TypeError, ValueError):
+            pass
+    elif category == "bool":
+        parsed = parse_bool_answer(ans.value)
+        if parsed is not None:
+            setattr(profile, ans.kind, parsed)
+            return
+    # Unrecognized label, or a typed field we couldn't coerce → reusable custom
+    # answer keyed by the normalized question label.
+    profile.upsert_custom_answer(
+        CustomAnswer(
+            key=normalize_question_label(ans.label),
+            label=ans.label,
+            field_type=ans.field_type,
+            value=ans.value,
+            options=ans.options,
+        )
+    )
+
+
+@router.post("/api/jobs/{job_id}/answer-questions", response_model=ApplyProfile)
+async def answer_questions(
+    job_id: str, body: AnswerQuestionsRequest, request: Request, user: CurrentUser
+) -> ApplyProfile:
+    """Save the user's answers to a job's parked ``manual_required`` questions.
+
+    Answers for recognized typed kinds (e.g. ``years_experience``) update the
+    corresponding ``ApplyProfile`` field; everything else is stored in the
+    generic custom-answers store, keyed by normalized question label, so the
+    same question auto-fills on future applications. The job stays in
+    ``manual_required``; the caller re-dispatches via ``POST /api/jobs/{id}/apply``.
+    """
+    ctx = get_ctx(request)
+    job = await ctx.repository.get_for_user(job_id, user.id)
+    if job is None:
+        raise HTTPException(404, f"Job {job_id} not found")
+    if not body.answers:
+        raise HTTPException(400, "No answers provided")
+
+    profile = user.apply_profile or ApplyProfile()
+    for ans in body.answers:
+        _apply_answer_to_profile(profile, ans)
+
+    updated = await ctx.user_repository.update(user.id, {"apply_profile": profile})
+    return updated.apply_profile or profile
+
+
 @router.post("/api/jobs/{job_id}/apply", response_model=JobSubmitResponse)
 async def apply_job(job_id: str, request: Request, user: CurrentUser) -> JobSubmitResponse:
     """Manually (re-)trigger an Easy Apply run for a job awaiting application.
@@ -389,7 +481,13 @@ async def apply_job(job_id: str, request: Request, user: CurrentUser) -> JobSubm
     if job is None:
         raise HTTPException(404, f"Job {job_id} not found")
 
-    retriable = {BusinessState.NEEDS_EXTENSION, BusinessState.APPROVED}
+    # MANUAL_REQUIRED is retriable too: the user answered the parked questions
+    # in-app, so their now-complete profile can drive the apply automatically.
+    retriable = {
+        BusinessState.NEEDS_EXTENSION,
+        BusinessState.APPROVED,
+        BusinessState.MANUAL_REQUIRED,
+    }
     if job.status not in retriable:
         raise HTTPException(409, f"Job is not awaiting application (status: {job.status})")
 

@@ -26,7 +26,7 @@ import re
 from pydantic import BaseModel, Field
 
 from src.models.cv import ContactInfo
-from src.models.user import ApplyProfile
+from src.models.user import ApplyProfile, CustomAnswer
 
 # ---------------------------------------------------------------------------
 # I/O models
@@ -72,11 +72,18 @@ class Unknown(BaseModel):
     """An unrecognized field, or a recognized field with no backing value.
 
     The caller treats any ``Unknown`` as a hard stop -> ``manual_required``.
+
+    ``kind`` is set when the field *was* recognized as a known profile kind but
+    the value is missing (e.g. ``years_experience``). It lets the in-app answer
+    flow route the answer back into the typed ``ApplyProfile`` attribute rather
+    than the generic custom-answers store. ``None`` means the label itself was
+    unrecognized.
     """
 
     selector: str
     label: str
     reason: str
+    kind: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -160,6 +167,27 @@ _RE_PROFICIENCY = re.compile(
 _RE_YES = re.compile(r"^(yes|oui|s[íi]|ja|s[ìi])$", re.I)
 _RE_NO = re.compile(r"^(no|non|nein)$", re.I)
 
+# Programmatic truthy/falsy tokens (checkbox "true"/"false", numeric flags) that
+# aren't natural-language yes/no words.
+_YES_EXTRA = frozenset({"true", "1", "y", "t"})
+_NO_EXTRA = frozenset({"false", "0", "n", "f"})
+
+
+def parse_bool_answer(value: str) -> bool | None:
+    """Parse a user/option string into a boolean, or None if unrecognized.
+
+    The single source of truth for yes/no interpretation — reuses the
+    multilingual ``_RE_YES``/``_RE_NO`` matchers plus programmatic true/false/1/0
+    tokens. Returns ``None`` (never guesses) for anything it can't map.
+    """
+    token = (value or "").strip()
+    if _RE_YES.match(token) or token.lower() in _YES_EXTRA:
+        return True
+    if _RE_NO.match(token) or token.lower() in _NO_EXTRA:
+        return False
+    return None
+
+
 # Language-proficiency tier preference: Native > Fluent > Professional.
 _PROFICIENCY_TIERS: tuple[tuple[str, ...], ...] = (
     ("native", "bilingual", "bilingue", "langue maternelle", "muttersprache", "madrelingua"),
@@ -177,6 +205,67 @@ def _coerce(field: SerializedField | dict) -> SerializedField:
     if isinstance(field, SerializedField):
         return field
     return SerializedField(**field)
+
+
+# Trailing required-marker / punctuation noise to strip from question labels so
+# the same question keys identically across postings ("Years of Python*",
+# "Years of Python :" -> "years of python").
+_LABEL_TRIM = re.compile(r"[\s*:?.••\-–—]+$")
+_WS = re.compile(r"\s+")
+
+
+def normalize_question_label(label: str) -> str:
+    """Normalize a field label into a stable match key for custom answers.
+
+    Lowercase, collapse internal whitespace, and strip trailing required markers
+    / punctuation. Matching is intentionally *exact* on this key — near-duplicate
+    wording will not match, keeping the classifier's "never guess" guarantee.
+    """
+    collapsed = _WS.sub(" ", (label or "").strip().lower())
+    return _LABEL_TRIM.sub("", collapsed).strip()
+
+
+# Field types considered mutually compatible for custom-answer reuse.
+_TEXTLIKE = {"text", "email", "tel", "number"}
+_CHOICELIKE = {"select", "listbox"}
+
+
+def _lookup_custom_answer(
+    f: SerializedField, ftype: str, custom_answers: list[CustomAnswer]
+) -> FieldFill | None:
+    """Return a fill from a stored custom answer, or None if none applies.
+
+    Re-validates choice/radio answers against the field's *current* options so a
+    stale stored value is never blindly submitted (options changed -> no fill,
+    the field falls back to ``Unknown`` / ``manual_required``).
+    """
+    if not custom_answers:
+        return None
+    key = normalize_question_label(f.label)
+    if not key:
+        return None
+    for ans in custom_answers:
+        if ans.key != key:
+            continue
+        if not _types_compatible(ftype, ans.field_type):
+            return None
+        if ftype in ("radio",) or ftype in _CHOICELIKE:
+            # Only reuse when the stored value is still a valid option. A custom
+            # listbox may serialize empty options — trust the stored value then.
+            if f.options and ans.value not in f.options:
+                return None
+        return FieldFill(selector=f.selector, value=ans.value, kind="custom")
+    return None
+
+
+def _types_compatible(ftype: str, stored_type: str) -> bool:
+    if ftype == stored_type:
+        return True
+    if ftype in _TEXTLIKE and stored_type in _TEXTLIKE:
+        return True
+    if ftype in _CHOICELIKE and stored_type in _CHOICELIKE:
+        return True
+    return False
 
 
 def _split_name(full_name: str) -> tuple[str, str]:
@@ -231,21 +320,28 @@ def classify_field(
         return Skip(selector=f.selector, reason="file upload handled by upload_file")
 
     if ftype == "checkbox":
-        return _classify_checkbox(f, label)
-
-    if ftype == "radio":
-        return _classify_radio(f, label, profile)
-
-    if ftype in ("select", "listbox"):
+        outcome: FieldFill | Skip | Unknown = _classify_checkbox(f, label)
+    elif ftype == "radio":
+        outcome = _classify_radio(f, label, profile)
+    elif ftype in ("select", "listbox"):
         result = _classify_choice(f, label, profile)
-        if result is not None:
-            return result
         # Choice fields may still be a country code etc. handled as text below;
         # otherwise fall through to Unknown.
-        return Unknown(selector=f.selector, label=f.label, reason="unrecognized dropdown")
+        outcome = (
+            result
+            if result is not None
+            else Unknown(selector=f.selector, label=f.label, reason="unrecognized dropdown")
+        )
+    else:
+        # Text-like inputs (text/email/tel/number).
+        outcome = _classify_text(f, label, profile, contact_info)
 
-    # Text-like inputs (text/email/tel/number).
-    return _classify_text(f, label, profile, contact_info)
+    # Reuse a previously captured custom answer before giving up on an Unknown.
+    if isinstance(outcome, Unknown):
+        reused = _lookup_custom_answer(f, ftype, profile.custom_answers)
+        if reused is not None:
+            return reused
+    return outcome
 
 
 def _classify_checkbox(f: SerializedField, label: str) -> FieldFill | Skip | Unknown:
@@ -273,6 +369,7 @@ def _classify_radio(f: SerializedField, label: str, profile: ApplyProfile) -> Fi
                     selector=f.selector,
                     label=f.label,
                     reason=f"profile value missing: {kind}",
+                    kind=kind,
                 )
             value = _match_yes_no_option(f.options, want_yes=bool(answer))
             return FieldFill(selector=f.selector, value=value, kind=kind)
@@ -290,6 +387,7 @@ def _classify_choice(
                 selector=f.selector,
                 label=f.label,
                 reason="profile value missing: phone_country_code",
+                kind="phone_country_code",
             )
         # Prefer an option that contains the code (e.g. "United States (+1)").
         value = next((o for o in f.options if code in o), code)
@@ -343,6 +441,7 @@ def _classify_text(
                     selector=f.selector,
                     label=f.label,
                     reason=f"profile value missing: {kind}",
+                    kind=kind,
                 )
             return FieldFill(selector=f.selector, value=value, kind=kind)
 

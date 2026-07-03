@@ -59,6 +59,25 @@ class UserSearchPreferences(BaseModel):
     max_jobs: int = Field(default=50, ge=1, le=500)
 
 
+class CustomAnswer(BaseModel):
+    """A reusable answer to an Easy Apply question the classifier can't map to a
+    fixed ``ApplyProfile`` field.
+
+    Captured when an application aborts to ``manual_required`` and the user
+    answers the unmatched questions in-app. Keyed by a normalized question label
+    (see ``normalize_question_label`` in the field classifier) so the same
+    question auto-fills on future applications. ``options`` snapshots the choices
+    present when answered, so a stored choice/radio value can be re-validated
+    against the current field before reuse (never guess if options changed).
+    """
+
+    key: str  # normalized question label — the match key
+    label: str  # original label, for display
+    field_type: str  # text|number|radio|select|listbox|checkbox
+    value: str  # answer to fill (option text for choice/radio; "true"/"false" for checkbox)
+    options: list[str] = Field(default_factory=list)
+
+
 class ApplyProfile(BaseModel):
     """Structured answers reused to fill LinkedIn Easy Apply screening fields.
 
@@ -66,6 +85,10 @@ class ApplyProfile(BaseModel):
     classifier treats a required-but-missing value as an abort signal
     (``manual_required``) rather than guessing. Captured once in Settings and
     reused across applications.
+
+    ``custom_answers`` extends this beyond the fixed fields: arbitrary screening
+    questions answered in-app after a ``manual_required`` abort are stored here
+    and matched by normalized label on subsequent applications.
     """
 
     phone_country_code: str | None = None
@@ -75,6 +98,15 @@ class ApplyProfile(BaseModel):
     legally_authorized: bool | None = None
     willing_to_relocate: bool | None = None
     drivers_license: bool | None = None
+    custom_answers: list[CustomAnswer] = Field(default_factory=list)
+
+    def upsert_custom_answer(self, answer: CustomAnswer) -> None:
+        """Replace an existing custom answer with the same ``key``, else append."""
+        for i, existing in enumerate(self.custom_answers):
+            if existing.key == answer.key:
+                self.custom_answers[i] = answer
+                return
+        self.custom_answers.append(answer)
 
     def is_complete_for(self, required_kinds: set[str]) -> bool:
         """Return True iff every required field "kind" has a known value.

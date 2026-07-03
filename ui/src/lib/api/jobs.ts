@@ -1,4 +1,4 @@
-import type { AdminJobRecord } from './admin';
+import type { AdminJobRecord, PendingQuestion } from './admin';
 import { handle } from './_http';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
@@ -90,3 +90,51 @@ export async function applyJob(jobId: string): Promise<ApplyResponse> {
 	});
 	return handle<ApplyResponse>(response, 'Apply to job');
 }
+
+export interface QuestionAnswer {
+	label: string;
+	field_type: string;
+	value: string;
+	options?: string[];
+	kind?: string | null;
+}
+
+/** Minimal ApplyProfile shape returned by answerQuestions (custom answers included). */
+export interface ApplyProfile {
+	phone_country_code?: string | null;
+	years_experience?: number | null;
+	expected_salary?: string | null;
+	needs_visa_sponsorship?: boolean | null;
+	legally_authorized?: boolean | null;
+	willing_to_relocate?: boolean | null;
+	drivers_license?: boolean | null;
+	custom_answers?: Array<{
+		key: string;
+		label: string;
+		field_type: string;
+		value: string;
+		options?: string[];
+	}>;
+}
+
+/**
+ * Save the user's answers to a job's parked `manual_required` questions.
+ * Answers are stored on the user's ApplyProfile and reused on future
+ * applications. The job stays in `manual_required`; call `applyJob` after
+ * to re-dispatch it.
+ */
+export async function answerQuestions(
+	jobId: string,
+	answers: QuestionAnswer[]
+): Promise<ApplyProfile> {
+	const response = await fetch(`${API_BASE}/api/jobs/${jobId}/answer-questions`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ answers }),
+		credentials: 'include',
+	});
+	return handle<ApplyProfile>(response, 'Answer questions');
+}
+
+// Re-export for consumers that build the questions UI.
+export type { PendingQuestion };

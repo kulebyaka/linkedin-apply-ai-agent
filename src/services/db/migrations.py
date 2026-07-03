@@ -181,6 +181,10 @@ MIGRATIONS: tuple[Migration, ...] = (
         "add_user_auto_apply",
         _add_column("user", "auto_apply", "auto_apply BOOLEAN NOT NULL DEFAULT 0"),
     ),
+    Migration(
+        "add_job_pending_questions",
+        _add_column("job", "pending_questions", "pending_questions JSON NULL"),
+    ),
 )
 
 

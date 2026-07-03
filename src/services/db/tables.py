@@ -88,6 +88,10 @@ class Job(Table):
     # Error tracking
     error_message = Text(null=True)
 
+    # Easy Apply fields the classifier couldn't fill (serialized PendingQuestion
+    # list); the user answers these in-app after a manual_required abort.
+    pending_questions = JSON(null=True)
+
     # Scrape failure tracking
     scrape_attempts = Integer(default=0)
     last_scrape_error = Text(null=True)
