@@ -32,7 +32,8 @@ dependencies = [
     "pyjwt>=2.8.0",
     "pypdf>=4.0.0",
     "python-multipart>=0.0.9",
-    "jsonschema>=4.26.0",
+    "instructor>=1.15.0",
+    "litellm>=1.93.0",
 ]
 
 [project.optional-dependencies]

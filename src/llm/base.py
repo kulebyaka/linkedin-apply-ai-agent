@@ -5,36 +5,13 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from enum import StrEnum
+from typing import Any, TypeVar, overload
+
+from pydantic import BaseModel
 
 from .prompt_spec import PromptSpec
 
-#: Fallback output-token budget used when a caller passes no ``max_tokens`` and
-#: a truncation retry needs a value to double.
-DEFAULT_MAX_TOKENS = 4096
-
-
-class LLMTruncatedError(Exception):
-    """Raised when model output was cut off by the token limit.
-
-    ``generate_json`` retries a truncated response exactly once with
-    ``max_tokens`` doubled; if it truncates again this is raised rather than
-    blind-retrying the identical request (which can never succeed).
-    """
-
-
-def build_retry_feedback(previous_output: str, error: str, *, limit: int = 1000) -> str:
-    """Build the feedback block appended to a retry's user message.
-
-    Includes the previous (invalid) output truncated to ``limit`` chars plus
-    the specific error, so the retry is corrective rather than a blind repeat.
-    """
-    prev = (previous_output or "")[:limit]
-    return (
-        "Your previous response was invalid.\n"
-        f"Previous response (truncated):\n{prev}\n"
-        f"Error: {error}\n"
-        "Return corrected JSON matching the schema."
-    )
+_ResponseModelT = TypeVar("_ResponseModelT", bound=BaseModel)
 
 
 class LLMProvider(StrEnum):
@@ -44,6 +21,19 @@ class LLMProvider(StrEnum):
     DEEPSEEK = "deepseek"
     GROK = "grok"
     ANTHROPIC = "anthropic"
+
+
+#: Providers whose models can accept native PDF document input. LiteLLM 1.93.0
+#: has no ``supports_pdf_input`` lookup, so capability is tracked here (the
+#: OpenAI GPT-4 family and Anthropic Claude accept PDFs; Grok/DeepSeek do not).
+_PDF_CAPABLE_PROVIDERS: frozenset[LLMProvider] = frozenset(
+    {LLMProvider.OPENAI, LLMProvider.ANTHROPIC}
+)
+
+
+def provider_supports_pdf(provider: LLMProvider) -> bool:
+    """Return True if ``provider`` can accept native PDF document input."""
+    return provider in _PDF_CAPABLE_PROVIDERS
 
 
 class BaseLLMClient(ABC):
@@ -61,59 +51,67 @@ class BaseLLMClient(ABC):
         self,
         pdf_bytes: bytes,
         prompt: str,
+        response_model: type[BaseModel] | None = None,
         schema: dict | None = None,
         *,
         temperature: float = 0.1,
         max_tokens: int = 8192,
-    ) -> dict:
+    ) -> dict | BaseModel:
         """Generate structured JSON from a native PDF document input.
 
         Override in providers whose APIs accept PDF document content blocks.
         Default raises so callers can react with a clear UX error.
         """
-        raise NotImplementedError(
-            f"{self.__class__.__name__} does not support native PDF input"
-        )
+        raise NotImplementedError(f"{self.__class__.__name__} does not support native PDF input")
 
     @abstractmethod
     def generate(self, spec: PromptSpec, temperature: float = 0.7, **kwargs) -> str:
         """Generate text completion from a cache-aware prompt spec."""
         pass
 
+    @overload
+    def generate_json(
+        self,
+        spec: PromptSpec,
+        response_model: type[_ResponseModelT],
+        schema: dict | None = ...,
+        temperature: float = ...,
+        max_retries: int = ...,
+        validator: Callable[[dict], None] | None = ...,
+        **kwargs: Any,
+    ) -> _ResponseModelT: ...
+
+    @overload
+    def generate_json(
+        self,
+        spec: PromptSpec,
+        response_model: None = ...,
+        schema: dict | None = ...,
+        temperature: float = ...,
+        max_retries: int = ...,
+        validator: Callable[[dict], None] | None = ...,
+        **kwargs: Any,
+    ) -> dict: ...
+
     @abstractmethod
     def generate_json(
         self,
         spec: PromptSpec,
+        response_model: type[BaseModel] | None = None,
         schema: dict | None = None,
         temperature: float = 0.4,
         max_retries: int = 3,
         validator: Callable[[dict], None] | None = None,
-        **kwargs,
-    ) -> dict:
+        **kwargs: Any,
+    ) -> dict | BaseModel:
         """Generate structured JSON output from a cache-aware prompt spec.
 
+        ``response_model`` is the preferred way to request structured output:
+        a Pydantic model class the result is validated against and returned as.
+        ``schema`` (a raw JSON-schema dict) is retained for ad-hoc call sites.
+
         ``validator`` is an optional callable that receives the parsed dict
-        and raises ``ValueError`` on a semantic problem the JSON schema can't
-        express; the raised message feeds the retry-with-feedback loop.
+        and raises ``ValueError`` on a semantic problem the schema can't
+        express.
         """
         pass
-
-
-def basic_validate_json_schema(data, schema: dict) -> None:
-    """Validate ``data`` against ``schema`` for providers without native
-    schema enforcement (DeepSeek).
-
-    Full JSON Schema validation via the ``jsonschema`` library, including
-    nested objects/arrays and constraints. ``jsonschema.ValidationError`` is
-    wrapped as ``ValueError`` so the ``generate_json`` retry-with-feedback loop
-    picks up the message.
-    """
-    import jsonschema
-
-    try:
-        jsonschema.validate(instance=data, schema=schema)
-    except jsonschema.ValidationError as e:
-        # e.message is the concise reason; the full path helps the model fix it.
-        location = "/".join(str(p) for p in e.absolute_path)
-        detail = f"{e.message} (at '{location}')" if location else e.message
-        raise ValueError(f"Schema validation failed: {detail}") from e

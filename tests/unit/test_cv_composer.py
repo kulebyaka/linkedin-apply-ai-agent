@@ -39,19 +39,29 @@ class MockLLMClient(BaseLLMClient):
     def generate_json(
         self,
         spec: PromptSpec,
+        response_model=None,
         schema: dict = None,
         temperature: float = 0.4,
         max_retries: int = 3,
         **kwargs,
-    ) -> dict:
-        """Mock generate_json method — matches keywords across system+user."""
+    ):
+        """Mock generate_json — matches keywords across system+user.
+
+        When a ``response_model`` is supplied (the migrated call shape), the
+        configured dict is validated into that model and returned as an
+        instance, mirroring the Instructor client.
+        """
         self.call_count += 1
 
         combined = ((spec.system or "") + "\n" + spec.user).lower()
         for keyword, response in self.responses.items():
             if keyword.lower() in combined:
+                if response_model is not None:
+                    return response_model(**response)
                 return response
 
+        if response_model is not None:
+            return response_model()
         return {}
 
 
@@ -93,7 +103,7 @@ class TestJobSummarization:
             "education_reqs": ["Bachelor's degree"],
             "experience_reqs": {"years": 5, "level": "senior"},
             "responsibilities": ["Design microservices", "Implement scalable solutions"],
-            "nice_to_have": ["Kubernetes", "Flask"]
+            "nice_to_have": ["Kubernetes", "Flask"],
         }
         mock_llm_client.set_response("job description", mock_response)
 
@@ -115,7 +125,7 @@ class TestJobSummarization:
             "education_reqs": [],
             "experience_reqs": {"years": None, "level": None},
             "responsibilities": ["Develop software"],
-            "nice_to_have": []
+            "nice_to_have": [],
         }
         mock_llm_client.set_response("job description", mock_response)
 
@@ -132,7 +142,7 @@ class TestJobSummarization:
             "title": "Developer",
             "company": "Company",
             "description": "",
-            "requirements": ""
+            "requirements": "",
         }
 
         mock_response = {
@@ -141,7 +151,7 @@ class TestJobSummarization:
             "education_reqs": [],
             "experience_reqs": {"years": None, "level": None},
             "responsibilities": [],
-            "nice_to_have": []
+            "nice_to_have": [],
         }
         mock_llm_client.set_response("job description", mock_response)
 
@@ -159,57 +169,66 @@ class TestComposeCVIntegration:
         # Master CV needs 'contact' key for pass-through validation
         master_cv_with_contact = {
             **master_cv,
-            "contact": master_cv.get("contact_info", {
-                "full_name": "John Doe",
-                "email": "john@example.com",
-            }),
+            "contact": master_cv.get(
+                "contact_info",
+                {
+                    "full_name": "John Doe",
+                    "email": "john@example.com",
+                },
+            ),
         }
 
         # Mock response for job summary (triggered by "job description" in prompt)
-        mock_llm_client.set_response("job description", {
-            "technical_skills": ["Python", "Django", "AWS", "Docker"],
-            "soft_skills": ["Communication"],
-            "education_reqs": ["Bachelor's degree"],
-            "experience_reqs": {"years": 5, "level": "senior"},
-            "responsibilities": ["Design microservices"],
-            "nice_to_have": ["Kubernetes"],
-        })
+        mock_llm_client.set_response(
+            "job description",
+            {
+                "technical_skills": ["Python", "Django", "AWS", "Docker"],
+                "soft_skills": ["Communication"],
+                "education_reqs": ["Bachelor's degree"],
+                "experience_reqs": {"years": 5, "level": "senior"},
+                "responsibilities": ["Design microservices"],
+                "nice_to_have": ["Kubernetes"],
+            },
+        )
 
         # Mock response for full CV generation (triggered by "master cv" in prompt)
-        mock_llm_client.set_response("master cv", {
-            "summary": "Senior Software Engineer with 8+ years of experience",
-            "experiences": [
-                {
-                    "company": "Tech Corp",
-                    "position": "Senior Software Engineer",
-                    "start_date": "2020-01-15",
-                    "end_date": None,
-                    "is_current": True,
-                    "location": "San Francisco, CA",
-                    "description": "Lead development of cloud-based microservices platform",
-                    "achievements": [
-                        "Architected microservices platform serving 1M+ users",
-                        "Reduced deployment time by 60%",
-                    ],
-                    "technologies": ["Python", "Django", "AWS", "Docker"],
-                }
-            ],
-            "education": [
-                {
-                    "institution": "Stanford University",
-                    "degree": "Bachelor of Science",
-                    "field_of_study": "Computer Science",
-                    "start_date": "2011-09-01",
-                    "end_date": "2015-06-15",
-                }
-            ],
-            "skills": [
-                {"name": "Python", "category": "Programming"},
-                {"name": "AWS", "category": "Cloud"},
-            ],
-            "projects": [],
-            "certifications": [],
-        })
+        mock_llm_client.set_response(
+            "master cv",
+            {
+                "summary": "Senior Software Engineer with 8+ years of experience",
+                "experiences": [
+                    {
+                        "company": "Tech Corp",
+                        "position": "Senior Software Engineer",
+                        "start_date": "2020-01-15",
+                        "end_date": None,
+                        "is_current": True,
+                        "location": "San Francisco, CA",
+                        "description": "Lead development of cloud-based microservices platform",
+                        "achievements": [
+                            "Architected microservices platform serving 1M+ users",
+                            "Reduced deployment time by 60%",
+                        ],
+                        "technologies": ["Python", "Django", "AWS", "Docker"],
+                    }
+                ],
+                "education": [
+                    {
+                        "institution": "Stanford University",
+                        "degree": "Bachelor of Science",
+                        "field_of_study": "Computer Science",
+                        "start_date": "2011-09-01",
+                        "end_date": "2015-06-15",
+                    }
+                ],
+                "skills": [
+                    {"name": "Python", "category": "Programming"},
+                    {"name": "AWS", "category": "Cloud"},
+                ],
+                "projects": [],
+                "certifications": [],
+            },
+        )
 
         result = cv_composer.compose_cv(master_cv_with_contact, job_posting)
 
@@ -231,55 +250,64 @@ class TestComposeCVIntegration:
 
         master_cv_with_contact = {
             **master_cv,
-            "contact": master_cv.get("contact_info", {
-                "full_name": "John Doe",
-                "email": "john@example.com",
-            }),
+            "contact": master_cv.get(
+                "contact_info",
+                {
+                    "full_name": "John Doe",
+                    "email": "john@example.com",
+                },
+            ),
         }
 
-        mock_llm_client.set_response("job description", {
-            "technical_skills": ["Python"],
-            "soft_skills": [],
-            "education_reqs": [],
-            "experience_reqs": {"years": None, "level": None},
-            "responsibilities": [],
-            "nice_to_have": [],
-        })
+        mock_llm_client.set_response(
+            "job description",
+            {
+                "technical_skills": ["Python"],
+                "soft_skills": [],
+                "education_reqs": [],
+                "experience_reqs": {"years": None, "level": None},
+                "responsibilities": [],
+                "nice_to_have": [],
+            },
+        )
 
-        mock_llm_client.set_response("master cv", {
-            "summary": "Engineer",
-            "experiences": [
-                {
-                    "company": "Tech Corp",
-                    "position": "Engineer",
-                    "start_date": "2020-01-01",
-                    "end_date": None,
-                    "is_current": True,
-                    "location": "SF",
-                    "description": "Dev",
-                    "achievements": [],
-                    "technologies": [],
-                },
-                {
-                    "company": "Tech Corp",
-                    "position": "Junior Engineer",
-                    "start_date": "2018-01-01",
-                    "end_date": "2019-12-31",
-                    "is_current": False,
-                    "location": "SF",
-                    "description": "Dev",
-                    "achievements": [],
-                    "technologies": [],
-                },
-            ],
-            "education": [],
-            "skills": [
-                {"name": "Python", "category": "Programming"},
-                {"name": "Go", "category": "Programming"},
-            ],
-            "projects": [],
-            "certifications": [],
-        })
+        mock_llm_client.set_response(
+            "master cv",
+            {
+                "summary": "Engineer",
+                "experiences": [
+                    {
+                        "company": "Tech Corp",
+                        "position": "Engineer",
+                        "start_date": "2020-01-01",
+                        "end_date": None,
+                        "is_current": True,
+                        "location": "SF",
+                        "description": "Dev",
+                        "achievements": [],
+                        "technologies": [],
+                    },
+                    {
+                        "company": "Tech Corp",
+                        "position": "Junior Engineer",
+                        "start_date": "2018-01-01",
+                        "end_date": "2019-12-31",
+                        "is_current": False,
+                        "location": "SF",
+                        "description": "Dev",
+                        "achievements": [],
+                        "technologies": [],
+                    },
+                ],
+                "education": [],
+                "skills": [
+                    {"name": "Python", "category": "Programming"},
+                    {"name": "Go", "category": "Programming"},
+                ],
+                "projects": [],
+                "certifications": [],
+            },
+        )
 
         result = composer.compose_cv(master_cv_with_contact, job_posting)
 
@@ -349,33 +377,41 @@ class TestValidation:
         with pytest.raises(CVCompositionError, match="(?i)schema"):
             cv_composer._validate_output(invalid_cv, master_cv)
 
-    def test_validate_detects_hallucinated_companies(self, cv_composer, master_cv, valid_tailored_cv):
+    def test_validate_detects_hallucinated_companies(
+        self, cv_composer, master_cv, valid_tailored_cv
+    ):
         """Test that hallucinated companies are detected"""
-        valid_tailored_cv["experiences"].append({
-            "company": "Fake Corp",
-            "position": "Engineer",
-            "start_date": "2020-01-01",
-            "end_date": None,
-            "is_current": True,
-            "location": "Nowhere",
-            "description": "Fake job",
-            "achievements": [],
-            "technologies": [],
-        })
+        valid_tailored_cv["experiences"].append(
+            {
+                "company": "Fake Corp",
+                "position": "Engineer",
+                "start_date": "2020-01-01",
+                "end_date": None,
+                "is_current": True,
+                "location": "Nowhere",
+                "description": "Fake job",
+                "achievements": [],
+                "technologies": [],
+            }
+        )
 
         with patch("src.services.cv.cv_composer.logger") as mock_logger:
             cv_composer._validate_output(valid_tailored_cv, master_cv)
             mock_logger.warning.assert_called()
 
-    def test_validate_detects_hallucinated_institutions(self, cv_composer, master_cv, valid_tailored_cv):
+    def test_validate_detects_hallucinated_institutions(
+        self, cv_composer, master_cv, valid_tailored_cv
+    ):
         """Test that hallucinated educational institutions are detected"""
-        valid_tailored_cv["education"].append({
-            "institution": "Fake University",
-            "degree": "PhD",
-            "field_of_study": "Computer Science",
-            "start_date": "2015-09-01",
-            "end_date": "2019-06-01",
-        })
+        valid_tailored_cv["education"].append(
+            {
+                "institution": "Fake University",
+                "degree": "PhD",
+                "field_of_study": "Computer Science",
+                "start_date": "2015-09-01",
+                "end_date": "2019-06-01",
+            }
+        )
 
         with patch("src.services.cv.cv_composer.logger") as mock_logger:
             cv_composer._validate_output(valid_tailored_cv, master_cv)
@@ -520,17 +556,19 @@ class TestCVValidator:
 
     def test_strict_raises_on_hallucinated_company(self, master_cv, valid_tailored_cv):
         """Test STRICT mode raises CVHallucinationError on fabricated company."""
-        valid_tailored_cv["experiences"].append({
-            "company": "Fake Corp",
-            "position": "Engineer",
-            "start_date": "2020-01-01",
-            "end_date": None,
-            "is_current": True,
-            "location": "Nowhere",
-            "description": "Fake",
-            "achievements": [],
-            "technologies": [],
-        })
+        valid_tailored_cv["experiences"].append(
+            {
+                "company": "Fake Corp",
+                "position": "Engineer",
+                "start_date": "2020-01-01",
+                "end_date": None,
+                "is_current": True,
+                "location": "Nowhere",
+                "description": "Fake",
+                "achievements": [],
+                "technologies": [],
+            }
+        )
         validator = CVValidator(master_cv=master_cv, policy=HallucinationPolicy.STRICT)
 
         with pytest.raises(CVHallucinationError) as exc_info:
@@ -541,13 +579,15 @@ class TestCVValidator:
 
     def test_strict_raises_on_hallucinated_institution(self, master_cv, valid_tailored_cv):
         """Test STRICT mode raises CVHallucinationError on fabricated institution."""
-        valid_tailored_cv["education"].append({
-            "institution": "Fake University",
-            "degree": "PhD",
-            "field_of_study": "CS",
-            "start_date": "2015-09-01",
-            "end_date": "2019-06-01",
-        })
+        valid_tailored_cv["education"].append(
+            {
+                "institution": "Fake University",
+                "degree": "PhD",
+                "field_of_study": "CS",
+                "start_date": "2015-09-01",
+                "end_date": "2019-06-01",
+            }
+        )
         validator = CVValidator(master_cv=master_cv, policy=HallucinationPolicy.STRICT)
 
         with pytest.raises(CVHallucinationError) as exc_info:
@@ -558,24 +598,28 @@ class TestCVValidator:
 
     def test_strict_raises_with_both_hallucinations(self, master_cv, valid_tailored_cv):
         """Test STRICT mode includes both fabricated companies and institutions."""
-        valid_tailored_cv["experiences"].append({
-            "company": "Ghost LLC",
-            "position": "Dev",
-            "start_date": "2020-01-01",
-            "end_date": None,
-            "is_current": False,
-            "location": "X",
-            "description": "X",
-            "achievements": [],
-            "technologies": [],
-        })
-        valid_tailored_cv["education"].append({
-            "institution": "Phantom College",
-            "degree": "BA",
-            "field_of_study": "Art",
-            "start_date": "2010-09-01",
-            "end_date": "2014-06-01",
-        })
+        valid_tailored_cv["experiences"].append(
+            {
+                "company": "Ghost LLC",
+                "position": "Dev",
+                "start_date": "2020-01-01",
+                "end_date": None,
+                "is_current": False,
+                "location": "X",
+                "description": "X",
+                "achievements": [],
+                "technologies": [],
+            }
+        )
+        valid_tailored_cv["education"].append(
+            {
+                "institution": "Phantom College",
+                "degree": "BA",
+                "field_of_study": "Art",
+                "start_date": "2010-09-01",
+                "end_date": "2014-06-01",
+            }
+        )
         validator = CVValidator(master_cv=master_cv, policy=HallucinationPolicy.STRICT)
 
         with pytest.raises(CVHallucinationError) as exc_info:
@@ -586,17 +630,19 @@ class TestCVValidator:
 
     def test_warn_logs_but_does_not_raise(self, master_cv, valid_tailored_cv):
         """Test WARN mode logs warning but returns validated CV."""
-        valid_tailored_cv["experiences"].append({
-            "company": "Fake Corp",
-            "position": "Engineer",
-            "start_date": "2020-01-01",
-            "end_date": None,
-            "is_current": True,
-            "location": "Nowhere",
-            "description": "Fake",
-            "achievements": [],
-            "technologies": [],
-        })
+        valid_tailored_cv["experiences"].append(
+            {
+                "company": "Fake Corp",
+                "position": "Engineer",
+                "start_date": "2020-01-01",
+                "end_date": None,
+                "is_current": True,
+                "location": "Nowhere",
+                "description": "Fake",
+                "achievements": [],
+                "technologies": [],
+            }
+        )
         validator = CVValidator(master_cv=master_cv, policy=HallucinationPolicy.WARN)
 
         with patch("src.services.cv.cv_validator.logger") as mock_logger:
@@ -608,17 +654,19 @@ class TestCVValidator:
 
     def test_disabled_skips_hallucination_checks(self, master_cv, valid_tailored_cv):
         """Test DISABLED mode skips hallucination checks entirely."""
-        valid_tailored_cv["experiences"].append({
-            "company": "Totally Made Up Corp",
-            "position": "Engineer",
-            "start_date": "2020-01-01",
-            "end_date": None,
-            "is_current": True,
-            "location": "Nowhere",
-            "description": "Fake",
-            "achievements": [],
-            "technologies": [],
-        })
+        valid_tailored_cv["experiences"].append(
+            {
+                "company": "Totally Made Up Corp",
+                "position": "Engineer",
+                "start_date": "2020-01-01",
+                "end_date": None,
+                "is_current": True,
+                "location": "Nowhere",
+                "description": "Fake",
+                "achievements": [],
+                "technologies": [],
+            }
+        )
         validator = CVValidator(master_cv=master_cv, policy=HallucinationPolicy.DISABLED)
 
         # Should not raise even with fabricated companies
@@ -642,43 +690,49 @@ class TestCVValidator:
         """Test compose_cv accepts and uses a CVValidator."""
         composer = CVComposer(llm_client=mock_llm_client)
 
-        mock_llm_client.set_response("job description", {
-            "technical_skills": ["Python"],
-            "soft_skills": [],
-            "education_reqs": [],
-            "experience_reqs": {"years": None, "level": None},
-            "responsibilities": [],
-            "nice_to_have": [],
-        })
+        mock_llm_client.set_response(
+            "job description",
+            {
+                "technical_skills": ["Python"],
+                "soft_skills": [],
+                "education_reqs": [],
+                "experience_reqs": {"years": None, "level": None},
+                "responsibilities": [],
+                "nice_to_have": [],
+            },
+        )
 
-        mock_llm_client.set_response("master cv", {
-            "summary": "Engineer",
-            "experiences": [
-                {
-                    "company": "Tech Corp",
-                    "position": "Engineer",
-                    "start_date": "2020-01-01",
-                    "end_date": None,
-                    "is_current": True,
-                    "location": "SF",
-                    "description": "Dev",
-                    "achievements": [],
-                    "technologies": [],
-                }
-            ],
-            "education": [
-                {
-                    "institution": "Stanford University",
-                    "degree": "BS",
-                    "field_of_study": "CS",
-                    "start_date": "2011-09-01",
-                    "end_date": "2015-06-15",
-                }
-            ],
-            "skills": [{"name": "Python", "category": "Programming"}],
-            "projects": [],
-            "certifications": [],
-        })
+        mock_llm_client.set_response(
+            "master cv",
+            {
+                "summary": "Engineer",
+                "experiences": [
+                    {
+                        "company": "Tech Corp",
+                        "position": "Engineer",
+                        "start_date": "2020-01-01",
+                        "end_date": None,
+                        "is_current": True,
+                        "location": "SF",
+                        "description": "Dev",
+                        "achievements": [],
+                        "technologies": [],
+                    }
+                ],
+                "education": [
+                    {
+                        "institution": "Stanford University",
+                        "degree": "BS",
+                        "field_of_study": "CS",
+                        "start_date": "2011-09-01",
+                        "end_date": "2015-06-15",
+                    }
+                ],
+                "skills": [{"name": "Python", "category": "Programming"}],
+                "projects": [],
+                "certifications": [],
+            },
+        )
 
         validator = CVValidator(master_cv=master_cv, policy=HallucinationPolicy.STRICT)
         job_posting = {"title": "Dev", "company": "X", "description": "Y"}
@@ -686,39 +740,47 @@ class TestCVValidator:
         result = composer.compose_cv(master_cv, job_posting, validator=validator)
         assert isinstance(result, CVLLMOutput)
 
-    def test_compose_cv_with_strict_validator_rejects_hallucination(self, mock_llm_client, master_cv):
+    def test_compose_cv_with_strict_validator_rejects_hallucination(
+        self, mock_llm_client, master_cv
+    ):
         """Test compose_cv with STRICT validator raises on hallucinated company."""
         composer = CVComposer(llm_client=mock_llm_client)
 
-        mock_llm_client.set_response("job description", {
-            "technical_skills": [],
-            "soft_skills": [],
-            "education_reqs": [],
-            "experience_reqs": {"years": None, "level": None},
-            "responsibilities": [],
-            "nice_to_have": [],
-        })
+        mock_llm_client.set_response(
+            "job description",
+            {
+                "technical_skills": [],
+                "soft_skills": [],
+                "education_reqs": [],
+                "experience_reqs": {"years": None, "level": None},
+                "responsibilities": [],
+                "nice_to_have": [],
+            },
+        )
 
-        mock_llm_client.set_response("master cv", {
-            "summary": "Engineer",
-            "experiences": [
-                {
-                    "company": "Hallucinated Corp",
-                    "position": "Engineer",
-                    "start_date": "2020-01-01",
-                    "end_date": None,
-                    "is_current": True,
-                    "location": "SF",
-                    "description": "Dev",
-                    "achievements": [],
-                    "technologies": [],
-                }
-            ],
-            "education": [],
-            "skills": [],
-            "projects": [],
-            "certifications": [],
-        })
+        mock_llm_client.set_response(
+            "master cv",
+            {
+                "summary": "Engineer",
+                "experiences": [
+                    {
+                        "company": "Hallucinated Corp",
+                        "position": "Engineer",
+                        "start_date": "2020-01-01",
+                        "end_date": None,
+                        "is_current": True,
+                        "location": "SF",
+                        "description": "Dev",
+                        "achievements": [],
+                        "technologies": [],
+                    }
+                ],
+                "education": [],
+                "skills": [],
+                "projects": [],
+                "certifications": [],
+            },
+        )
 
         validator = CVValidator(master_cv=master_cv, policy=HallucinationPolicy.STRICT)
         job_posting = {"title": "Dev", "company": "X", "description": "Y"}

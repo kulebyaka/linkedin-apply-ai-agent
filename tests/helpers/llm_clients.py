@@ -3,7 +3,7 @@
 import logging
 import os
 
-from src.llm.provider import LLMClientFactory, LLMProvider
+from src.llm.provider import InstructorClient, LLMProvider, litellm_model
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,9 @@ def create_real_llm_client():
 
     provider = provider_map.get(provider_str)
     if not provider:
-        raise ValueError(f"Unknown LLM provider: {provider_str}. Supported: {list(provider_map.keys())}")
+        raise ValueError(
+            f"Unknown LLM provider: {provider_str}. Supported: {list(provider_map.keys())}"
+        )
 
     # Get API key based on provider
     api_key_map = {
@@ -61,13 +63,9 @@ def create_real_llm_client():
             f"Please set {api_key_env} environment variable."
         )
 
-    # Create client using factory
+    # Create the Instructor + LiteLLM client with a route-prefixed model string.
     try:
-        client = LLMClientFactory.create(
-            provider=provider,
-            api_key=api_key,
-            model=model
-        )
+        client = InstructorClient(api_key, litellm_model(provider, model))
         logger.info(f"Created {provider.value} client with model {model}")
         return client
 

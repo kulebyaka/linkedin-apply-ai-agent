@@ -16,13 +16,10 @@ from typing import Any
 
 from src.llm.prompt_spec import PromptSpec
 from src.llm.provider import BaseLLMClient
-from src.models.job_filter import FilterResult, UserFilterPreferences
+from src.models.job_filter import FilterRefinement, FilterResult, UserFilterPreferences
 from src.services.cv.cv_prompts import PromptLoader
 
 logger = logging.getLogger(__name__)
-
-# JSON schema derived from Pydantic model for LLM structured output
-FILTER_RESULT_SCHEMA = FilterResult.model_json_schema()
 
 # Default prompts directory
 DEFAULT_PROMPTS_DIR = "prompts/job_filter"
@@ -82,21 +79,14 @@ class JobFilter:
         spec = self._build_evaluation_spec(job_posting, user_filter_prefs, user_id)
 
         try:
-            raw_result = self.llm.generate_json(
+            result = self.llm.generate_json(
                 spec,
-                schema=FILTER_RESULT_SCHEMA,
+                response_model=FilterResult,
                 temperature=self.TEMPERATURE,
-                validator=lambda data: FilterResult(**data),
             )
         except Exception as e:
             logger.error(f"LLM evaluation failed for {job_title} at {company}: {e}")
             raise JobFilterError(f"Job evaluation failed: {e}") from e
-
-        try:
-            result = FilterResult(**raw_result)
-        except Exception as e:
-            logger.error(f"FilterResult validation failed: {e}")
-            raise JobFilterError(f"Invalid filter result structure: {e}") from e
 
         logger.info(
             f"Job evaluation complete: score={result.score}, "
@@ -144,23 +134,6 @@ class JobFilter:
         logger.info(f"Generated filter prompt ({len(generated)} chars)")
         return generated
 
-    # JSON schema for the refinement LLM call.
-    _REFINEMENT_SCHEMA = {
-        "type": "object",
-        "properties": {
-            "proposed_learned_block": {
-                "type": "string",
-                "description": "Full '## Auto-learned criteria' markdown block.",
-            },
-            "rationale": {
-                "type": "string",
-                "description": "Plain-language explanation citing the signals.",
-            },
-        },
-        "required": ["proposed_learned_block", "rationale"],
-        "additionalProperties": False,
-    }
-
     def generate_refinement(
         self,
         current_learned_block: str,
@@ -204,15 +177,15 @@ class JobFilter:
         try:
             raw = self.llm.generate_json(
                 spec,
-                schema=self._REFINEMENT_SCHEMA,
+                response_model=FilterRefinement,
                 temperature=0.3,
             )
         except Exception as e:
             logger.error(f"Refinement generation failed: {e}")
             raise JobFilterError(f"Refinement generation failed: {e}") from e
 
-        block = (raw.get("proposed_learned_block") or "").strip()
-        rationale = (raw.get("rationale") or "").strip()
+        block = (raw.proposed_learned_block or "").strip()
+        rationale = (raw.rationale or "").strip()
         # Validate the block looks like the expected structure before storing.
         if not block or "## Auto-learned criteria" not in block:
             raise JobFilterError(
@@ -231,7 +204,9 @@ class JobFilter:
         """
         return result.disqualified or result.score < reject_threshold
 
-    def should_warn(self, result: FilterResult, warning_threshold: int = 70, reject_threshold: int = 30) -> bool:
+    def should_warn(
+        self, result: FilterResult, warning_threshold: int = 70, reject_threshold: int = 30
+    ) -> bool:
         """Check if a job should show a warning badge in HITL review.
 
         Returns True if the score is below the warning threshold but

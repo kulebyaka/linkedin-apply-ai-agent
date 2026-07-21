@@ -81,7 +81,7 @@ async def start_cv_extraction(
     # Local imports: src.agents._shared pulls in WeasyPrint, which needs
     # native libs we don't want to require at import time.
     from src.agents._shared import create_llm_client
-    from src.llm.provider import LLMClientFactory, LLMProvider
+    from src.llm.provider import LLMProvider, provider_supports_pdf
     from src.services.cv.pdf_extraction import run_extraction
 
     settings = get_settings()
@@ -100,11 +100,10 @@ async def start_cv_extraction(
     except ValueError:
         raise HTTPException(
             400,
-            "Configured CV model provider is unknown. "
-            "Update Settings → Model preferences.",
+            "Configured CV model provider is unknown. " "Update Settings → Model preferences.",
         ) from None
 
-    if not LLMClientFactory.supports_pdf(provider):
+    if not provider_supports_pdf(provider):
         raise HTTPException(
             400,
             "PDF extraction requires Anthropic Claude or OpenAI GPT-4. "
@@ -125,12 +124,11 @@ async def start_cv_extraction(
         raise HTTPException(400, "Uploaded PDF is empty")
     if size > max_bytes:
         await ctx.cv_extraction_registry.update(
-            task.id, status="failed",
+            task.id,
+            status="failed",
             error_message=f"File exceeds {max_bytes // (1024 * 1024)}MB limit",
         )
-        raise HTTPException(
-            400, f"File exceeds {max_bytes // (1024 * 1024)}MB limit"
-        )
+        raise HTTPException(400, f"File exceeds {max_bytes // (1024 * 1024)}MB limit")
 
     try:
         from io import BytesIO
@@ -143,20 +141,25 @@ async def start_cv_extraction(
     except PdfReadError as e:
         logger.warning("Could not parse uploaded PDF: %s", e)
         await ctx.cv_extraction_registry.update(
-            task.id, status="failed", error_message="PDF could not be parsed",
+            task.id,
+            status="failed",
+            error_message="PDF could not be parsed",
         )
         raise HTTPException(400, "Could not read PDF — file may be corrupt") from None
 
     max_pages = settings.pdf_cv_upload_max_pages
     if page_count > max_pages:
         await ctx.cv_extraction_registry.update(
-            task.id, status="failed",
+            task.id,
+            status="failed",
             error_message=f"PDF exceeds {max_pages}-page limit",
         )
         raise HTTPException(400, f"PDF exceeds {max_pages}-page limit")
     if page_count == 0:
         await ctx.cv_extraction_registry.update(
-            task.id, status="failed", error_message="PDF has no pages",
+            task.id,
+            status="failed",
+            error_message="PDF has no pages",
         )
         raise HTTPException(400, "PDF has no pages")
 
@@ -164,15 +167,21 @@ async def start_cv_extraction(
         llm_client = create_llm_client(provider_str, model_override)
     except ValueError as e:
         await ctx.cv_extraction_registry.update(
-            task.id, status="failed", error_message=str(e),
+            task.id,
+            status="failed",
+            error_message=str(e),
         )
         raise HTTPException(400, str(e)) from None
 
     logger.info(
-        "PDF extraction queued: user=%s task=%s file=%s size=%d pages=%d "
-        "provider=%s model=%s",
-        user.id, task.id, file.filename, size, page_count,
-        provider_str, llm_client.model,
+        "PDF extraction queued: user=%s task=%s file=%s size=%d pages=%d " "provider=%s model=%s",
+        user.id,
+        task.id,
+        file.filename,
+        size,
+        page_count,
+        provider_str,
+        llm_client.model,
     )
 
     ctx.create_background_task(
@@ -315,14 +324,10 @@ async def accept_filter_refinement(
         raise HTTPException(404, "No pending refinement proposal")
 
     prefs = user.filter_preferences or UserFilterPreferences()
-    new_custom_prompt = apply_learned_block(
-        prefs.custom_prompt, proposal.proposed_learned_block
-    )
+    new_custom_prompt = apply_learned_block(prefs.custom_prompt, proposal.proposed_learned_block)
     updated_prefs = prefs.model_copy(update={"custom_prompt": new_custom_prompt})
 
-    updated_user = await ctx.user_repository.update(
-        user.id, {"filter_preferences": updated_prefs}
-    )
+    updated_user = await ctx.user_repository.update(user.id, {"filter_preferences": updated_prefs})
     await _consume_proposal(ctx, user, proposal)
     logger.info("Filter refinement accepted for user %s", user.id)
     return updated_user

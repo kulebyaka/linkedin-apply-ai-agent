@@ -46,23 +46,29 @@ class MockLLMClient(BaseLLMClient):
     def generate_json(
         self,
         spec: PromptSpec,
+        response_model=None,
         schema: dict | None = None,
         temperature: float = 0.4,
         max_retries: int = 3,
         **kwargs,
-    ) -> dict:
+    ):
         prompt_text = (spec.system or "") + "\n" + spec.user
         self.generate_json_calls.append(
             {
                 "spec": spec,
                 "prompt": prompt_text,
                 "schema": schema,
+                "response_model": response_model,
                 "temperature": temperature,
             }
         )
         if self._generate_json_response is not None:
+            if response_model is not None:
+                # Mirror the Instructor client: validate into the model (raises
+                # on invalid data, exactly as the real retry-exhausted path).
+                return response_model(**self._generate_json_response)
             return self._generate_json_response
-        return {}
+        return response_model() if response_model is not None else {}
 
 
 # ---------------------------------------------------------------------------
@@ -210,16 +216,14 @@ class TestEvaluateJob:
         # Custom prompt should still include job data
         assert "Senior Software Engineer" in prompt
 
-    def test_evaluate_job_passes_schema(
+    def test_evaluate_job_passes_response_model(
         self, job_filter, mock_llm, job_posting, good_filter_result_dict
     ):
         mock_llm.set_generate_json_response(good_filter_result_dict)
         job_filter.evaluate_job(job_posting)
 
-        schema = mock_llm.generate_json_calls[0]["schema"]
-        assert schema is not None
-        assert "properties" in schema
-        assert "score" in schema["properties"]
+        response_model = mock_llm.generate_json_calls[0]["response_model"]
+        assert response_model is FilterResult
 
     def test_evaluate_job_uses_low_temperature(
         self, job_filter, mock_llm, job_posting, good_filter_result_dict
@@ -241,13 +245,13 @@ class TestEvaluateJob:
         with pytest.raises(JobFilterError, match="Job evaluation failed"):
             job_filter.evaluate_job(job_posting)
 
-    def test_evaluate_job_raises_on_invalid_result(
-        self, job_filter, mock_llm, job_posting
-    ):
-        # Missing required fields
+    def test_evaluate_job_raises_on_invalid_result(self, job_filter, mock_llm, job_posting):
+        # Missing required fields — response_model validation fails inside the
+        # client (mirrors Instructor exhausting its retries), surfacing as a
+        # JobFilterError from the evaluation call.
         mock_llm.set_generate_json_response({"score": 50})
 
-        with pytest.raises(JobFilterError, match="Invalid filter result"):
+        with pytest.raises(JobFilterError, match="Job evaluation failed"):
             job_filter.evaluate_job(job_posting)
 
 
@@ -259,67 +263,92 @@ class TestEvaluateJob:
 class TestThresholdDecisions:
     def test_should_reject_below_threshold(self, job_filter):
         result = FilterResult(
-            score=20, red_flags=[], disqualified=False,
-            disqualifier_reason=None, reasoning="Low score."
+            score=20,
+            red_flags=[],
+            disqualified=False,
+            disqualifier_reason=None,
+            reasoning="Low score.",
         )
         assert job_filter.should_reject(result, reject_threshold=30) is True
 
     def test_should_reject_at_threshold(self, job_filter):
         result = FilterResult(
-            score=30, red_flags=[], disqualified=False,
-            disqualifier_reason=None, reasoning="At threshold."
+            score=30,
+            red_flags=[],
+            disqualified=False,
+            disqualifier_reason=None,
+            reasoning="At threshold.",
         )
         assert job_filter.should_reject(result, reject_threshold=30) is False
 
     def test_should_reject_above_threshold(self, job_filter):
         result = FilterResult(
-            score=85, red_flags=[], disqualified=False,
-            disqualifier_reason=None, reasoning="Good match."
+            score=85,
+            red_flags=[],
+            disqualified=False,
+            disqualifier_reason=None,
+            reasoning="Good match.",
         )
         assert job_filter.should_reject(result, reject_threshold=30) is False
 
     def test_should_reject_when_disqualified_regardless_of_score(self, job_filter):
         result = FilterResult(
-            score=95, red_flags=["Requires clearance"],
+            score=95,
+            red_flags=["Requires clearance"],
             disqualified=True,
             disqualifier_reason="Needs TS/SCI clearance.",
-            reasoning="High score but disqualified."
+            reasoning="High score but disqualified.",
         )
         assert job_filter.should_reject(result, reject_threshold=30) is True
 
     def test_should_reject_custom_threshold(self, job_filter):
         result = FilterResult(
-            score=45, red_flags=[], disqualified=False,
-            disqualifier_reason=None, reasoning="Mid score."
+            score=45,
+            red_flags=[],
+            disqualified=False,
+            disqualifier_reason=None,
+            reasoning="Mid score.",
         )
         assert job_filter.should_reject(result, reject_threshold=50) is True
         assert job_filter.should_reject(result, reject_threshold=40) is False
 
     def test_should_warn_below_warning_threshold(self, job_filter):
         result = FilterResult(
-            score=55, red_flags=["Concern"], disqualified=False,
-            disqualifier_reason=None, reasoning="Some concerns."
+            score=55,
+            red_flags=["Concern"],
+            disqualified=False,
+            disqualifier_reason=None,
+            reasoning="Some concerns.",
         )
         assert job_filter.should_warn(result, warning_threshold=70) is True
 
     def test_should_warn_at_warning_threshold(self, job_filter):
         result = FilterResult(
-            score=70, red_flags=[], disqualified=False,
-            disqualifier_reason=None, reasoning="At threshold."
+            score=70,
+            red_flags=[],
+            disqualified=False,
+            disqualifier_reason=None,
+            reasoning="At threshold.",
         )
         assert job_filter.should_warn(result, warning_threshold=70) is False
 
     def test_should_warn_above_warning_threshold(self, job_filter):
         result = FilterResult(
-            score=85, red_flags=[], disqualified=False,
-            disqualifier_reason=None, reasoning="Good match."
+            score=85,
+            red_flags=[],
+            disqualified=False,
+            disqualifier_reason=None,
+            reasoning="Good match.",
         )
         assert job_filter.should_warn(result, warning_threshold=70) is False
 
     def test_should_warn_custom_threshold(self, job_filter):
         result = FilterResult(
-            score=55, red_flags=[], disqualified=False,
-            disqualifier_reason=None, reasoning="Mid score."
+            score=55,
+            red_flags=[],
+            disqualified=False,
+            disqualifier_reason=None,
+            reasoning="Mid score.",
         )
         assert job_filter.should_warn(result, warning_threshold=50) is False
         assert job_filter.should_warn(result, warning_threshold=60) is True
@@ -336,18 +365,14 @@ class TestGeneratePromptFromPreferences:
             "Evaluate this job posting for the following criteria:\n"
             "1. Must be remote\n2. Must use Python"
         )
-        result = job_filter.generate_prompt_from_preferences(
-            "I want remote Python jobs"
-        )
+        result = job_filter.generate_prompt_from_preferences("I want remote Python jobs")
 
         assert isinstance(result, str)
         assert "Evaluate this job posting" in result
 
     def test_generate_prompt_passes_prefs_to_llm(self, job_filter, mock_llm):
         mock_llm.set_generate_response("Generated prompt")
-        job_filter.generate_prompt_from_preferences(
-            "No security clearance, remote only"
-        )
+        job_filter.generate_prompt_from_preferences("No security clearance, remote only")
 
         assert len(mock_llm.generate_calls) == 1
         prompt = mock_llm.generate_calls[0]["prompt"]
@@ -376,10 +401,15 @@ class TestGeneratePromptFromPreferences:
 
 class TestPromptConstruction:
     def test_default_prompt_includes_job_fields(self, job_filter, mock_llm, job_posting):
-        mock_llm.set_generate_json_response({
-            "score": 80, "red_flags": [], "disqualified": False,
-            "disqualifier_reason": None, "reasoning": "Good."
-        })
+        mock_llm.set_generate_json_response(
+            {
+                "score": 80,
+                "red_flags": [],
+                "disqualified": False,
+                "disqualifier_reason": None,
+                "reasoning": "Good.",
+            }
+        )
         job_filter.evaluate_job(job_posting)
 
         prompt = mock_llm.generate_json_calls[0]["prompt"]
@@ -391,10 +421,15 @@ class TestPromptConstruction:
     def test_custom_prompt_includes_job_data_and_custom_text(
         self, job_filter, mock_llm, job_posting
     ):
-        mock_llm.set_generate_json_response({
-            "score": 80, "red_flags": [], "disqualified": False,
-            "disqualifier_reason": None, "reasoning": "Good."
-        })
+        mock_llm.set_generate_json_response(
+            {
+                "score": 80,
+                "red_flags": [],
+                "disqualified": False,
+                "disqualifier_reason": None,
+                "reasoning": "Good.",
+            }
+        )
         prefs = UserFilterPreferences(
             custom_prompt="MY CUSTOM EVALUATION INSTRUCTIONS HERE",
         )
@@ -407,10 +442,15 @@ class TestPromptConstruction:
     def test_default_prompt_without_prefs_has_no_user_section(
         self, job_filter, mock_llm, job_posting
     ):
-        mock_llm.set_generate_json_response({
-            "score": 80, "red_flags": [], "disqualified": False,
-            "disqualifier_reason": None, "reasoning": "Good."
-        })
+        mock_llm.set_generate_json_response(
+            {
+                "score": 80,
+                "red_flags": [],
+                "disqualified": False,
+                "disqualifier_reason": None,
+                "reasoning": "Good.",
+            }
+        )
         job_filter.evaluate_job(job_posting, user_filter_prefs=None)
 
         prompt = mock_llm.generate_json_calls[0]["prompt"]
@@ -419,10 +459,15 @@ class TestPromptConstruction:
     def test_default_prompt_with_empty_prefs_has_no_user_section(
         self, job_filter, mock_llm, job_posting
     ):
-        mock_llm.set_generate_json_response({
-            "score": 80, "red_flags": [], "disqualified": False,
-            "disqualifier_reason": None, "reasoning": "Good."
-        })
+        mock_llm.set_generate_json_response(
+            {
+                "score": 80,
+                "red_flags": [],
+                "disqualified": False,
+                "disqualifier_reason": None,
+                "reasoning": "Good.",
+            }
+        )
         prefs = UserFilterPreferences(natural_language_prefs="")
         job_filter.evaluate_job(job_posting, user_filter_prefs=prefs)
 
@@ -434,10 +479,15 @@ class TestPromptConstruction:
     ):
         """When custom_prompt is set, it is injected as the user-criteria section
         of the default template; natural_language_prefs is ignored."""
-        mock_llm.set_generate_json_response({
-            "score": 80, "red_flags": [], "disqualified": False,
-            "disqualifier_reason": None, "reasoning": "Good."
-        })
+        mock_llm.set_generate_json_response(
+            {
+                "score": 80,
+                "red_flags": [],
+                "disqualified": False,
+                "disqualifier_reason": None,
+                "reasoning": "Good.",
+            }
+        )
         prefs = UserFilterPreferences(
             custom_prompt="Only check if it's a Python role.",
             natural_language_prefs="I also have prefs here",

@@ -1,13 +1,8 @@
-"""Concrete LLM provider clients."""
+"""Concrete LLM provider client(s)."""
 
-from .anthropic import AnthropicClient
-from .deepseek import DeepSeekClient
-from .grok import GrokClient
-from .openai import OpenAIClient
+from .instructor_client import InstructorClient, litellm_model
 
 __all__ = [
-    "AnthropicClient",
-    "DeepSeekClient",
-    "GrokClient",
-    "OpenAIClient",
+    "InstructorClient",
+    "litellm_model",
 ]
