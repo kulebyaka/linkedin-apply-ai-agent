@@ -1,5 +1,6 @@
 """Tests for LinkedIn search scheduler and API endpoints."""
 
+import asyncio
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 
@@ -339,6 +340,41 @@ class TestPerUserSearch:
         assert item3.user_id == "user-b"
         assert item3.job.job_id == "j3"
 
+    async def test_in_progress_is_scoped_to_the_searching_user(self):
+        """search_in_progress_for is True only for the user actively searching,
+        and clears once the search finishes."""
+        scheduler, _, scraper, _ = _make_scheduler(scrape_result=[])
+
+        seen: dict[str, bool] = {}
+
+        async def _capture(_params):
+            # Mid-search: only the searching user is in progress.
+            seen["self"] = scheduler.search_in_progress_for("default-user")
+            seen["other"] = scheduler.search_in_progress_for("someone-else")
+            return []
+
+        scraper.scrape_and_enrich = AsyncMock(side_effect=_capture)
+
+        assert scheduler.search_in_progress_for("default-user") is False
+        await scheduler.run_search()
+
+        assert seen["self"] is True
+        assert seen["other"] is False
+        # Cleared after the cycle completes.
+        assert scheduler.search_in_progress_for("default-user") is False
+
+    async def test_in_progress_clears_on_auth_failure(self):
+        """A failed auth returns before the per-user loop, but the safety-net
+        finally must still clear the in-progress marker."""
+        scheduler, _, scraper, _ = _make_scheduler(scrape_result=[])
+        scraper.browser.ensure_authenticated = AsyncMock(
+            side_effect=RuntimeError("auth down")
+        )
+
+        await scheduler.run_search()
+
+        assert scheduler.search_in_progress_for("default-user") is False
+
     async def test_skips_search_when_no_users_have_prefs(self):
         """When user_repository returns no users with prefs, search is skipped
         to avoid creating ownerless jobs that no authenticated user can access."""
@@ -425,6 +461,121 @@ class TestPerUserSearch:
         assert count == 1
         item = await queue.get()
         assert item.user_id == "user-b"
+
+
+# ---------------------------------------------------------------------------
+# Per-user concurrency: manual searches are not dropped by others' cycles
+# ---------------------------------------------------------------------------
+
+
+def _two_user_scheduler(scrape_side_effect):
+    """Build a scheduler whose repo has user-a and user-b.
+
+    ``scrape_side_effect`` is assigned to scraper.scrape_and_enrich.
+    Returns (scheduler, scraper, queue).
+    """
+    user_a = _user("user-a", prefs=UserSearchPreferences(keywords="a"))
+    user_b = _user("user-b", prefs=UserSearchPreferences(keywords="b"))
+    repo = MagicMock()
+    repo.get_all_with_search_prefs = AsyncMock(return_value=[user_a, user_b])
+
+    scraper = MagicMock()
+    scraper.browser = MagicMock()
+    scraper.browser.ensure_authenticated = AsyncMock()
+    scraper.reset_seen = MagicMock()
+    scraper.scrape_and_enrich = AsyncMock(side_effect=scrape_side_effect)
+
+    settings = MagicMock()
+    settings.linkedin_search_interval_hours = 1
+    settings.scraped_jobs_path = None
+
+    queue = JobQueue(max_size=100)
+    scheduler = LinkedInSearchScheduler(
+        settings, scraper, queue, user_repository=repo
+    )
+    return scheduler, scraper, queue
+
+
+class TestPerUserConcurrency:
+    async def test_manual_search_not_dropped_by_other_users_cycle(self):
+        """A manual search landing while another user is mid-scrape is queued
+        and runs, not dropped. (Under the old global lock it returned 0.)"""
+        release_a = asyncio.Event()
+
+        async def scrape(params):
+            if params.keywords == "a":
+                # Hold user-a mid-scrape (browser lock held) until released.
+                await release_a.wait()
+                return [_job("a1")]
+            return [_job("b1")]
+
+        scheduler, scraper, _ = _two_user_scheduler(scrape)
+
+        task_a = asyncio.create_task(scheduler.run_search("user-a"))
+        # Let user-a acquire the browser lock and block inside its scrape.
+        await asyncio.sleep(0.01)
+
+        # user-b's search starts and waits for the browser — it is NOT dropped.
+        task_b = asyncio.create_task(scheduler.run_search("user-b"))
+        await asyncio.sleep(0.01)
+        assert not task_b.done()  # queued behind user-a, still pending
+        assert scheduler.search_in_progress_for("user-a") is True
+
+        release_a.set()
+        count_a = await task_a
+        count_b = await task_b
+
+        # Both ran to completion; neither was skipped.
+        assert count_a == 1
+        assert count_b == 1
+        assert scraper.scrape_and_enrich.await_count == 2
+
+    async def test_browser_access_is_serialized(self):
+        """Even with overlapping searches, only one scrape touches the shared
+        browser at a time (single Playwright page)."""
+        active = 0
+        max_active = 0
+
+        async def scrape(_params):
+            nonlocal active, max_active
+            active += 1
+            max_active = max(max_active, active)
+            await asyncio.sleep(0.01)
+            active -= 1
+            return []
+
+        scheduler, _, _ = _two_user_scheduler(scrape)
+
+        await asyncio.gather(
+            scheduler.run_search("user-a"),
+            scheduler.run_search("user-b"),
+        )
+
+        assert max_active == 1
+
+    async def test_duplicate_search_for_same_user_is_deduped(self):
+        """A second search for a user already searching is skipped, not queued
+        (avoids double-scraping the same query)."""
+        release = asyncio.Event()
+        calls = 0
+
+        async def scrape(_params):
+            nonlocal calls
+            calls += 1
+            await release.wait()
+            return [_job("j1")]
+
+        scheduler, scraper, _ = _two_user_scheduler(scrape)
+
+        task = asyncio.create_task(scheduler.run_search("user-a"))
+        await asyncio.sleep(0)  # let the first search start scraping
+        # Second concurrent search for the SAME user is deduped.
+        dup = await scheduler.run_search("user-a")
+        assert dup == 0
+
+        release.set()
+        await task
+        assert calls == 1
 
 
 # ---------------------------------------------------------------------------
@@ -515,7 +666,10 @@ class TestLinkedInSearchAPI:
     def test_search_status_with_scheduler(self, client):
         test_client, ctx = client
         mock_scheduler = MagicMock()
-        mock_scheduler.is_running = True
+        # Per-user in-progress flag drives the "running" field, not the global
+        # scheduler-alive state.
+        mock_scheduler.search_in_progress_for.return_value = True
+        mock_scheduler.get_last_run_for_user.return_value = None
         mock_scheduler.last_run_time = datetime(2026, 3, 6, 12, 0, 0)
         mock_scheduler.last_run_jobs = 5
         mock_scheduler.next_run_time = datetime(2026, 3, 6, 13, 0, 0)
@@ -529,6 +683,8 @@ class TestLinkedInSearchAPI:
             assert data["running"] is True
             assert data["last_run_jobs"] == 5
             assert "2026-03-06" in data["last_run_time"]
+            # Status is scoped to the requesting user.
+            mock_scheduler.search_in_progress_for.assert_called_once_with("test-user")
         finally:
             ctx.scheduler = original
 

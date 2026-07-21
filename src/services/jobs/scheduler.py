@@ -101,15 +101,44 @@ class LinkedInSearchScheduler(IntervalScheduler):
         self.user_repository = user_repository
         self.admin_alert_service = admin_alert_service
         self.job_repository = job_repository
-        self._search_lock = asyncio.Lock()
         self._last_run_jobs: int = 0
         self._last_run_per_user: dict[str, UserLastRun] = {}
         self._run_history: deque[SearchRun] = deque(maxlen=_RUN_HISTORY_MAXLEN)
+        # User ids whose search is actively executing right now. Drives the
+        # per-user "search running" status so a user only sees the spinner for
+        # their own in-flight search, not any global scheduler activity.
+        self._in_progress_users: set[str] = set()
+        # Per-user locks dedupe concurrent searches for the SAME user (a manual
+        # click landing while that user's scheduled search runs). Searches for
+        # DIFFERENT users are never blocked by each other here.
+        self._user_search_locks: dict[str | None, asyncio.Lock] = {}
+        # The scraper drives a single shared Playwright page, so actual browser
+        # work (auth + scrape) must be serialized. This lock does that fairly
+        # (asyncio.Lock is FIFO): a manual search queues for the browser between
+        # scheduled users instead of being dropped or stuck behind the whole
+        # cycle.
+        self._browser_lock = asyncio.Lock()
 
     @property
     def search_in_progress(self) -> bool:
-        """True if a search is currently holding the lock."""
-        return self._search_lock.locked()
+        """True if any user's search is actively executing.
+
+        Global across all users — used by admin views. For the per-user
+        spinner use :meth:`search_in_progress_for` instead.
+        """
+        return bool(self._in_progress_users)
+
+    def search_in_progress_for(self, user_id: str) -> bool:
+        """True if a search is actively executing for this specific user."""
+        return user_id in self._in_progress_users
+
+    def _user_lock(self, user_id: str | None) -> asyncio.Lock:
+        """Return (creating if needed) the dedupe lock for one user."""
+        lock = self._user_search_locks.get(user_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._user_search_locks[user_id] = lock
+        return lock
 
     async def run_search(self, user_id: str | None = None) -> int:
         """Execute one search cycle: authenticate, scrape, enqueue.
@@ -121,18 +150,13 @@ class LinkedInSearchScheduler(IntervalScheduler):
         Returns the number of jobs enqueued. Never raises — all exceptions
         are caught and logged so the scheduler keeps running.
 
-        The locked() pre-check is a fast-path optimisation: if a search is
-        already running we skip immediately instead of queuing behind the lock.
-        A narrow race exists where two callers both see locked()==False and
-        then one waits on the lock, but the outcome is correct (second search
-        runs after the first finishes rather than being skipped).
+        Concurrency is now per-user, not global: a manual search for one user
+        is not dropped just because another user's scheduled search is mid
+        cycle. Deduping (skip a duplicate search for the *same* user) and
+        serialization of the shared browser happen inside
+        :meth:`_search_for_user`.
         """
-        if self._search_lock.locked():
-            logger.warning("Search already in progress, skipping")
-            return 0
-
-        async with self._search_lock:
-            return await self._do_search(user_id=user_id)
+        return await self._do_search(user_id=user_id)
 
     async def _do_search(self, user_id: str | None = None) -> int:
         """Internal search implementation.
@@ -203,111 +227,14 @@ class LinkedInSearchScheduler(IntervalScheduler):
                 )
                 return 0
 
-            # Scraping uses LinkedIn's public Jobs Search page which serves
-            # results without auth — skip /feed validation so we don't trip
-            # anti-bot detection. Cookies are still loaded in case they help
-            # widen results, but they're treated as best-effort.
-            try:
-                await self.scraper.browser.ensure_authenticated(validate_session=False)
-            except Exception as exc:
-                logger.exception("LinkedIn authentication failed")
-                now = datetime.now(tz=timezone.utc)
-                for plan_user_id, _ in search_plans:
-                    self._record_run(
-                        user_id=plan_user_id,
-                        time=now,
-                        jobs_found=0,
-                        reason="auth_failed",
-                        search_url=None,
-                        message=str(exc),
-                    )
-                self._last_run_time = now
-                self._last_run_jobs = 0
-                return 0
-
+            # Run each user's search. Different users are independent — one
+            # user's browser turn or failure does not block or drop another's.
+            # Each ``_search_for_user`` serializes its own browser access via
+            # ``_browser_lock`` (single shared Playwright page) and dedupes a
+            # concurrent duplicate for the same user.
             total_enqueued = 0
-
             for plan_user_id, params in search_plans:
-                # Reset scraper dedup state before each user's search so that
-                # the same LinkedIn posting can be found independently by
-                # different users (the within-user pagination dedup is rebuilt
-                # fresh each time).
-                self.scraper.reset_seen()
-
-                search_url = LinkedInSearchURLBuilder.build_url(params)
-
-                try:
-                    jobs = await self.scraper.scrape_and_enrich(params)
-                    logger.info(
-                        "Scraped %d jobs for user=%s", len(jobs), plan_user_id or "global"
-                    )
-
-                    if self.admin_alert_service is not None and jobs:
-                        empty = sum(
-                            1 for j in jobs if not (j.description or "").strip()
-                        )
-                        try:
-                            await self.admin_alert_service.maybe_alert_unauthenticated_session(
-                                total_jobs=len(jobs),
-                                empty_descriptions=empty,
-                                user_id=plan_user_id,
-                                search_url=search_url,
-                            )
-                        except Exception:
-                            logger.exception("Admin alert dispatch failed")
-
-                    # Auto-record scraped jobs to fixture file
-                    fixture_path = getattr(self.settings, "scraped_jobs_path", None)
-                    if jobs and isinstance(fixture_path, str):
-                        try:
-                            from .job_fixtures import save_scraped_jobs
-                            save_scraped_jobs(jobs, fixture_path)
-                        except Exception:
-                            logger.warning(
-                                "Failed to save scraped jobs to fixture file",
-                                exc_info=True,
-                            )
-
-                    # Persist a QUEUED row per discovered job before enqueueing
-                    # so the work is durable across restarts and visible in
-                    # the UI immediately. Deduped jobs that are already in a
-                    # terminal/in-progress state are not re-enqueued.
-                    enqueued, deduped = await self._persist_and_enqueue(
-                        jobs, plan_user_id,
-                    )
-                    logger.info(
-                        "jobs_discovered total=%d enqueued=%d deduped=%d "
-                        "user=%s queue_size=%d",
-                        len(jobs),
-                        enqueued,
-                        deduped,
-                        plan_user_id or "global",
-                        self.queue.size(),
-                    )
-                    total_enqueued += enqueued
-
-                    self._record_run(
-                        user_id=plan_user_id,
-                        time=datetime.now(tz=timezone.utc),
-                        jobs_found=len(jobs),
-                        reason="ok" if jobs else "no_results",
-                        search_url=search_url,
-                        enqueued=enqueued,
-                        deduped=deduped,
-                    )
-                except Exception as exc:
-                    logger.exception(
-                        "Search failed for user=%s, continuing to next",
-                        plan_user_id or "global",
-                    )
-                    self._record_run(
-                        user_id=plan_user_id,
-                        time=datetime.now(tz=timezone.utc),
-                        jobs_found=0,
-                        reason="scrape_failed",
-                        search_url=search_url,
-                        message=str(exc),
-                    )
+                total_enqueued += await self._search_for_user(plan_user_id, params)
 
             self._last_run_time = datetime.now(tz=timezone.utc)
             self._last_run_jobs = total_enqueued
@@ -318,6 +245,150 @@ class LinkedInSearchScheduler(IntervalScheduler):
             self._last_run_time = datetime.now(tz=timezone.utc)
             self._last_run_jobs = 0
             return 0
+
+    async def _search_for_user(
+        self, plan_user_id: str | None, params: LinkedInSearchParams
+    ) -> int:
+        """Run one user's search end-to-end. Never raises; returns enqueued.
+
+        Dedupes duplicate concurrent searches for the same user, marks that
+        user in-progress for the per-user status, and serializes the shared
+        browser via ``_browser_lock`` so overlapping searches never drive one
+        Playwright page from two coroutines.
+        """
+        lock = self._user_lock(plan_user_id)
+        if lock.locked():
+            logger.info(
+                "Search already in progress for user=%s, skipping duplicate",
+                plan_user_id or "global",
+            )
+            return 0
+
+        async with lock:
+            if plan_user_id is not None:
+                self._in_progress_users.add(plan_user_id)
+            try:
+                return await self._run_user_plan(plan_user_id, params)
+            finally:
+                if plan_user_id is not None:
+                    self._in_progress_users.discard(plan_user_id)
+
+    async def _run_user_plan(
+        self, plan_user_id: str | None, params: LinkedInSearchParams
+    ) -> int:
+        """Authenticate + scrape (browser-locked) then persist/enqueue."""
+        search_url = LinkedInSearchURLBuilder.build_url(params)
+
+        # Serialize all shared-browser work. DB/queue work below runs outside
+        # the lock so a slow persist for one user doesn't hold the browser from
+        # the next waiter.
+        async with self._browser_lock:
+            # Reset scraper dedup state before each user's search so the same
+            # LinkedIn posting can be found independently by different users.
+            self.scraper.reset_seen()
+
+            # Scraping uses LinkedIn's public Jobs Search page which serves
+            # results without auth — skip /feed validation so we don't trip
+            # anti-bot detection. Cookies are still loaded in case they help
+            # widen results, but they're treated as best-effort.
+            try:
+                await self.scraper.browser.ensure_authenticated(validate_session=False)
+            except Exception as exc:
+                logger.exception("LinkedIn authentication failed")
+                self._record_run(
+                    user_id=plan_user_id,
+                    time=datetime.now(tz=timezone.utc),
+                    jobs_found=0,
+                    reason="auth_failed",
+                    search_url=None,
+                    message=str(exc),
+                )
+                return 0
+
+            try:
+                jobs = await self.scraper.scrape_and_enrich(params)
+            except Exception as exc:
+                logger.exception(
+                    "Search failed for user=%s", plan_user_id or "global"
+                )
+                self._record_run(
+                    user_id=plan_user_id,
+                    time=datetime.now(tz=timezone.utc),
+                    jobs_found=0,
+                    reason="scrape_failed",
+                    search_url=search_url,
+                    message=str(exc),
+                )
+                return 0
+
+        # --- browser lock released; the rest is DB/queue-bound ---
+        logger.info(
+            "Scraped %d jobs for user=%s", len(jobs), plan_user_id or "global"
+        )
+
+        if self.admin_alert_service is not None and jobs:
+            empty = sum(1 for j in jobs if not (j.description or "").strip())
+            try:
+                await self.admin_alert_service.maybe_alert_unauthenticated_session(
+                    total_jobs=len(jobs),
+                    empty_descriptions=empty,
+                    user_id=plan_user_id,
+                    search_url=search_url,
+                )
+            except Exception:
+                logger.exception("Admin alert dispatch failed")
+
+        # Auto-record scraped jobs to fixture file
+        fixture_path = getattr(self.settings, "scraped_jobs_path", None)
+        if jobs and isinstance(fixture_path, str):
+            try:
+                from .job_fixtures import save_scraped_jobs
+                save_scraped_jobs(jobs, fixture_path)
+            except Exception:
+                logger.warning(
+                    "Failed to save scraped jobs to fixture file",
+                    exc_info=True,
+                )
+
+        try:
+            # Persist a QUEUED row per discovered job before enqueueing so the
+            # work is durable across restarts and visible in the UI
+            # immediately. Deduped jobs already in a terminal/in-progress state
+            # are not re-enqueued.
+            enqueued, deduped = await self._persist_and_enqueue(jobs, plan_user_id)
+        except Exception as exc:
+            logger.exception(
+                "Persist/enqueue failed for user=%s", plan_user_id or "global"
+            )
+            self._record_run(
+                user_id=plan_user_id,
+                time=datetime.now(tz=timezone.utc),
+                jobs_found=len(jobs),
+                reason="scrape_failed",
+                search_url=search_url,
+                message=str(exc),
+            )
+            return 0
+
+        logger.info(
+            "jobs_discovered total=%d enqueued=%d deduped=%d "
+            "user=%s queue_size=%d",
+            len(jobs),
+            enqueued,
+            deduped,
+            plan_user_id or "global",
+            self.queue.size(),
+        )
+        self._record_run(
+            user_id=plan_user_id,
+            time=datetime.now(tz=timezone.utc),
+            jobs_found=len(jobs),
+            reason="ok" if jobs else "no_results",
+            search_url=search_url,
+            enqueued=enqueued,
+            deduped=deduped,
+        )
+        return enqueued
 
     async def _persist_and_enqueue(
         self, jobs: list, plan_user_id: str | None
