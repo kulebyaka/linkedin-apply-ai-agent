@@ -2,12 +2,14 @@
 
 from src.api.main import app
 
+from ._route_helpers import collect_route_paths
+
 
 class TestLegacyEndpointsRemoved:
     """Legacy /api/cv/* endpoints should no longer be registered."""
 
     def _get_routes(self) -> set[str]:
-        return {route.path for route in app.routes}
+        return collect_route_paths(app.routes)
 
     def test_cv_generate_removed(self):
         assert "/api/cv/generate" not in self._get_routes()

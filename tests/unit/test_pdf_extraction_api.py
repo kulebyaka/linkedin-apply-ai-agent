@@ -14,6 +14,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
 
 from src.api.main import app, get_current_user
+
+from ._route_helpers import collect_route_paths
 from src.models.user import ModelChoice, User, UserModelPreferences
 from src.services.cv.pdf_extraction import CVExtractionRegistry
 
@@ -304,6 +306,6 @@ class TestGetExtractionStatus:
 
 class TestRouteRegistration:
     def test_routes_registered(self):
-        paths = {route.path for route in app.routes}
+        paths = collect_route_paths(app.routes)
         assert "/api/users/me/master-cv/extract" in paths
         assert "/api/users/me/master-cv/extract/{extraction_id}" in paths
