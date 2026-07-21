@@ -85,15 +85,67 @@ def test_parser_drops_dated_snapshot_when_alias_present(litellm_data):
 
 def test_parser_noise_and_provider_filters(litellm_data):
     ids = {e.model for e in parse_litellm_json(litellm_data)}
-    assert "text-embedding-3-small" not in ids       # mode=embedding
-    assert "gpt-4o-transcribe" not in ids             # mode=audio_transcription
-    assert "gpt-4o-realtime-preview" not in ids       # mode=chat but 'realtime'
-    assert "mistral-large-latest" not in ids          # excluded provider
+    assert "text-embedding-3-small" not in ids  # mode=embedding
+    assert "gpt-4o-transcribe" not in ids  # mode=audio_transcription
+    assert "gpt-4o-realtime-preview" not in ids  # mode=chat but 'realtime'
+    assert "mistral-large-latest" not in ids  # excluded provider
 
 
 def test_parser_dedups_prefixed_and_bare_duplicates(litellm_data):
     entries = [e for e in parse_litellm_json(litellm_data) if e.model == "deepseek-chat"]
     assert len(entries) == 1  # deepseek-chat + deepseek/deepseek-chat collapse
+
+
+def test_parser_drops_finetuned_models(litellm_data):
+    ids = {e.model for e in parse_litellm_json(litellm_data, now=NOW)}
+    assert not any(m.startswith("ft:") for m in ids)
+
+
+def test_parser_drops_preview_variants(litellm_data):
+    ids = {e.model for e in parse_litellm_json(litellm_data, now=NOW)}
+    assert "gpt-4.5-preview" not in ids
+
+
+def test_parser_drops_legacy_small_context_models(litellm_data):
+    ids = {e.model for e in parse_litellm_json(litellm_data, now=NOW)}
+    assert "gpt-4" not in ids  # 8k context < 32k floor
+
+
+def test_parser_drops_deprecated_models(litellm_data):
+    ids = {e.model for e in parse_litellm_json(litellm_data, now=NOW)}
+    assert "gpt-4-0613" not in ids  # deprecation_date 2025-06-06 < NOW
+
+
+def test_parser_collapses_dash_dated_snapshot_to_alias(litellm_data):
+    ids = {e.model for e in parse_litellm_json(litellm_data, now=NOW)}
+    # gpt-4o (alias) kept, gpt-4o-2024-05-13 (dash-dated snapshot) collapsed away
+    assert "gpt-4o" in ids
+    assert "gpt-4o-2024-05-13" not in ids
+
+
+def test_parser_keeps_newest_orphan_snapshot(litellm_data):
+    # grok-2-1212 has no bare "grok-2" alias -> kept as newest orphan snapshot
+    ids = {e.model for e in parse_litellm_json(litellm_data, now=NOW)}
+    assert "grok-2-1212" in ids
+
+
+def test_parser_deprecation_cut_respects_now():
+    # A snapshot whose deprecation_date is in the future survives; the same
+    # date in the past is dropped.
+    data = {
+        "gpt-x": {
+            "litellm_provider": "openai",
+            "mode": "chat",
+            "input_cost_per_token": 1e-06,
+            "output_cost_per_token": 2e-06,
+            "max_input_tokens": 128000,
+            "deprecation_date": "2026-12-31",
+        }
+    }
+    before = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    after = datetime(2027, 1, 1, tzinfo=timezone.utc)
+    assert {e.model for e in parse_litellm_json(data, now=before)} == {"gpt-x"}
+    assert {e.model for e in parse_litellm_json(data, now=after)} == set()
 
 
 # ---------------------------------------------------------------------------
@@ -207,9 +259,7 @@ async def test_load_refetches_when_cache_stale(tmp_path, monkeypatch):
         return fresh
 
     monkeypatch.setattr(pricing_source, "fetch_catalog", fake_fetch)
-    result = await load_catalog(
-        cache_path=path, ttl_hours=24, now=NOW + timedelta(hours=25)
-    )
+    result = await load_catalog(cache_path=path, ttl_hours=24, now=NOW + timedelta(hours=25))
     assert [e.model for e in result] == ["claude-opus-4-8"]
     # fresh result was written back to cache
     assert [e.model for e in read_cache(path).entries] == ["claude-opus-4-8"]
@@ -224,9 +274,7 @@ async def test_load_falls_back_to_stale_cache_on_fetch_failure(tmp_path, monkeyp
         raise httpx.ConnectError("offline")
 
     monkeypatch.setattr(pricing_source, "fetch_catalog", failing_fetch)
-    result = await load_catalog(
-        cache_path=path, ttl_hours=24, now=NOW + timedelta(hours=25)
-    )
+    result = await load_catalog(cache_path=path, ttl_hours=24, now=NOW + timedelta(hours=25))
     assert [e.model for e in result] == ["gpt-4o"]  # stale cache
 
 
