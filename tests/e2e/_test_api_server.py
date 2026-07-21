@@ -122,6 +122,12 @@ def main():
         cors_origins=[],  # Empty — we'll override CORS with regex below
         cv_composer_hallucination_policy="disabled",
         jwt_secret="test-secret-for-e2e-tests-extended",
+        # Dummy keys so /api/llm/models exposes exactly these two providers
+        # (the provider list is filtered to those with a configured key).
+        openai_api_key="test-openai-key",
+        anthropic_api_key="test-anthropic-key",
+        # Use the static MODEL_CATALOG (no network fetch) for deterministic tests.
+        model_catalog_dynamic_enabled=False,
     )
     _settings_mod.get_settings = lambda: _test_settings
 

@@ -1,153 +1,123 @@
-"""E2E tests for LLM provider and model dropdowns.
+"""E2E tests for the shared LLM provider + model selector on /generate.
 
-Tests verify that:
-1. Default values are correctly set (OpenAI / gpt-4.1-nano)
-2. Provider dropdown contains expected options
-3. Model dropdown updates when provider changes
-4. Anthropic provider shows only Claude models
-5. OpenAI provider shows only GPT models
+The selector (`ModelSelector.svelte`) is catalog-driven: the provider list comes
+from `/api/llm/models`, filtered server-side to providers that have an API key
+configured. The e2e API server (see `_test_api_server.py`) configures dummy
+OpenAI + Anthropic keys and uses the static catalog, so the expected options are
+derived from the API response rather than hardcoded here.
 
-Run with: pytest tests/e2e/test_llm_dropdowns.py -v
-Set UI_URL env var to override default: UI_URL=http://localhost:5178 pytest ...
+Run with: pytest tests/e2e/test_llm_dropdowns.py -v -m e2e
 """
 
-import os
-
+import httpx
 import pytest
-from playwright.sync_api import Page, sync_playwright
+from playwright.sync_api import Page
 
-# Expected dropdown options
-EXPECTED_PROVIDERS = ["openai", "anthropic"]
-EXPECTED_OPENAI_MODELS = ["gpt-5-mini", "gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo"]
-EXPECTED_ANTHROPIC_MODELS = ["claude-haiku-4.5"]
+pytestmark = pytest.mark.e2e
 
-DEFAULT_PROVIDER = "openai"
-DEFAULT_MODEL = "gpt-4o-mini"
-
-UI_URL = os.environ.get("UI_URL", "http://localhost:5173")
+PROVIDER_SELECT = "#llm-provider-select"
+MODEL_SELECT = "#llm-model-select"
 
 
-@pytest.fixture(scope="module")
-def browser():
-    """Launch browser for test session."""
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        yield browser
-        browser.close()
+def _options(page: Page, selector: str) -> list[str]:
+    """All option values of a <select>."""
+    return page.eval_on_selector(selector, "el => Array.from(el.options).map(o => o.value)")
 
 
-@pytest.fixture
-def page(browser):
-    """Create new page for each test."""
-    page = browser.new_page()
-    yield page
-    page.close()
-
-
-def get_select_options(page: Page, selector: str) -> list[str]:
-    """Extract all option values from a select element."""
-    return page.eval_on_selector(
-        selector,
-        "el => Array.from(el.options).map(o => o.value)"
-    )
-
-
-def get_selected_value(page: Page, selector: str) -> str:
-    """Get currently selected value from a select element."""
+def _selected(page: Page, selector: str) -> str:
+    """Currently selected value of a <select>."""
     return page.eval_on_selector(selector, "el => el.value")
 
 
+def _catalog(api_url: str) -> dict:
+    """Fetch the cv_generation catalog the /generate form uses."""
+    resp = httpx.get(
+        f"{api_url}/api/llm/models",
+        params={"operation": "cv_generation"},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _goto_form(page: Page, ui_url: str) -> None:
+    """Open the CV generator and wait for the provider dropdown to render."""
+    page.goto(f"{ui_url}/generate")
+    page.wait_for_selector(PROVIDER_SELECT, timeout=15000)
+    page.wait_for_load_state("networkidle")
+
+
 class TestLLMDropdowns:
-    """Test suite for LLM provider and model dropdown functionality."""
+    """The provider/model selector is decoupled into two catalog-driven dropdowns."""
 
-    def test_default_provider_is_openai(self, page: Page):
-        """Verify default provider is OpenAI."""
-        page.goto(UI_URL)
-        page.wait_for_load_state("networkidle")
+    def test_providers_match_configured_keys(
+        self, ui_dev_server: str, mock_llm_and_api_server: str, page: Page
+    ):
+        """Provider dropdown shows exactly the providers with a configured key."""
+        _goto_form(page, ui_dev_server)
 
-        selected = get_selected_value(page, "#llm-provider-select")
-        assert selected == DEFAULT_PROVIDER, f"Expected default provider '{DEFAULT_PROVIDER}', got '{selected}'"
+        catalog = _catalog(mock_llm_and_api_server)
+        expected = sorted({m["provider"] for m in catalog["models"]})
 
-    def test_default_model_is_gpt_4_1_nano(self, page: Page):
-        """Verify default model is gpt-4.1-nano."""
-        page.goto(UI_URL)
-        page.wait_for_load_state("networkidle")
+        assert sorted(_options(page, PROVIDER_SELECT)) == expected
+        # The e2e server configures OpenAI + Anthropic keys only.
+        assert expected == ["anthropic", "openai"]
 
-        selected = get_selected_value(page, "#llm-model-select")
-        assert selected == DEFAULT_MODEL, f"Expected default model '{DEFAULT_MODEL}', got '{selected}'"
+    def test_default_selection_matches_api_default(
+        self, ui_dev_server: str, mock_llm_and_api_server: str, page: Page
+    ):
+        """Initial provider/model match the catalog's server-provided default."""
+        _goto_form(page, ui_dev_server)
 
-    def test_provider_dropdown_has_expected_options(self, page: Page):
-        """Verify provider dropdown contains OpenAI and Anthropic."""
-        page.goto(UI_URL)
-        page.wait_for_load_state("networkidle")
+        default = _catalog(mock_llm_and_api_server)["default"]
+        assert _selected(page, PROVIDER_SELECT) == default["provider"]
+        assert _selected(page, MODEL_SELECT) == default["model"]
 
-        options = get_select_options(page, "#llm-provider-select")
-        assert set(options) == set(EXPECTED_PROVIDERS), f"Expected providers {EXPECTED_PROVIDERS}, got {options}"
+    def test_model_options_belong_to_selected_provider(
+        self, ui_dev_server: str, mock_llm_and_api_server: str, page: Page
+    ):
+        """Switching provider updates the model list to that provider's models."""
+        _goto_form(page, ui_dev_server)
 
-    def test_openai_models_shown_by_default(self, page: Page):
-        """Verify OpenAI models are shown when OpenAI is selected."""
-        page.goto(UI_URL)
-        page.wait_for_load_state("networkidle")
+        catalog = _catalog(mock_llm_and_api_server)
+        by_provider: dict[str, list[str]] = {}
+        for m in catalog["models"]:
+            by_provider.setdefault(m["provider"], []).append(m["model"])
 
-        options = get_select_options(page, "#llm-model-select")
-        assert set(options) == set(EXPECTED_OPENAI_MODELS), f"Expected OpenAI models {EXPECTED_OPENAI_MODELS}, got {options}"
+        for provider, models in by_provider.items():
+            page.select_option(PROVIDER_SELECT, provider)
+            page.wait_for_timeout(300)  # reactive model reset
 
-    def test_switching_to_anthropic_shows_claude_models(self, page: Page):
-        """Verify switching to Anthropic updates model dropdown to Claude models."""
-        page.goto(UI_URL)
-        page.wait_for_load_state("networkidle")
+            options = _options(page, MODEL_SELECT)
+            assert set(options) == set(models), (
+                f"Provider {provider}: expected {models}, got {options}"
+            )
+            # The auto-selected model belongs to the chosen provider.
+            assert _selected(page, MODEL_SELECT) in models
 
-        # Switch to Anthropic
-        page.select_option("#llm-provider-select", "anthropic")
-        page.wait_for_timeout(300)  # Wait for reactive update
+    def test_model_selection_persists_within_provider(
+        self, ui_dev_server: str, mock_llm_and_api_server: str, page: Page
+    ):
+        """Picking a non-default model of the same provider sticks."""
+        _goto_form(page, ui_dev_server)
 
-        # Verify model dropdown updated
-        options = get_select_options(page, "#llm-model-select")
-        assert set(options) == set(EXPECTED_ANTHROPIC_MODELS), f"Expected Anthropic models {EXPECTED_ANTHROPIC_MODELS}, got {options}"
+        catalog = _catalog(mock_llm_and_api_server)
+        provider = _selected(page, PROVIDER_SELECT)
+        models = [m["model"] for m in catalog["models"] if m["provider"] == provider]
+        assert len(models) >= 2, "Need >=2 models for this provider to test persistence"
 
-        # Verify selected model is Claude
-        selected = get_selected_value(page, "#llm-model-select")
-        assert selected == "claude-haiku-4.5", f"Expected selected model 'claude-haiku-4.5', got '{selected}'"
-
-    def test_switching_back_to_openai_restores_gpt_models(self, page: Page):
-        """Verify switching back to OpenAI restores GPT models."""
-        page.goto(UI_URL)
-        page.wait_for_load_state("networkidle")
-
-        # Switch to Anthropic then back to OpenAI
-        page.select_option("#llm-provider-select", "anthropic")
-        page.wait_for_timeout(300)
-        page.select_option("#llm-provider-select", "openai")
-        page.wait_for_timeout(300)
-
-        # Verify model dropdown shows OpenAI models
-        options = get_select_options(page, "#llm-model-select")
-        assert set(options) == set(EXPECTED_OPENAI_MODELS), f"Expected OpenAI models {EXPECTED_OPENAI_MODELS}, got {options}"
-
-    def test_model_selection_persists_within_provider(self, page: Page):
-        """Verify selecting a different model persists until provider changes."""
-        page.goto(UI_URL)
-        page.wait_for_load_state("networkidle")
-
-        # Select gpt-4o
-        page.select_option("#llm-model-select", "gpt-4o")
+        target = next(m for m in models if m != _selected(page, MODEL_SELECT))
+        page.select_option(MODEL_SELECT, target)
         page.wait_for_timeout(100)
 
-        # Verify selection persisted
-        selected = get_selected_value(page, "#llm-model-select")
-        assert selected == "gpt-4o", f"Expected selected model 'gpt-4o', got '{selected}'"
+        assert _selected(page, MODEL_SELECT) == target
 
-    def test_dropdowns_are_disabled_during_loading(self, page: Page):
-        """Verify dropdowns are disabled when form is submitting."""
-        page.goto(UI_URL)
-        page.wait_for_load_state("networkidle")
+    def test_dropdowns_enabled_initially(self, ui_dev_server: str, page: Page):
+        """Both dropdowns are interactive before submission."""
+        _goto_form(page, ui_dev_server)
 
-        # Initially dropdowns should be enabled
-        provider_disabled = page.eval_on_selector("#llm-provider-select", "el => el.disabled")
-        model_disabled = page.eval_on_selector("#llm-model-select", "el => el.disabled")
-
-        assert not provider_disabled, "Provider dropdown should be enabled initially"
-        assert not model_disabled, "Model dropdown should be enabled initially"
+        assert not page.eval_on_selector(PROVIDER_SELECT, "el => el.disabled")
+        assert not page.eval_on_selector(MODEL_SELECT, "el => el.disabled")
 
 
 if __name__ == "__main__":
