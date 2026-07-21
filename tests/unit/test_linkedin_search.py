@@ -6,6 +6,7 @@ from src.services.linkedin.linkedin_search import (
     LINKEDIN_JOBS_SEARCH_BASE,
     LinkedInSearchParams,
     LinkedInSearchURLBuilder,
+    normalize_keywords,
 )
 
 
@@ -45,6 +46,64 @@ class TestLinkedInSearchParams:
         assert params.remote_filter == "remote"
         assert params.experience_level == ["mid-senior", "director"]
         assert params.max_jobs == 25
+
+
+class TestNormalizeKeywords:
+    """Test comma-list -> LinkedIn boolean-OR translation."""
+
+    def test_comma_list_becomes_or_with_quoted_phrases(self):
+        result = normalize_keywords(
+            "Junior Accountant, Finance Assistant, Billing Specialist"
+        )
+        assert result == (
+            '"Junior Accountant" OR "Finance Assistant" OR "Billing Specialist"'
+        )
+
+    def test_single_word_terms_are_not_quoted(self):
+        assert normalize_keywords("python, java, rust") == "python OR java OR rust"
+
+    def test_mixed_single_and_multiword(self):
+        assert normalize_keywords("AP, Accounts Payable") == 'AP OR "Accounts Payable"'
+
+    def test_single_term_without_comma_is_unchanged(self):
+        assert normalize_keywords("Junior Accountant") == "Junior Accountant"
+        assert normalize_keywords("python") == "python"
+
+    def test_existing_boolean_query_is_untouched(self):
+        q = '"Junior Accountant" OR "Finance Assistant"'
+        assert normalize_keywords(q) == q
+
+    def test_boolean_operators_without_quotes_untouched(self):
+        assert normalize_keywords("python AND django") == "python AND django"
+        assert normalize_keywords("java NOT scala") == "java NOT scala"
+
+    def test_parentheses_untouched(self):
+        q = "(accountant OR analyst) AND finance"
+        assert normalize_keywords(q) == q
+
+    def test_lowercase_or_between_words_is_not_treated_as_operator(self):
+        # No comma, no uppercase operator -> passed through verbatim.
+        assert normalize_keywords("sales or marketing") == "sales or marketing"
+
+    def test_whitespace_and_empty_segments_are_trimmed(self):
+        assert normalize_keywords("  a ,  , b  ,") == "a OR b"
+
+    def test_duplicate_terms_are_deduped_case_insensitively(self):
+        assert (
+            normalize_keywords("Accountant, accountant, ACCOUNTANT")
+            == "Accountant"
+        )
+
+    def test_empty_and_whitespace_only(self):
+        assert normalize_keywords("") == ""
+        assert normalize_keywords("   ") == ""
+
+    def test_build_url_applies_normalization(self):
+        params = LinkedInSearchParams(keywords="Junior Accountant, Finance Assistant")
+        url = LinkedInSearchURLBuilder.build_url(params)
+        # parse_qs decodes the percent-encoding back to the raw boolean string.
+        keywords = _parse_url(url)["keywords"][0]
+        assert keywords == '"Junior Accountant" OR "Finance Assistant"'
 
 
 class TestLinkedInSearchURLBuilder:
