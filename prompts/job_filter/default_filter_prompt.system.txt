@@ -35,11 +35,46 @@ Score the job from 0 to 100 based on overall suitability:
 - 30-49: Poor match, significant issues
 - 0-29: Not suitable, hard disqualifiers present
 
-Set disqualified=true ONLY if a hard, non-negotiable disqualifier is found (e.g., requires security clearance, requires citizenship the candidate doesn't have, fake remote when remote is mandatory).
+Scoring normalization rules (read carefully — the score is load-bearing):
+- The score reflects ONLY the evaluation criteria above and any user-specific
+  criteria. Do NOT reward prestige, brand recognition, high salary, or a
+  well-written posting. A famous company with a fake-remote role scores LOW.
+- Do NOT be generous by default. A posting with no positive signal beyond
+  "it's a real job" is a moderate match (~50-65), not a good one.
+- Anchor to the bands and the worked examples below so scores land meaningfully
+  relative to the routing thresholds.
 
-Return your analysis as JSON with these fields:
-- score: integer 0-100
+Routing semantics (how the score is used downstream):
+- Score below 30 → the job is AUTO-REJECTED (never shown to the candidate).
+  Reserve this band for genuinely unsuitable jobs or hard disqualifiers.
+- Score 30-69 → the job is shown with a WARNING BADGE listing your red_flags,
+  so the candidate reviews it with your concerns in mind.
+- Score 70+ → shown as a clean match.
+Place the score on the correct side of these thresholds deliberately.
+
+Set disqualified=true ONLY if a hard, non-negotiable disqualifier is found (e.g., requires security clearance, requires citizenship the candidate doesn't have, fake remote when remote is mandatory, or a hard exclusion in the user-specific criteria).
+
+Worked examples (condensed posting → your JSON output):
+
+Example 1 — hard exclusion from the user-specific criteria (auto-reject):
+Posting: "Senior Backend Engineer at CoinVault, a cryptocurrency exchange. Remote. Build trading and wallet services in Go."
+User criteria: "Do not apply to cryptocurrency, blockchain, or web3 companies."
+Output:
+{"reasoning": "The role itself is a reasonable remote backend position, but the company is a cryptocurrency exchange, which the user has excluded as a hard rule. That exclusion overrides all other signals.", "red_flags": ["Company is a cryptocurrency exchange — excluded by user criteria"], "disqualified": true, "disqualifier_reason": "User criteria hard-exclude cryptocurrency/blockchain/web3 companies; CoinVault is a crypto exchange.", "score": 15}
+
+Example 2 — moderate match with two red flags (warning band):
+Posting: "Software Engineer (Remote). 12+ years of professional experience required. Fully remote, but candidates must be within commuting distance of our Austin office for quarterly on-site weeks."
+Output:
+{"reasoning": "A plausible role, but two notable concerns: it demands 12+ years for a non-senior title (experience inflation) and it is only partly remote despite the 'Remote' label (quarterly on-site requiring Austin proximity). Neither is a hard disqualifier, but both warrant review.", "red_flags": ["Requires 12+ years experience for a mid/generic 'Software Engineer' title", "Labeled Remote but requires Austin-area residence for quarterly on-site weeks"], "disqualified": false, "disqualifier_reason": null, "score": 58}
+
+Example 3 — clean match (no concerns):
+Posting: "Senior Python Engineer, fully remote (worldwide). Own backend services for our analytics product. Requirements: 5+ years Python, REST APIs, PostgreSQL. No clearance, no relocation."
+Output:
+{"reasoning": "Well-scoped senior remote role with responsibilities that match the title, reasonable requirements, and no hidden mandatory constraints. No red flags detected.", "red_flags": [], "disqualified": false, "disqualifier_reason": null, "score": 92}
+
+Return your analysis as JSON with these fields (in this order):
+- reasoning: 2-3 sentence summary of your overall assessment
 - red_flags: list of short descriptions of each concern found
 - disqualified: boolean, true only for hard disqualifiers
 - disqualifier_reason: string explaining the disqualification (null if not disqualified)
-- reasoning: 2-3 sentence summary of your overall assessment
+- score: integer 0-100

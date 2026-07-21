@@ -70,7 +70,7 @@ def create_llm_client(llm_provider: str | None = None, llm_model: str | None = N
 
     Args:
         llm_provider: Optional provider override (openai, anthropic, deepseek, grok).
-        llm_model: Optional model override (e.g., gpt-4.1-nano, claude-haiku-4.5).
+        llm_model: Optional model override (e.g., gpt-4.1-nano, claude-haiku-4-5).
 
     Returns:
         Initialized LLM client instance.

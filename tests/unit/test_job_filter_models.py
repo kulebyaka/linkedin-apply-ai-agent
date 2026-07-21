@@ -14,6 +14,21 @@ from src.models.state_machine import (
 class TestFilterResult:
     """Test FilterResult model validation."""
 
+    def test_schema_property_order_is_reasoning_before_score(self):
+        """JSON-schema property order must place evidence before the verdict.
+
+        Generation follows schema order under strict/structured modes, so the
+        model must commit to reasoning/flags/disqualification before the score.
+        """
+        props = list(FilterResult.model_json_schema()["properties"].keys())
+        assert props == [
+            "reasoning",
+            "red_flags",
+            "disqualified",
+            "disqualifier_reason",
+            "score",
+        ]
+
     def test_valid_result(self):
         result = FilterResult(
             score=75,

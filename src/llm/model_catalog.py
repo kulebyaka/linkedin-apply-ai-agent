@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from .provider import LLMProvider
 
-PRICING_SNAPSHOT_DATE = "2026-04-18"
+PRICING_SNAPSHOT_DATE = "2026-07-04"
 
 Operation = Literal["cv_generation", "job_filtering", "filter_prompt_generation"]
 
@@ -94,8 +94,8 @@ MODEL_CATALOG: list[ModelCatalogEntry] = [
     # Anthropic
     ModelCatalogEntry(
         provider=LLMProvider.ANTHROPIC,
-        model="claude-opus-4.6",
-        display_name="Claude Opus 4.6",
+        model="claude-opus-4-8",
+        display_name="Claude Opus 4.8",
         input_cost_per_1m=5.00,
         output_cost_per_1m=25.00,
         supports_strict_schema=True,
@@ -103,7 +103,16 @@ MODEL_CATALOG: list[ModelCatalogEntry] = [
     ),
     ModelCatalogEntry(
         provider=LLMProvider.ANTHROPIC,
-        model="claude-sonnet-4.6",
+        model="claude-sonnet-5",
+        display_name="Claude Sonnet 5",
+        input_cost_per_1m=3.00,
+        output_cost_per_1m=15.00,
+        supports_strict_schema=True,
+        supports_json_object=True,
+    ),
+    ModelCatalogEntry(
+        provider=LLMProvider.ANTHROPIC,
+        model="claude-sonnet-4-6",
         display_name="Claude Sonnet 4.6",
         input_cost_per_1m=3.00,
         output_cost_per_1m=15.00,
@@ -112,7 +121,7 @@ MODEL_CATALOG: list[ModelCatalogEntry] = [
     ),
     ModelCatalogEntry(
         provider=LLMProvider.ANTHROPIC,
-        model="claude-haiku-4.5",
+        model="claude-haiku-4-5",
         display_name="Claude Haiku 4.5",
         input_cost_per_1m=1.00,
         output_cost_per_1m=5.00,
@@ -180,23 +189,30 @@ def build_label(entry: ModelCatalogEntry) -> str:
     )
 
 
-def get_catalog_for_operation(operation: Operation | None = None) -> list[ModelCatalogEntry]:
+def get_catalog_for_operation(
+    operation: Operation | None = None,
+    catalog: list[ModelCatalogEntry] | None = None,
+) -> list[ModelCatalogEntry]:
     """Return models suitable for the given operation, sorted by output
     cost descending (expensive → cheap).
 
     - cv_generation, job_filtering: require strict schema OR json_object support.
     - filter_prompt_generation: any model with plain-text support.
     - None: returns the full catalog.
+
+    ``catalog`` defaults to the static ``MODEL_CATALOG`` but callers can pass
+    the dynamically loaded catalog (see :mod:`src.llm.pricing_source`).
     """
+    source = MODEL_CATALOG if catalog is None else catalog
     if operation is None:
-        entries = list(MODEL_CATALOG)
+        entries = list(source)
     elif operation in ("cv_generation", "job_filtering"):
         entries = [
-            e for e in MODEL_CATALOG
+            e for e in source
             if e.supports_strict_schema or e.supports_json_object
         ]
     elif operation == "filter_prompt_generation":
-        entries = [e for e in MODEL_CATALOG if e.supports_plain_text]
+        entries = [e for e in source if e.supports_plain_text]
     else:
         raise ValueError(f"Unknown operation: {operation}")
 

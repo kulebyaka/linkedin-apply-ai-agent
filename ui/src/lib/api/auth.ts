@@ -76,6 +76,25 @@ export async function requestMagicLink(email: string): Promise<{ message: string
 	return response.json();
 }
 
+/**
+ * Local-development bypass. Hits POST /api/auth/dev-login, which mints a JWT
+ * cookie for the configured dev user without an email round-trip. The endpoint
+ * returns 404 unless DEV_AUTH_BYPASS=true on the server.
+ */
+export async function devLogin(): Promise<AuthResponse> {
+	const response = await fetch(`${API_BASE}/api/auth/dev-login`, {
+		method: 'POST',
+		credentials: 'include',
+	});
+
+	if (!response.ok) {
+		const errorText = await response.text();
+		throw new Error(`Dev login failed: ${response.statusText} - ${errorText}`);
+	}
+
+	return response.json();
+}
+
 export async function verifyToken(token: string): Promise<AuthResponse> {
 	const response = await fetch(`${API_BASE}/api/auth/verify?token=${encodeURIComponent(token)}`, {
 		credentials: 'include',

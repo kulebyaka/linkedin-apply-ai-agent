@@ -86,6 +86,7 @@ class JobFilter:
                 spec,
                 schema=FILTER_RESULT_SCHEMA,
                 temperature=self.TEMPERATURE,
+                validator=lambda data: FilterResult(**data),
             )
         except Exception as e:
             logger.error(f"LLM evaluation failed for {job_title} at {company}: {e}")

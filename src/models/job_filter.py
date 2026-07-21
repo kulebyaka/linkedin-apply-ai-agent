@@ -24,9 +24,18 @@ class FilterResult(BaseModel):
     """Result of LLM job evaluation.
 
     Returned by JobFilter.evaluate_job() and stored on JobRecord.
+
+    Field order is deliberate: JSON-schema ``properties`` order follows
+    field-declaration order, and structured/strict generation follows that
+    order — so the model commits to the *evidence* (reasoning, red_flags,
+    disqualification) before the *verdict* (score). Stored/serialized JSON is
+    key-based, so DB and UI are unaffected by the order.
     """
 
-    score: int = Field(..., ge=0, le=100, description="Overall suitability score 0-100")
+    reasoning: str = Field(
+        ...,
+        description="LLM's reasoning for the score and flags",
+    )
     red_flags: list[str] = Field(
         default_factory=list,
         description="List of detected red flags or concerns",
@@ -39,10 +48,7 @@ class FilterResult(BaseModel):
         None,
         description="Reason for disqualification (if disqualified=True)",
     )
-    reasoning: str = Field(
-        ...,
-        description="LLM's reasoning for the score and flags",
-    )
+    score: int = Field(..., ge=0, le=100, description="Overall suitability score 0-100")
 
 
 class UserFilterPreferences(BaseModel):

@@ -1,7 +1,11 @@
 <script lang="ts">
-	import { requestMagicLink } from '$lib/api/auth';
+	import { requestMagicLink, devLogin } from '$lib/api/auth';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { goto } from '$app/navigation';
+
+	// Local dev bypass: entering this email logs in immediately (server must
+	// have DEV_AUTH_BYPASS=true, otherwise dev-login 404s and we surface an error).
+	const DEV_AUTH_EMAIL = 'dev@local.test';
 
 	let email = $state('');
 	let isSubmitting = $state(false);
@@ -23,6 +27,14 @@
 		error = null;
 
 		try {
+			if (email.trim().toLowerCase() === DEV_AUTH_EMAIL) {
+				const result = await devLogin();
+				auth.setUser(result.user);
+				const destination = result.user.master_cv_json == null ? '/welcome' : '/';
+				await goto(destination);
+				return;
+			}
+
 			await requestMagicLink(email.trim());
 			sent = true;
 		} catch (err) {

@@ -229,9 +229,42 @@ The system uses a **two-workflow pipeline** split at the HITL boundary, enabling
 
 #### Important Notes about strict schema support
 - **OpenAI**: Requires GPT-4 or newer models for strict schema support
-- **Anthropic**: Requires beta header `anthropic-beta: structured-outputs-2025-11-13` (already configured)
+- **Anthropic**: Structured outputs are GA — **no beta header required**. `generate_json`
+  uses `output_config={"format": {"type": "json_schema", "schema": ...}}` (the deprecated
+  `output_format` param is gone). Schemas are passed through `make_schema_anthropic_safe()`
+  (`src/llm/schema_strict.py`), which strips constraints the API rejects (`minimum`/`maximum`/
+  `minLength`/`maxLength`/`multipleOf`/`min|maxItems`/…) and forces `additionalProperties:
+  false`; those constraints stay enforced client-side via the `validator` callback.
+  `temperature` is skipped for models that 400 on sampling params (Opus 4.7/4.8, Sonnet 5,
+  Fable — `SAMPLING_UNSUPPORTED_PREFIXES` in `src/llm/providers/anthropic.py`).
 - **Grok**: Works with all models after grok-2-1212
-- **DeepSeek**: Does NOT support strict schemas - validates after generation
+- **DeepSeek**: Does NOT support strict schemas — validated after generation via the
+  `jsonschema` library (`basic_validate_json_schema`), including nested objects/constraints.
+
+#### generate_json resilience (all providers)
+- **Truncation**: on a `finish_reason == "length"` (OpenAI-compatible) / `stop_reason ==
+  "max_tokens"` (Anthropic), the request is retried **once** with `max_tokens` doubled, then
+  raises `LLMTruncatedError` — identical blind retries can never fix truncation.
+- **Retry-with-feedback**: invalid-JSON / schema / `validator` failures append the previous
+  bad output (truncated) + the specific error to the retry's **user** message (preserving the
+  cacheable system prefix), bounded by `max_retries`.
+- **Validator**: `generate_json(..., validator=callable)` runs a caller-supplied check (raises
+  `ValueError` → feeds the feedback loop). `CVComposer._summarize_job` and
+  `JobFilter.evaluate_job` pass Pydantic validators so validation errors re-prompt instead of
+  failing the job.
+
+#### Model catalog (dynamic — up-to-date model list + prices)
+- `src/llm/model_catalog.py` holds a **static** `MODEL_CATALOG` (dashed real IDs, e.g.
+  `claude-opus-4-8`) used as the offline fallback.
+- `src/llm/pricing_source.py` fetches the community-maintained LiteLLM pricing JSON
+  (`model_prices_and_context_window.json`) — the source of the current model **list** *and*
+  prices for OpenAI/Anthropic/DeepSeek/xAI. Load order: fresh disk cache → live refetch →
+  stale cache → static fallback. Disk cache at `data/model_catalog_cache.json` (TTL 24h).
+- Wired via `AppContext.model_catalog` + `AppContext.refresh_model_catalog()`; loaded at
+  startup (non-blocking) and refreshed daily by `ModelCatalogScheduler`
+  (`src/services/jobs/model_catalog_scheduler.py`). The `/api/llm/models` endpoint reads the
+  context-held catalog. Config: `MODEL_CATALOG_DYNAMIC_ENABLED`, `MODEL_CATALOG_CACHE_PATH`,
+  `MODEL_CATALOG_REFRESH_HOURS`, `MODEL_CATALOG_URL`.
 
 See `src/llm/provider.py` module documentation for detailed implementation.
 

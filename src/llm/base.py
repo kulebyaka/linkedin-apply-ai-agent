@@ -3,9 +3,38 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from enum import StrEnum
 
 from .prompt_spec import PromptSpec
+
+#: Fallback output-token budget used when a caller passes no ``max_tokens`` and
+#: a truncation retry needs a value to double.
+DEFAULT_MAX_TOKENS = 4096
+
+
+class LLMTruncatedError(Exception):
+    """Raised when model output was cut off by the token limit.
+
+    ``generate_json`` retries a truncated response exactly once with
+    ``max_tokens`` doubled; if it truncates again this is raised rather than
+    blind-retrying the identical request (which can never succeed).
+    """
+
+
+def build_retry_feedback(previous_output: str, error: str, *, limit: int = 1000) -> str:
+    """Build the feedback block appended to a retry's user message.
+
+    Includes the previous (invalid) output truncated to ``limit`` chars plus
+    the specific error, so the retry is corrective rather than a blind repeat.
+    """
+    prev = (previous_output or "")[:limit]
+    return (
+        "Your previous response was invalid.\n"
+        f"Previous response (truncated):\n{prev}\n"
+        f"Error: {error}\n"
+        "Return corrected JSON matching the schema."
+    )
 
 
 class LLMProvider(StrEnum):
@@ -58,26 +87,33 @@ class BaseLLMClient(ABC):
         schema: dict | None = None,
         temperature: float = 0.4,
         max_retries: int = 3,
+        validator: Callable[[dict], None] | None = None,
         **kwargs,
     ) -> dict:
-        """Generate structured JSON output from a cache-aware prompt spec."""
+        """Generate structured JSON output from a cache-aware prompt spec.
+
+        ``validator`` is an optional callable that receives the parsed dict
+        and raises ``ValueError`` on a semantic problem the JSON schema can't
+        express; the raised message feeds the retry-with-feedback loop.
+        """
         pass
 
 
 def basic_validate_json_schema(data, schema: dict) -> None:
-    """Simplified schema validation used as a fallback when the provider
-    cannot enforce schemas natively (DeepSeek).
+    """Validate ``data`` against ``schema`` for providers without native
+    schema enforcement (DeepSeek).
 
-    Production-quality validation would use the ``jsonschema`` library.
+    Full JSON Schema validation via the ``jsonschema`` library, including
+    nested objects/arrays and constraints. ``jsonschema.ValidationError`` is
+    wrapped as ``ValueError`` so the ``generate_json`` retry-with-feedback loop
+    picks up the message.
     """
-    schema_type = schema.get("type")
+    import jsonschema
 
-    if schema_type == "object":
-        if not isinstance(data, dict):
-            raise ValueError(f"Expected object, got {type(data)}")
-        for field in schema.get("required", []):
-            if field not in data:
-                raise ValueError(f"Missing required field: {field}")
-    elif schema_type == "array":
-        if not isinstance(data, list):
-            raise ValueError(f"Expected array, got {type(data)}")
+    try:
+        jsonschema.validate(instance=data, schema=schema)
+    except jsonschema.ValidationError as e:
+        # e.message is the concise reason; the full path helps the model fix it.
+        location = "/".join(str(p) for p in e.absolute_path)
+        detail = f"{e.message} (at '{location}')" if location else e.message
+        raise ValueError(f"Schema validation failed: {detail}") from e
