@@ -160,7 +160,10 @@ async def get_linkedin_search_status(request: Request, user: CurrentUser):
 
     return {
         "enabled": settings.linkedin_search_schedule_enabled,
-        "running": ctx.scheduler.is_running,
+        # Per-user: only True while THIS user's own search is executing, not
+        # whenever the shared scheduler happens to be alive or busy with
+        # another user's cycle.
+        "running": ctx.scheduler.search_in_progress_for(user.id),
         "last_run_time": ctx.scheduler.last_run_time.isoformat()
         if ctx.scheduler.last_run_time
         else None,

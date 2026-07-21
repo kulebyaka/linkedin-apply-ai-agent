@@ -105,11 +105,23 @@ class LinkedInSearchScheduler(IntervalScheduler):
         self._last_run_jobs: int = 0
         self._last_run_per_user: dict[str, UserLastRun] = {}
         self._run_history: deque[SearchRun] = deque(maxlen=_RUN_HISTORY_MAXLEN)
+        # User ids whose search is actively executing right now. Drives the
+        # per-user "search running" status so a user only sees the spinner for
+        # their own in-flight search, not any global scheduler activity.
+        self._in_progress_users: set[str] = set()
 
     @property
     def search_in_progress(self) -> bool:
-        """True if a search is currently holding the lock."""
+        """True if a search is currently holding the lock.
+
+        Global across all users — used by admin views. For the per-user
+        spinner use :meth:`search_in_progress_for` instead.
+        """
         return self._search_lock.locked()
+
+    def search_in_progress_for(self, user_id: str) -> bool:
+        """True if a search is actively executing for this specific user."""
+        return user_id in self._in_progress_users
 
     async def run_search(self, user_id: str | None = None) -> int:
         """Execute one search cycle: authenticate, scrape, enqueue.
@@ -202,6 +214,14 @@ class LinkedInSearchScheduler(IntervalScheduler):
                     message="Search preferences not configured.",
                 )
                 return 0
+
+            # Mark planned users as in-progress so their UI shows the spinner
+            # for the whole span of their search (auth + scrape + enqueue). Each
+            # user is cleared as its iteration finishes; the outer ``finally``
+            # is the safety net for auth failures and unexpected errors.
+            self._in_progress_users.update(
+                uid for uid, _ in search_plans if uid is not None
+            )
 
             # Scraping uses LinkedIn's public Jobs Search page which serves
             # results without auth — skip /feed validation so we don't trip
@@ -308,6 +328,11 @@ class LinkedInSearchScheduler(IntervalScheduler):
                         search_url=search_url,
                         message=str(exc),
                     )
+                finally:
+                    # This user's search is done — clear its spinner even if the
+                    # cycle continues to the next user.
+                    if plan_user_id is not None:
+                        self._in_progress_users.discard(plan_user_id)
 
             self._last_run_time = datetime.now(tz=timezone.utc)
             self._last_run_jobs = total_enqueued
@@ -318,6 +343,10 @@ class LinkedInSearchScheduler(IntervalScheduler):
             self._last_run_time = datetime.now(tz=timezone.utc)
             self._last_run_jobs = 0
             return 0
+        finally:
+            # Safety net: clear any users still marked in-progress (auth
+            # failure returns before the loop, or an unexpected early error).
+            self._in_progress_users.clear()
 
     async def _persist_and_enqueue(
         self, jobs: list, plan_user_id: str | None

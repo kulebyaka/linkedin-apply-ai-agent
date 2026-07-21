@@ -339,6 +339,41 @@ class TestPerUserSearch:
         assert item3.user_id == "user-b"
         assert item3.job.job_id == "j3"
 
+    async def test_in_progress_is_scoped_to_the_searching_user(self):
+        """search_in_progress_for is True only for the user actively searching,
+        and clears once the search finishes."""
+        scheduler, _, scraper, _ = _make_scheduler(scrape_result=[])
+
+        seen: dict[str, bool] = {}
+
+        async def _capture(_params):
+            # Mid-search: only the searching user is in progress.
+            seen["self"] = scheduler.search_in_progress_for("default-user")
+            seen["other"] = scheduler.search_in_progress_for("someone-else")
+            return []
+
+        scraper.scrape_and_enrich = AsyncMock(side_effect=_capture)
+
+        assert scheduler.search_in_progress_for("default-user") is False
+        await scheduler.run_search()
+
+        assert seen["self"] is True
+        assert seen["other"] is False
+        # Cleared after the cycle completes.
+        assert scheduler.search_in_progress_for("default-user") is False
+
+    async def test_in_progress_clears_on_auth_failure(self):
+        """A failed auth returns before the per-user loop, but the safety-net
+        finally must still clear the in-progress marker."""
+        scheduler, _, scraper, _ = _make_scheduler(scrape_result=[])
+        scraper.browser.ensure_authenticated = AsyncMock(
+            side_effect=RuntimeError("auth down")
+        )
+
+        await scheduler.run_search()
+
+        assert scheduler.search_in_progress_for("default-user") is False
+
     async def test_skips_search_when_no_users_have_prefs(self):
         """When user_repository returns no users with prefs, search is skipped
         to avoid creating ownerless jobs that no authenticated user can access."""
@@ -515,7 +550,10 @@ class TestLinkedInSearchAPI:
     def test_search_status_with_scheduler(self, client):
         test_client, ctx = client
         mock_scheduler = MagicMock()
-        mock_scheduler.is_running = True
+        # Per-user in-progress flag drives the "running" field, not the global
+        # scheduler-alive state.
+        mock_scheduler.search_in_progress_for.return_value = True
+        mock_scheduler.get_last_run_for_user.return_value = None
         mock_scheduler.last_run_time = datetime(2026, 3, 6, 12, 0, 0)
         mock_scheduler.last_run_jobs = 5
         mock_scheduler.next_run_time = datetime(2026, 3, 6, 13, 0, 0)
@@ -529,6 +567,8 @@ class TestLinkedInSearchAPI:
             assert data["running"] is True
             assert data["last_run_jobs"] == 5
             assert "2026-03-06" in data["last_run_time"]
+            # Status is scoped to the requesting user.
+            mock_scheduler.search_in_progress_for.assert_called_once_with("test-user")
         finally:
             ctx.scheduler = original
 
