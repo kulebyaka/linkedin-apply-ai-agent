@@ -43,6 +43,64 @@ _JOB_TYPE_MAP = {
 
 LINKEDIN_JOBS_SEARCH_BASE = "https://www.linkedin.com/jobs/search/"
 
+# Boolean operators LinkedIn recognizes in the keywords field (uppercase only).
+# If a query already uses them we pass it through untouched.
+_BOOLEAN_OPERATORS = ("OR", "AND", "NOT")
+
+
+def normalize_keywords(raw: str) -> str:
+    """Translate a comma-separated keyword list into a LinkedIn boolean query.
+
+    LinkedIn's ``keywords`` field treats the whole string as one literal query
+    — commas are **not** "OR". A friendly comma list like
+    ``"Junior Accountant, Finance Assistant"`` therefore matches nothing
+    (LinkedIn looks for that entire phrase verbatim).
+
+    This converts such a list into a boolean OR query:
+    ``"Junior Accountant" OR "Finance Assistant"``. Each comma-separated term
+    is trimmed, de-duplicated, and multi-word terms are wrapped in quotes
+    (exact-phrase match); single tokens are left bare. Terms are joined with
+    ``OR``.
+
+    Strings that already use boolean syntax — standalone uppercase
+    ``OR``/``AND``/``NOT``, quotes, or parentheses — are returned unchanged so
+    a power user's query is never mangled. A single term (no comma) is also
+    left as-is.
+    """
+    if not raw:
+        return raw
+    text = raw.strip()
+    if not text:
+        return ""
+
+    # Respect an existing boolean query — don't touch quotes/grouping...
+    if '"' in text or "(" in text or ")" in text:
+        return text
+    # ...or standalone boolean operators (exact case, as LinkedIn requires).
+    if any(op in text.split() for op in _BOOLEAN_OPERATORS):
+        return text
+
+    # Nothing to translate without a comma-separated list.
+    if "," not in text:
+        return text
+
+    terms: list[str] = []
+    seen: set[str] = set()
+    for part in text.split(","):
+        term = part.strip()
+        if not term:
+            continue
+        key = term.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        # Quote multi-word phrases so LinkedIn matches them exactly.
+        terms.append(f'"{term}"' if " " in term else term)
+
+    if not terms:
+        return ""
+    return " OR ".join(terms)
+
 
 class LinkedInSearchParams(BaseModel):
     """Encapsulates all LinkedIn job search filters."""
@@ -74,7 +132,9 @@ class LinkedInSearchURLBuilder:
         query: dict[str, str] = {}
 
         if params.keywords:
-            query["keywords"] = params.keywords
+            normalized = normalize_keywords(params.keywords)
+            if normalized:
+                query["keywords"] = normalized
 
         if params.location:
             query["location"] = params.location
