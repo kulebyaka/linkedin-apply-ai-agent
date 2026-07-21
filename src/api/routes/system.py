@@ -38,14 +38,36 @@ async def health(request: Request):
     }
 
 
+def _configured_providers(settings) -> set:
+    """Return the set of providers that have a non-empty API key configured.
+
+    Drives the provider filtering on ``/api/llm/models`` so the UI only ever
+    offers providers the server can actually call.
+    """
+    from src.llm.provider import LLMProvider
+
+    keys = {
+        LLMProvider.OPENAI: settings.openai_api_key,
+        LLMProvider.DEEPSEEK: settings.deepseek_api_key,
+        LLMProvider.GROK: settings.grok_api_key,
+        LLMProvider.ANTHROPIC: settings.anthropic_api_key,
+    }
+    return {provider for provider, key in keys.items() if key}
+
+
 @router.get("/api/llm/models")
 async def list_llm_models(
+    request: Request,
     operation: Annotated[str | None, Query()] = None,
 ):
     """Return the LLM model catalog, optionally filtered by operation.
 
     Public endpoint (no auth) — exposes only model names, display names,
-    and pricing. Never exposes API keys or user data.
+    and pricing. Never exposes API keys or user data. Reads the live,
+    context-held catalog (dynamically loaded from LiteLLM; static fallback).
+
+    The provider list is filtered to those with an API key configured on the
+    server, so the UI never offers a provider that would fail at call time.
     """
     from src.llm.model_catalog import (
         OPERATIONS,
@@ -55,6 +77,7 @@ async def list_llm_models(
     from src.llm.provider import LLMProvider
 
     settings = get_settings()
+    ctx = get_ctx(request)
 
     if operation is not None and operation not in OPERATIONS:
         raise HTTPException(
@@ -63,19 +86,49 @@ async def list_llm_models(
             f"Must be one of: {', '.join(OPERATIONS)} (or omit for full catalog)",
         )
 
-    entries = get_catalog_for_operation(operation)  # type: ignore[arg-type]
+    entries = get_catalog_for_operation(
+        operation,  # type: ignore[arg-type]
+        catalog=ctx.model_catalog,
+    )
 
-    try:
-        default_provider = LLMProvider(settings.primary_llm_provider)
-    except ValueError:
-        default_provider = LLMProvider.OPENAI
+    # Restrict to providers with an API key configured. If none are configured
+    # (e.g. a bare dev environment) fall back to the full list so the UI is
+    # never empty.
+    configured = _configured_providers(settings)
+    if configured:
+        entries = [e for e in entries if e.provider in configured]
+    else:
+        logger.warning(
+            "No LLM API keys configured — returning the full model catalog "
+            "unfiltered. Set OPENAI_API_KEY / ANTHROPIC_API_KEY / etc. to "
+            "restrict the provider list."
+        )
+
     provider_to_model = {
         LLMProvider.OPENAI: settings.openai_model,
         LLMProvider.DEEPSEEK: settings.deepseek_model,
         LLMProvider.GROK: settings.grok_model,
         LLMProvider.ANTHROPIC: settings.anthropic_model,
     }
+
+    # Default provider/model: prefer the configured primary, but fall back to
+    # the first available entry so we never default to a filtered-out provider.
+    try:
+        default_provider = LLMProvider(settings.primary_llm_provider)
+    except ValueError:
+        default_provider = LLMProvider.OPENAI
+    available_providers = {e.provider for e in entries}
+    if default_provider not in available_providers and entries:
+        default_provider = entries[0].provider
+
     default_model = provider_to_model.get(default_provider, "")
+    provider_models = {e.model for e in entries if e.provider == default_provider}
+    if default_model not in provider_models:
+        # The env default model isn't in the (filtered) catalog for this
+        # provider — fall back to the first listed model for it.
+        default_model = next(
+            (e.model for e in entries if e.provider == default_provider), ""
+        )
 
     return {
         "models": [

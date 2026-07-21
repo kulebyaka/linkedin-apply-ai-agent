@@ -8,6 +8,7 @@
 	} from '$lib/api/auth';
 	import { getModelCatalog, updateModelPreferences } from '$lib/api/settings';
 	import { auth } from '$lib/stores/auth.svelte';
+	import ModelSelector from '$lib/components/ModelSelector.svelte';
 
 	interface Slot {
 		key: keyof UserModelPreferences;
@@ -43,7 +44,13 @@
 		filter_prompt_generation: [],
 	});
 
-	let selected = $state<Record<keyof UserModelPreferences, string>>({
+	// Selected provider + model per slot, bound to the two ModelSelector dropdowns.
+	let selectedProvider = $state<Record<keyof UserModelPreferences, string>>({
+		cv_generation: '',
+		job_filtering: '',
+		filter_prompt_generation: '',
+	});
+	let selectedModel = $state<Record<keyof UserModelPreferences, string>>({
 		cv_generation: '',
 		job_filtering: '',
 		filter_prompt_generation: '',
@@ -55,28 +62,22 @@
 	let saved = $state(false);
 	let error = $state<string | null>(null);
 
-	function choiceKey(c: ModelChoice | null | undefined): string {
-		return c ? `${c.provider}::${c.model}` : '';
-	}
-
-	function entryKey(e: ModelCatalogEntry): string {
-		return `${e.provider}::${e.model}`;
+	function inCatalog(catalog: ModelCatalogEntry[], choice: ModelChoice): boolean {
+		return catalog.some((e) => e.provider === choice.provider && e.model === choice.model);
 	}
 
 	function resolveInitial(
 		catalog: ModelCatalogEntry[],
 		current: ModelChoice | null | undefined,
 		fallback: ModelChoice,
-	): string {
-		if (current) {
-			const key = choiceKey(current);
-			if (catalog.some((e) => entryKey(e) === key)) return key;
-		}
-		// No stored preference — pre-select the global .env default if it's
-		// in the catalog; otherwise the first entry (so dropdown is never empty).
-		const defaultKey = choiceKey(fallback);
-		if (catalog.some((e) => entryKey(e) === defaultKey)) return defaultKey;
-		return catalog.length > 0 ? entryKey(catalog[0]) : '';
+	): { provider: string; model: string } {
+		// Stored preference wins if still in the catalog.
+		if (current && inCatalog(catalog, current)) return current;
+		// Otherwise the global .env default if present, else the first entry so
+		// the dropdowns are never empty.
+		if (inCatalog(catalog, fallback)) return fallback;
+		if (catalog.length > 0) return { provider: catalog[0].provider, model: catalog[0].model };
+		return { provider: '', model: '' };
 	}
 
 	onMount(async () => {
@@ -93,7 +94,7 @@
 			};
 
 			const prefs = auth.user?.model_preferences ?? null;
-			selected = {
+			const initial = {
 				cv_generation: resolveInitial(cv.models, prefs?.cv_generation, cv.default),
 				job_filtering: resolveInitial(jf.models, prefs?.job_filtering, jf.default),
 				filter_prompt_generation: resolveInitial(
@@ -102,6 +103,16 @@
 					fp.default,
 				),
 			};
+			selectedProvider = {
+				cv_generation: initial.cv_generation.provider,
+				job_filtering: initial.job_filtering.provider,
+				filter_prompt_generation: initial.filter_prompt_generation.provider,
+			};
+			selectedModel = {
+				cv_generation: initial.cv_generation.model,
+				job_filtering: initial.job_filtering.model,
+				filter_prompt_generation: initial.filter_prompt_generation.model,
+			};
 		} catch (err) {
 			loadError = err instanceof Error ? err.message : 'Could not load model catalog';
 		} finally {
@@ -109,9 +120,9 @@
 		}
 	});
 
-	function toChoice(key: string): ModelChoice | null {
-		if (!key) return null;
-		const [provider, model] = key.split('::');
+	function toChoice(key: keyof UserModelPreferences): ModelChoice | null {
+		const provider = selectedProvider[key];
+		const model = selectedModel[key];
 		if (!provider || !model) return null;
 		return { provider: provider as ModelChoice['provider'], model };
 	}
@@ -122,9 +133,9 @@
 		saved = false;
 
 		const payload: UserModelPreferences = {
-			cv_generation: toChoice(selected.cv_generation),
-			job_filtering: toChoice(selected.job_filtering),
-			filter_prompt_generation: toChoice(selected.filter_prompt_generation),
+			cv_generation: toChoice('cv_generation'),
+			job_filtering: toChoice('job_filtering'),
+			filter_prompt_generation: toChoice('filter_prompt_generation'),
 		};
 
 		try {
@@ -156,22 +167,18 @@
 		<div class="flex flex-col gap-4">
 			{#each SLOTS as slot (slot.key)}
 				<div>
-					<label
-						for={`model-${slot.key}`}
-						class="font-mono mb-1 block text-xs uppercase tracking-wider text-[var(--color-muted-foreground)]"
-					>
+					<h3 class="font-mono mb-2 block text-xs font-semibold uppercase tracking-wider text-[var(--color-foreground)]">
 						{slot.label}
-					</label>
-					<select
-						id={`model-${slot.key}`}
-						bind:value={selected[slot.key]}
+					</h3>
+					<ModelSelector
+						catalog={catalogs[slot.operation]}
+						bind:provider={selectedProvider[slot.key]}
+						bind:model={selectedModel[slot.key]}
 						disabled={saving || catalogs[slot.operation].length === 0}
-						class="font-mono w-full border-2 border-[var(--color-foreground)] bg-white px-3 py-2 text-sm text-[var(--color-foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] disabled:opacity-50"
-					>
-						{#each catalogs[slot.operation] as entry (entryKey(entry))}
-							<option value={entryKey(entry)}>{entry.label}</option>
-						{/each}
-					</select>
+						idPrefix={`model-${slot.key}`}
+						providerLabel="Provider"
+						modelLabel="Model"
+					/>
 					<p class="font-mono mt-1 text-xs text-[var(--color-muted-foreground)]">
 						{slot.description}
 					</p>

@@ -22,8 +22,10 @@ class JobDescriptionInput(BaseModel):
     description: str = Field(..., description="Full job description")
     requirements: str | None = Field(None, description="Job requirements section")
     template_name: str | None = Field(None, description="CV template: modern, compact, classic, minimal, profile-card")
-    llm_provider: Literal["openai", "anthropic"] | None = Field(None, description="LLM provider: openai, anthropic")
-    llm_model: str | None = Field(None, description="LLM model name (e.g., gpt-4.1-nano, claude-haiku-4.5)")
+    llm_provider: Literal["openai", "anthropic", "deepseek", "grok"] | None = Field(
+        None, description="LLM provider: openai, anthropic, deepseek, grok"
+    )
+    llm_model: str | None = Field(None, description="LLM model name (e.g., gpt-4o-mini, claude-haiku-4-5)")
 
 # =============================================================================
 # Job Submission Models

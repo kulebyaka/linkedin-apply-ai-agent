@@ -1,6 +1,10 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { validateJobDescription } from '$lib/utils/validation';
+	import { getModelCatalog } from '$lib/api/settings';
+	import type { ModelCatalogEntry } from '$lib/api/auth';
 	import type { TemplateName, LLMProvider, LLMModel } from '$lib/types';
+	import ModelSelector from '$lib/components/ModelSelector.svelte';
 
 	interface Props {
 		onSubmit: (description: string, templateName: TemplateName, llmProvider?: LLMProvider, llmModel?: LLMModel) => void;
@@ -12,17 +16,21 @@
 		initialLLMModel?: LLMModel;
 	}
 
-	let { onSubmit, isLoading, errorMessage, initialValue = '', initialTemplate = 'compact', initialLLMProvider = 'openai', initialLLMModel = 'gpt-4o-mini' }: Props = $props();
+	let { onSubmit, isLoading, errorMessage, initialValue = '', initialTemplate = 'compact', initialLLMProvider, initialLLMModel }: Props = $props();
 
 	// svelte-ignore state_referenced_locally -- intentional: local state seeded from prop defaults
 	let jobDescription = $state(initialValue);
 	// svelte-ignore state_referenced_locally
 	let selectedTemplate = $state<TemplateName>(initialTemplate);
-	// svelte-ignore state_referenced_locally
-	let selectedLLMProvider = $state<LLMProvider>(initialLLMProvider);
-	// svelte-ignore state_referenced_locally
-	let selectedLLMModel = $state<LLMModel>(initialLLMModel);
+	let selectedLLMProvider = $state<string>('');
+	let selectedLLMModel = $state<string>('');
 	let validationError = $state<string | null>(null);
+
+	// Model catalog for CV generation, fetched from the API and filtered to
+	// providers with an API key configured on the server.
+	let catalog = $state<ModelCatalogEntry[]>([]);
+	let modelsLoading = $state(true);
+	let modelsError = $state<string | null>(null);
 
 	const templates: { value: TemplateName; label: string; description: string }[] = [
 		{ value: 'compact', label: 'Compact', description: '2-column layout, space-efficient' },
@@ -30,31 +38,31 @@
 		{ value: 'profile-card', label: 'Profile Card', description: 'LinkedIn-style layout' },
 	];
 
-	const llmProviders: { value: LLMProvider; label: string }[] = [
-		{ value: 'openai', label: 'OpenAI' },
-		{ value: 'anthropic', label: 'Anthropic' },
-	];
+	function inCatalog(entries: ModelCatalogEntry[], provider: string, model: string): boolean {
+		return entries.some((e) => e.provider === provider && e.model === model);
+	}
 
-	const modelsByProvider: Record<LLMProvider, { value: LLMModel; label: string; description: string }[]> = {
-		openai: [
-			{ value: 'gpt-5-mini', label: 'GPT-5 Mini', description: 'Latest & smartest' },
-			{ value: 'gpt-4o-mini', label: 'GPT-4o Mini', description: 'Fast & reliable' },
-			{ value: 'gpt-4o', label: 'GPT-4o', description: 'Best quality' },
-			{ value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo', description: 'Fastest (no strict schema)' },
-		],
-		anthropic: [
-			{ value: 'claude-haiku-4.5', label: 'Claude Haiku 4.5', description: 'Fast & efficient' },
-		],
-	};
+	onMount(async () => {
+		try {
+			const { models, default: dflt } = await getModelCatalog('cv_generation');
+			catalog = models;
 
-	// Get available models for selected provider
-	const availableModels = $derived(modelsByProvider[selectedLLMProvider]);
-
-	// When provider changes, reset model to first available
-	$effect(() => {
-		const models = modelsByProvider[selectedLLMProvider];
-		if (models && !models.some(m => m.value === selectedLLMModel)) {
-			selectedLLMModel = models[0].value;
+			// Seed from explicit props if valid, else the server default, else
+			// the first catalog entry so the dropdowns are never empty.
+			if (initialLLMProvider && initialLLMModel && inCatalog(models, initialLLMProvider, initialLLMModel)) {
+				selectedLLMProvider = initialLLMProvider;
+				selectedLLMModel = initialLLMModel;
+			} else if (inCatalog(models, dflt.provider, dflt.model)) {
+				selectedLLMProvider = dflt.provider;
+				selectedLLMModel = dflt.model;
+			} else if (models.length > 0) {
+				selectedLLMProvider = models[0].provider;
+				selectedLLMModel = models[0].model;
+			}
+		} catch (err) {
+			modelsError = err instanceof Error ? err.message : 'Could not load model catalog';
+		} finally {
+			modelsLoading = false;
 		}
 	});
 
@@ -68,7 +76,12 @@
 		}
 
 		validationError = null;
-		onSubmit(jobDescription, selectedTemplate, selectedLLMProvider, selectedLLMModel);
+		onSubmit(
+			jobDescription,
+			selectedTemplate,
+			(selectedLLMProvider || undefined) as LLMProvider | undefined,
+			(selectedLLMModel || undefined) as LLMModel | undefined,
+		);
 	}
 
 	function handleInput() {
@@ -168,58 +181,19 @@ Requirements:
 		</div>
 
 		<!-- LLM Provider & Model selectors -->
-		<div class="grid grid-cols-2 gap-4">
-			<div>
-				<label for="llm-provider-select" class="block font-mono text-sm font-medium tracking-wide text-[var(--color-foreground)] mb-3">
-					LLM Provider
-				</label>
-				<div class="relative">
-					<select
-						id="llm-provider-select"
-						bind:value={selectedLLMProvider}
-						disabled={isLoading}
-						class="w-full px-6 py-4 pr-12 border-2 border-[var(--color-foreground)] bg-white text-[var(--color-foreground)] shadow-brutal transition-all duration-200 disabled:cursor-not-allowed font-mono text-sm cursor-pointer appearance-none"
-						onfocus={(e) => { e.currentTarget.style.borderColor = 'var(--color-primary)'; e.currentTarget.style.boxShadow = '6px 6px 0 var(--color-foreground)'; }}
-						onblur={(e) => { e.currentTarget.style.borderColor = 'var(--color-foreground)'; e.currentTarget.style.boxShadow = '4px 4px 0 var(--color-foreground)'; }}
-					>
-						{#each llmProviders as provider}
-							<option value={provider.value}>{provider.label}</option>
-						{/each}
-						<option disabled value="">DeepSeek / Grok — server config only</option>
-					</select>
-					<div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-[var(--color-foreground)]">
-						<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-						</svg>
-					</div>
-				</div>
-			</div>
-
-			<div>
-				<label for="llm-model-select" class="block font-mono text-sm font-medium tracking-wide text-[var(--color-foreground)] mb-3">
-					Model
-				</label>
-				<div class="relative">
-					<select
-						id="llm-model-select"
-						bind:value={selectedLLMModel}
-						disabled={isLoading}
-						class="w-full px-6 py-4 pr-12 border-2 border-[var(--color-foreground)] bg-white text-[var(--color-foreground)] shadow-brutal transition-all duration-200 disabled:cursor-not-allowed font-mono text-sm cursor-pointer appearance-none"
-						onfocus={(e) => { e.currentTarget.style.borderColor = 'var(--color-primary)'; e.currentTarget.style.boxShadow = '6px 6px 0 var(--color-foreground)'; }}
-						onblur={(e) => { e.currentTarget.style.borderColor = 'var(--color-foreground)'; e.currentTarget.style.boxShadow = '4px 4px 0 var(--color-foreground)'; }}
-					>
-						{#each availableModels as model}
-							<option value={model.value}>{model.label} - {model.description}</option>
-						{/each}
-					</select>
-					<div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-[var(--color-foreground)]">
-						<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-						</svg>
-					</div>
-				</div>
-			</div>
-		</div>
+		{#if modelsError}
+			<p class="font-mono text-sm font-medium text-[var(--color-destructive)]">{modelsError}</p>
+		{:else if modelsLoading}
+			<p class="font-mono text-sm text-[var(--color-muted-foreground)]">Loading models…</p>
+		{:else}
+			<ModelSelector
+				{catalog}
+				bind:provider={selectedLLMProvider}
+				bind:model={selectedLLMModel}
+				disabled={isLoading}
+				idPrefix="llm"
+			/>
+		{/if}
 
 		<button
 			type="submit"

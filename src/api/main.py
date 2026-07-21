@@ -120,6 +120,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     ctx.create_background_task(_cleanup_magic_links_loop())
 
+    # Load the dynamic model catalog (up-to-date model list + prices) without
+    # blocking startup, and start its daily refresh. Best-effort — the static
+    # MODEL_CATALOG remains the fallback when offline.
+    if settings.model_catalog_dynamic_enabled:
+        ctx.create_background_task(ctx.refresh_model_catalog())
+        try:
+            from src.services.jobs.model_catalog_scheduler import (
+                ModelCatalogScheduler,
+            )
+
+            model_catalog_scheduler = ModelCatalogScheduler(ctx)
+            model_catalog_scheduler.start()
+            ctx.model_catalog_scheduler = model_catalog_scheduler
+        except Exception:
+            logger.exception("Failed to start model catalog refresh scheduler")
+
     # Start the auto-refining filter scheduler (independent of LinkedIn search).
     # Per-user opt-in (default OFF) still gates whether each user is processed.
     if settings.auto_refine_enabled and ctx.user_repository is not None:
@@ -207,6 +223,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     if ctx.refinement_scheduler:
         ctx.refinement_scheduler.stop()
+
+    if ctx.model_catalog_scheduler is not None:
+        ctx.model_catalog_scheduler.stop()
 
     if ctx.browser:
         await ctx.browser.close()

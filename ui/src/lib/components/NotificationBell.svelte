@@ -42,7 +42,12 @@
 		aria-label="Notifications"
 		aria-expanded={open}
 	>
-		<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+		<svg
+			class="h-5 w-5"
+			fill={notifications.unread > 0 ? 'var(--color-primary)' : 'none'}
+			stroke="var(--color-foreground)"
+			viewBox="0 0 24 24"
+		>
 			<path
 				stroke-linecap="round"
 				stroke-linejoin="round"

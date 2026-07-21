@@ -52,8 +52,20 @@ class Settings(BaseSettings):
     deepseek_model: str = "deepseek-chat"
     # Grok: grok-2-1212+ required for structured outputs
     grok_model: str = "grok-2-1212"
-    # Anthropic: claude-sonnet-4.5+ required for structured outputs (beta)
-    anthropic_model: str = "claude-sonnet-4.5"
+    # Anthropic: claude-sonnet-4-5+ required for structured outputs
+    anthropic_model: str = "claude-sonnet-4-5"
+
+    # -------------------------------------------------------------------------
+    # Dynamic model catalog (LiteLLM pricing JSON — up-to-date model list +
+    # prices, with the static MODEL_CATALOG as offline fallback)
+    # -------------------------------------------------------------------------
+    model_catalog_dynamic_enabled: bool = True
+    model_catalog_cache_path: str = "./data/model_catalog_cache.json"
+    model_catalog_refresh_hours: int = 24
+    model_catalog_url: str = (
+        "https://raw.githubusercontent.com/BerriAI/litellm/main/"
+        "model_prices_and_context_window.json"
+    )
 
     # -------------------------------------------------------------------------
     # Paths  (same for everyone — defaults defined here, no need to set in .env)

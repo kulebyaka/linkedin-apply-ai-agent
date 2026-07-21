@@ -194,7 +194,10 @@ Requirements:
             logger.info("[TIMING] Starting LLM API call for job summary")
             llm_start = time.time()
             summary = self.llm.generate_json(
-                spec, schema=JOB_SUMMARY_SCHEMA, temperature=self.TEMPERATURE_ANALYSIS
+                spec,
+                schema=JOB_SUMMARY_SCHEMA,
+                temperature=self.TEMPERATURE_ANALYSIS,
+                validator=lambda data: JobSummary(**data),
             )
             llm_elapsed = time.time() - llm_start
             logger.info(f"[TIMING] LLM API call for job summary completed in {llm_elapsed:.2f}s")

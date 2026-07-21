@@ -141,7 +141,7 @@ def _fake_pdf_reader(page_count: int):
 
 class TestStartExtraction:
     def test_rejects_non_pdf_content_type(self):
-        user = _make_user(provider="anthropic", model="claude-sonnet-4.6")
+        user = _make_user(provider="anthropic", model="claude-sonnet-4-6")
         ctx = _make_mock_ctx()
         with _patched_client(user, ctx) as client:
             resp = client.post(
@@ -152,7 +152,7 @@ class TestStartExtraction:
         assert "PDF" in resp.json()["detail"]
 
     def test_rejects_oversized_pdf(self):
-        user = _make_user(provider="anthropic", model="claude-sonnet-4.6")
+        user = _make_user(provider="anthropic", model="claude-sonnet-4-6")
         ctx = _make_mock_ctx()
         big = b"%PDF-1.4\n" + b"0" * (11 * 1024 * 1024)
         with _patched_client(user, ctx) as client:
@@ -176,7 +176,7 @@ class TestStartExtraction:
         assert "Anthropic" in detail or "GPT" in detail
 
     def test_rejects_too_many_pages(self):
-        user = _make_user(provider="anthropic", model="claude-sonnet-4.6")
+        user = _make_user(provider="anthropic", model="claude-sonnet-4-6")
         ctx = _make_mock_ctx()
         with (
             _patched_client(user, ctx) as client,
@@ -190,7 +190,7 @@ class TestStartExtraction:
         assert "page" in resp.json()["detail"].lower()
 
     def test_happy_path_returns_202_and_id(self):
-        user = _make_user(provider="anthropic", model="claude-sonnet-4.6")
+        user = _make_user(provider="anthropic", model="claude-sonnet-4-6")
         ctx = _make_mock_ctx()
         with (
             _patched_client(user, ctx) as client,
@@ -207,7 +207,7 @@ class TestStartExtraction:
         assert body["extraction_id"]
 
     def test_in_flight_returns_409(self):
-        user = _make_user(provider="anthropic", model="claude-sonnet-4.6")
+        user = _make_user(provider="anthropic", model="claude-sonnet-4-6")
         ctx = _make_mock_ctx()
 
         async def seed():
@@ -230,7 +230,7 @@ class TestStartExtraction:
     def test_rejects_corrupt_pdf(self):
         from pypdf.errors import PdfReadError
 
-        user = _make_user(provider="anthropic", model="claude-sonnet-4.6")
+        user = _make_user(provider="anthropic", model="claude-sonnet-4-6")
         ctx = _make_mock_ctx()
 
         class BadReader:

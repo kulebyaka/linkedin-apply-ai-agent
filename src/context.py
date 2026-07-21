@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from src.services.notifications.notification_repository import NotificationRepository
 
 from src.config.settings import Settings, get_settings
+from src.llm.model_catalog import MODEL_CATALOG, ModelCatalogEntry
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,13 @@ class AppContext:
     cv_extraction_registry: CVExtractionRegistry | None = None
     consumer_manager: ConsumerManager | None = None
     workflow_dispatcher: WorkflowDispatcher | None = None
+    model_catalog_scheduler: object | None = None
+
+    # Live model catalog (up-to-date model list + prices). Defaults to the
+    # static fallback; replaced at startup + on a daily refresh from LiteLLM.
+    model_catalog: list[ModelCatalogEntry] = field(
+        default_factory=lambda: list(MODEL_CATALOG)
+    )
 
     # Lock for LinkedIn search/browser initialization (manual trigger path).
     linkedin_init_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
@@ -105,6 +113,30 @@ class AppContext:
         """Get a snapshot of all tracked workflows."""
         async with self._tracking_lock:
             return dict(self._workflow_threads)
+
+    async def refresh_model_catalog(self) -> None:
+        """Refresh :attr:`model_catalog` from the dynamic pricing source.
+
+        Never raises — on any failure (offline, parse error) the existing
+        catalog (or static fallback) is retained. Disabled via
+        ``settings.model_catalog_dynamic_enabled``.
+        """
+        if not self.settings.model_catalog_dynamic_enabled:
+            return
+        from src.llm.pricing_source import load_catalog
+
+        try:
+            catalog = await load_catalog(
+                cache_path=self.settings.model_catalog_cache_path,
+                url=self.settings.model_catalog_url,
+                ttl_hours=self.settings.model_catalog_refresh_hours,
+            )
+            self.model_catalog = catalog
+        except Exception:
+            logger.warning(
+                "model catalog refresh failed; retaining current catalog",
+                exc_info=True,
+            )
 
     def create_background_task(self, coro) -> asyncio.Task:
         """Create an asyncio task and keep a reference to prevent GC."""

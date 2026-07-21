@@ -14,7 +14,7 @@ from .base import BaseLLMClient, LLMProvider, basic_validate_json_schema
 from .factory import LLMClientFactory
 from .prompt_spec import PromptSpec
 from .providers import AnthropicClient, DeepSeekClient, GrokClient, OpenAIClient
-from .schema_strict import make_schema_strict
+from .schema_strict import make_schema_anthropic_safe, make_schema_strict
 
 __all__ = [
     "AnthropicClient",
@@ -26,5 +26,6 @@ __all__ = [
     "OpenAIClient",
     "PromptSpec",
     "basic_validate_json_schema",
+    "make_schema_anthropic_safe",
     "make_schema_strict",
 ]

@@ -1,8 +1,10 @@
 // API Request/Response Types
 
 export type TemplateName = 'compact' | 'modern' | 'profile-card';
-export type LLMProvider = 'openai' | 'anthropic';
-export type LLMModel = 'gpt-5-mini' | 'gpt-4o-mini' | 'gpt-4o' | 'gpt-3.5-turbo' | 'claude-haiku-4.5';
+// Provider/model are catalog-driven at runtime (see /api/llm/models). Model is
+// an open string; provider mirrors the backend LLMProvider enum.
+export type LLMProvider = 'openai' | 'anthropic' | 'deepseek' | 'grok';
+export type LLMModel = string;
 
 export interface JobSubmitRequest {
 	source: 'manual';
