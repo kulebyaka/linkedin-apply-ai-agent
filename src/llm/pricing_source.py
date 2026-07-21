@@ -53,8 +53,24 @@ _NAME_BLOCKLIST: tuple[str, ...] = (
     "search",
 )
 
-# Dated snapshot suffix: "-20250514" or "@20250514".
-_DATED_SUFFIX = re.compile(r"(?:[-@])\d{8}$")
+# Deny-list of model-id patterns that are noise in a picker: fine-tuned models
+# (``ft:gpt-4o:...``) and preview/experimental variants. These leak through the
+# structural filters because they are still ``mode: chat`` with a price.
+_DENY = re.compile(
+    r"(?:^ft:|:ft-|-(?:preview|exp|experimental|nightly|alpha|beta)\b)",
+    re.IGNORECASE,
+)
+
+# Dated snapshot suffix, matching (in priority order):
+#   - dash ISO date:  "-2024-05-13"  (OpenAI/Grok modern snapshots)
+#   - packed date:    "-20250514" / "@20250514"  (Anthropic)
+#   - legacy 4-digit: "-0613" / "-1106" / "-1212"  (older OpenAI/Grok MMDD)
+# A single trailing digit (``grok-4``, ``claude-opus-4-8``) never matches.
+_DATED_SUFFIX = re.compile(r"(?:-\d{4}-\d{2}-\d{2}|[-@]\d{8}|-\d{4})$")
+
+# Legacy small-context models (4k/8k/16k) are a modernity proxy: every current
+# model these providers ship has a far larger window. Drop anything below this.
+_MIN_CONTEXT_TOKENS = 32_000
 
 
 def _strip_provider_prefix(key: str, litellm_provider: str) -> str:
@@ -69,17 +85,43 @@ def _strip_provider_prefix(key: str, litellm_provider: str) -> str:
     return key
 
 
-def parse_litellm_json(data: dict) -> list[ModelCatalogEntry]:
+def _make_entry(model_id: str, provider: str, meta: dict) -> ModelCatalogEntry:
+    return ModelCatalogEntry(
+        provider=_PROVIDER_MAP[provider],
+        model=model_id,
+        display_name=model_id,
+        input_cost_per_1m=round(meta["input_cost_per_token"] * 1e6, 6),
+        output_cost_per_1m=round(meta["output_cost_per_token"] * 1e6, 6),
+        supports_strict_schema=bool(meta.get("supports_response_schema")),
+        supports_json_object=True,
+        supports_plain_text=True,
+    )
+
+
+def parse_litellm_json(data: dict, *, now: datetime | None = None) -> list[ModelCatalogEntry]:
     """Parse the LiteLLM pricing JSON into ``ModelCatalogEntry`` records.
 
-    Keeps chat models for the four supported providers with a known price,
-    strips provider prefixes, converts per-token cost → per-1M, maps
-    ``supports_response_schema`` → ``supports_strict_schema``, drops
-    non-text ``mode: chat`` variants, and skips dated snapshots when a bare
-    alias for the same provider exists. Duplicate (provider, model) pairs are
-    de-duplicated (first wins).
+    Applies a strict, layered filter so the picker shows only current models
+    (see :mod:`src.llm.model_catalog` for the rationale). In order:
+
+    1. **Structural gate** — keep only ``mode: chat`` models for the four
+       supported providers with a known input/output price, drop non-text
+       ``mode: chat`` variants (``_NAME_BLOCKLIST``), drop fine-tunes /
+       previews (``_DENY``), drop models past their ``deprecation_date``, and
+       drop legacy small-context models (< ``_MIN_CONTEXT_TOKENS``).
+    2. **Snapshot collapse** — group by base alias (stripping dated suffixes
+       like ``-2024-05-13`` / ``-20250514`` / ``-0613``); keep the bare alias
+       when present, otherwise the single newest dated snapshot.
+
+    Converts per-token cost → per-1M and maps ``supports_response_schema`` →
+    ``supports_strict_schema``. Duplicate (provider, model) pairs are
+    de-duplicated. ``now`` (default: current UTC) anchors the deprecation cut.
     """
-    # First pass: filter to candidate chat models with a price.
+    if now is None:
+        now = datetime.now(tz=timezone.utc)
+    today = now.date().isoformat()
+
+    # First pass: structural gate → candidate chat models worth showing.
     candidates: list[tuple[str, str, dict]] = []  # (model_id, litellm_provider, meta)
     for key, meta in data.items():
         if not isinstance(meta, dict):
@@ -97,41 +139,41 @@ def parse_litellm_json(data: dict) -> list[ModelCatalogEntry]:
         lowered = model_id.lower()
         if any(token in lowered for token in _NAME_BLOCKLIST):
             continue
+        if _DENY.search(model_id):
+            continue
+        deprecation = meta.get("deprecation_date")
+        if isinstance(deprecation, str) and deprecation <= today:
+            continue
+        max_input = meta.get("max_input_tokens") or meta.get("max_tokens")
+        if isinstance(max_input, (int, float)) and max_input < _MIN_CONTEXT_TOKENS:
+            continue
         candidates.append((model_id, provider, meta))
 
-    # Set of (provider, model_id) present after prefix stripping — used to
-    # detect whether a dated snapshot has a bare alias to defer to.
-    present = {(provider, model_id) for model_id, provider, _ in candidates}
+    # Second pass: collapse dated snapshots. Group by (provider, base alias);
+    # prefer any undated member, else keep the newest dated snapshot (dates
+    # sort lexically within a family: "-2024-08-06" > "-2024-05-13").
+    groups: dict[tuple[str, str], list[tuple[str, dict, bool]]] = {}
+    for model_id, provider, meta in candidates:
+        dated = _DATED_SUFFIX.search(model_id)
+        base = model_id[: dated.start()] if dated else model_id
+        groups.setdefault((provider, base), []).append((model_id, meta, bool(dated)))
 
     entries: list[ModelCatalogEntry] = []
     seen: set[tuple[str, str]] = set()
-    for model_id, provider, meta in candidates:
-        dated = _DATED_SUFFIX.search(model_id)
-        if dated:
-            alias = model_id[: dated.start()]
-            if (provider, alias) in present:
-                continue  # prefer the bare alias
-        dedup_key = (provider, model_id)
-        if dedup_key in seen:
-            continue
-        seen.add(dedup_key)
-        entries.append(
-            ModelCatalogEntry(
-                provider=_PROVIDER_MAP[provider],
-                model=model_id,
-                display_name=model_id,
-                input_cost_per_1m=round(meta["input_cost_per_token"] * 1e6, 6),
-                output_cost_per_1m=round(meta["output_cost_per_token"] * 1e6, 6),
-                supports_strict_schema=bool(meta.get("supports_response_schema")),
-                supports_json_object=True,
-                supports_plain_text=True,
-            )
-        )
+    for (provider, _base), members in groups.items():
+        undated = [(mid, meta) for mid, meta, is_dated in members if not is_dated]
+        chosen = undated if undated else [max(members, key=lambda m: m[0])[:2]]
+        for model_id, meta in chosen:
+            dedup_key = (provider, model_id)
+            if dedup_key in seen:
+                continue
+            seen.add(dedup_key)
+            entries.append(_make_entry(model_id, provider, meta))
     return entries
 
 
 async def fetch_catalog(
-    url: str = LITELLM_URL, *, timeout: float = 10.0
+    url: str = LITELLM_URL, *, timeout: float = 10.0, now: datetime | None = None
 ) -> list[ModelCatalogEntry]:
     """Fetch + parse the LiteLLM catalog over HTTP.
 
@@ -144,7 +186,7 @@ async def fetch_catalog(
         response.raise_for_status()
         data = response.json()
 
-    entries = parse_litellm_json(data)
+    entries = parse_litellm_json(data, now=now)
     if not entries:
         raise ValueError("LiteLLM catalog parsed to zero entries")
     return entries
@@ -211,7 +253,7 @@ async def load_catalog(
         return cached.entries
 
     try:
-        entries = await fetch_catalog(url, timeout=timeout)
+        entries = await fetch_catalog(url, timeout=timeout, now=now)
         write_cache(cache_path, entries, now=now)
         logger.info("model catalog: fetched %d entries from LiteLLM", len(entries))
         return entries
