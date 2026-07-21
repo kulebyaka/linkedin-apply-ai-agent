@@ -39,7 +39,10 @@ src/
 │   ├── application_workflow.py # Apply to jobs after HITL approval (stubs)
 │   └── retry_workflow.py       # Re-compose CV with user feedback
 ├── llm/                        # LLM provider integrations
-│   └── provider.py             # Abstract base + provider implementations
+│   ├── base.py                 # LLMProvider enum + BaseLLMClient ABC + provider_supports_pdf
+│   ├── provider.py             # Re-export shim (BaseLLMClient, InstructorClient, LLMProvider, …)
+│   └── providers/
+│       └── instructor_client.py # Single Instructor + LiteLLM client (all providers)
 ├── services/                   # Business logic services (grouped by domain)
 │   ├── auth/                   # Authentication & user management
 │   │   ├── auth.py             # AuthService: magic link + JWT authentication
@@ -176,11 +179,19 @@ The system uses a **two-workflow pipeline** split at the HITL boundary, enabling
 - `HITLProcessor`: approve/decline/retry decisions, pending retrieval, history
 - API endpoints are thin adapters — extract context, call service, return result
 
-### 5. Multi-LLM Support
-- Factory pattern for provider instantiation (`LLMClientFactory`)
-- Abstract `BaseLLMClient` interface
-- Easy switching via environment variables
-- Fallback support for reliability
+### 5. Multi-LLM Support (Instructor + LiteLLM)
+- A single `InstructorClient(BaseLLMClient)` (`src/llm/providers/instructor_client.py`) backs
+  **all** providers. Structured output is coerced via Instructor's tool-calling mode
+  (`instructor.from_litellm(litellm.completion)` defaults to `Mode.TOOLS`); provider routing is
+  delegated to LiteLLM through prefixed model strings (`anthropic/…`, `openai/…`, `xai/…`,
+  `deepseek/…`).
+- `create_llm_client` (`src/agents/_shared.py`) resolves settings, reattaches the LiteLLM route
+  prefix via `litellm_model(provider, bare_model)` (note `GROK → xai`), and returns an
+  `InstructorClient`. There is **no** `LLMClientFactory` anymore.
+- Abstract `BaseLLMClient` interface preserved; `generate_json` gained a preferred
+  `response_model: type[BaseModel]` param (typed `@overload`s so callers get the model type back).
+- Easy switching via environment variables; `litellm.drop_params = True` drops sampling params a
+  model rejects (e.g. `temperature` on Opus 4.x / Sonnet 5) instead of gating per-model.
 
 ### 6. Repository Pattern
 - `JobRepository` abstract interface for data persistence
@@ -227,31 +238,35 @@ The system uses a **two-workflow pipeline** split at the HITL boundary, enabling
 - Last-admin guard: `PUT /api/admin/users/{user_id}/role` refuses (409) to demote yourself when you are the only remaining admin. The UI mirrors this guard, but the server-side check is authoritative.
 - Frontend: `ui/src/routes/admin/+layout.svelte` redirects to `/` when `authStore.isAdmin` is false. The auth store reads `role` from `/api/auth/me` and exposes `isAdmin` as a `$derived` value.
 
-#### Important Notes about strict schema support
-- **OpenAI**: Requires GPT-4 or newer models for strict schema support
-- **Anthropic**: Structured outputs are GA — **no beta header required**. `generate_json`
-  uses `output_config={"format": {"type": "json_schema", "schema": ...}}` (the deprecated
-  `output_format` param is gone). Schemas are passed through `make_schema_anthropic_safe()`
-  (`src/llm/schema_strict.py`), which strips constraints the API rejects (`minimum`/`maximum`/
-  `minLength`/`maxLength`/`multipleOf`/`min|maxItems`/…) and forces `additionalProperties:
-  false`; those constraints stay enforced client-side via the `validator` callback.
-  `temperature` is skipped for models that 400 on sampling params (Opus 4.7/4.8, Sonnet 5,
-  Fable — `SAMPLING_UNSUPPORTED_PREFIXES` in `src/llm/providers/anthropic.py`).
-- **Grok**: Works with all models after grok-2-1212
-- **DeepSeek**: Does NOT support strict schemas — validated after generation via the
-  `jsonschema` library (`basic_validate_json_schema`), including nested objects/constraints.
+#### Structured output (Instructor `Mode.TOOLS`, all providers)
+- Callers pass a **Pydantic `response_model`** to `generate_json` / `generate_json_from_pdf`;
+  Instructor coerces the output via **tool-calling** (`Mode.TOOLS`) and returns a validated
+  instance. Example: `self.llm.generate_json(spec, response_model=FilterResult, temperature=…)`.
+- The tool `input_schema` path is lenient about JSON-Schema constraint keywords (`minimum`/
+  `maximum`/`maxLength`/…), so the old per-provider strict-schema reshaping was **removed**
+  (`src/llm/schema_strict.py` is deleted). Confirmed by a live Anthropic gate: `FilterResult`
+  (which carries `minimum`/`maximum`) returns no 400 under `Mode.TOOLS`, and prompt caching fires
+  (`cache_read_input_tokens` non-zero on repeat). See
+  `docs/plans/completed/instructor-migration-plan.md`, Task 6.
+- A raw `schema: dict` is still accepted by `generate_json` (builds a throwaway model, returns a
+  plain `dict`) for ad-hoc call sites, but every first-party call now uses `response_model`.
+- `provider_supports_pdf(provider)` (`src/llm/base.py`) tracks PDF capability — LiteLLM 1.93.0
+  has no `supports_pdf_input` lookup. OpenAI + Anthropic support PDF; Grok + DeepSeek do not.
 
-#### generate_json resilience (all providers)
-- **Truncation**: on a `finish_reason == "length"` (OpenAI-compatible) / `stop_reason ==
-  "max_tokens"` (Anthropic), the request is retried **once** with `max_tokens` doubled, then
-  raises `LLMTruncatedError` — identical blind retries can never fix truncation.
-- **Retry-with-feedback**: invalid-JSON / schema / `validator` failures append the previous
-  bad output (truncated) + the specific error to the retry's **user** message (preserving the
-  cacheable system prefix), bounded by `max_retries`.
-- **Validator**: `generate_json(..., validator=callable)` runs a caller-supplied check (raises
-  `ValueError` → feeds the feedback loop). `CVComposer._summarize_job` and
-  `JobFilter.evaluate_job` pass Pydantic validators so validation errors re-prompt instead of
-  failing the job.
+#### Prompt caching (preserved both providers)
+- **Anthropic**: `PromptSpec.system` is emitted as a content-block list with
+  `cache_control: {"type": "ephemeral"}`; LiteLLM maps it onto Anthropic's top-level `system`
+  array carrying the cache breakpoint.
+- **OpenAI-compatible**: `PromptSpec.cache_key` rides in `extra_body={"prompt_cache_key": …}` (a
+  bare kwarg is dropped by LiteLLM). OpenAI auto-caches on the stable prefix regardless.
+
+#### generate_json resilience
+- **Retries**: Instructor's built-in (Tenacity) retry handles invalid/failed structured output,
+  bounded by `max_retries` (default 3). The old hand-rolled truncation-doubling +
+  retry-with-feedback loop (`LLMTruncatedError`, `build_retry_feedback`) is **gone**. Large CV
+  compositions pass a generous `max_tokens=8192` in `CVComposer._compose_all_sections` instead.
+- **Validator**: `generate_json(..., validator=callable)` still runs a caller-supplied check on
+  the parsed dict; first-party call sites rely on `response_model` validation instead.
 
 #### Model catalog (dynamic — up-to-date model list + prices)
 - `src/llm/model_catalog.py` holds a **static** `MODEL_CATALOG` (dashed real IDs, e.g.
@@ -483,16 +498,20 @@ All settings in `.env`:
 
 ### Adding a New LLM Provider
 
-1. Create provider class in `src/llm/provider.py`
-2. Add to `LLMProvider` enum
-3. Implement API integration with native structured output support:
-   - Research if provider supports JSON Schema enforcement
-   - Implement strict schema mode in `generate_json()` if available
-   - Fall back to `json_object` mode + manual validation if not
-4. Register in factory
-5. Add config to `settings.py`
-6. Document structured output capabilities in provider.py docstring
-7. Document in README
+Providers are now added through LiteLLM + Instructor — there is a single `InstructorClient`, no
+per-provider class to write:
+
+1. Add the provider to the `LLMProvider` enum (`src/llm/base.py`).
+2. Add the LiteLLM route prefix to `PROVIDER_LITELLM_PREFIX` in
+   `src/llm/providers/instructor_client.py` (confirm the correct LiteLLM prefix, e.g. `xai/`,
+   `deepseek/`; verify the provider supports **tool calling** for `Mode.TOOLS`, else fall back to
+   Instructor `Mode.JSON`).
+3. Add `*_api_key` / `*_model` settings to `settings.py` and the resolution branch in
+   `create_llm_client` (`src/agents/_shared.py`).
+4. If the provider accepts native PDF input, add it to `_PDF_CAPABLE_PROVIDERS`
+   (`src/llm/base.py`, consumed by `provider_supports_pdf`).
+5. Document in README. Prompt caching / cache-control wiring is handled generically by
+   `InstructorClient` (Anthropic `cache_control` block vs OpenAI `extra_body` cache key).
 
 ### Modifying CV Tailoring Logic
 

@@ -21,6 +21,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.api.main import app, get_current_user
+
+from ._route_helpers import collect_route_paths
 from src.models.job_filter import UserFilterPreferences
 from src.models.user import User
 
@@ -372,6 +374,6 @@ class TestGenerateFilterPrompt:
 
 class TestRouteRegistration:
     def test_filter_preferences_routes_registered(self):
-        routes = {route.path for route in app.routes}
+        routes = collect_route_paths(app.routes)
         assert "/api/users/me/filter-preferences" in routes
         assert "/api/users/me/filter-preferences/generate-prompt" in routes

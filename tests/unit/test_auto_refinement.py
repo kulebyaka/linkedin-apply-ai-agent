@@ -28,7 +28,6 @@ from src.models.state_machine import BusinessState
 from src.models.unified import JobRecord
 from src.services.db.job_repository import InMemoryJobRepository
 
-
 # ---------------------------------------------------------------------------
 # Mock LLM client
 # ---------------------------------------------------------------------------
@@ -42,8 +41,13 @@ class _MockLLM(BaseLLMClient):
     def generate(self, spec: PromptSpec, temperature: float = 0.7, **kwargs) -> str:
         return "unused"
 
-    def generate_json(self, spec, schema=None, temperature=0.4, max_retries=3, **kwargs) -> dict:
-        return self._json or {}
+    def generate_json(
+        self, spec, response_model=None, schema=None, temperature=0.4, max_retries=3, **kwargs
+    ):
+        data = self._json or {}
+        if response_model is not None:
+            return response_model(**data)
+        return data
 
 
 # ---------------------------------------------------------------------------
@@ -120,8 +124,12 @@ def test_generate_refinement_rejects_malformed_block():
 
 def _job(job_id: str, user_id: str = "u1", **kw) -> JobRecord:
     return JobRecord(
-        job_id=job_id, user_id=user_id, source="linkedin", mode="full",
-        status=BusinessState.PENDING, **kw,
+        job_id=job_id,
+        user_id=user_id,
+        source="linkedin",
+        mode="full",
+        status=BusinessState.PENDING,
+        **kw,
     )
 
 
@@ -130,11 +138,14 @@ async def test_inmemory_refine_signal_roundtrip():
     repo = InMemoryJobRepository()
     await repo.initialize()
     await repo.create(_job("j1"))
-    await repo.update("j1", {
-        "status": BusinessState.DECLINED,
-        "decline_reason": "too junior",
-        "refine_signal_state": "pending",
-    })
+    await repo.update(
+        "j1",
+        {
+            "status": BusinessState.DECLINED,
+            "decline_reason": "too junior",
+            "refine_signal_state": "pending",
+        },
+    )
     pending = await repo.list_refine_signals("u1", "pending")
     assert [j.job_id for j in pending] == ["j1"]
     # scoping
@@ -238,7 +249,9 @@ async def notif_repo(tmp_path):
 
 @pytest.mark.asyncio
 async def test_notification_crud_and_scoping(notif_repo):
-    await notif_repo.create("u1", type="filter_refinement", title="A", action_url="/settings#filter")
+    await notif_repo.create(
+        "u1", type="filter_refinement", title="A", action_url="/settings#filter"
+    )
     await notif_repo.create("u1", type="other", title="B")
     await notif_repo.create("u2", type="filter_refinement", title="C")
 
@@ -300,8 +313,8 @@ class _DeclineCtx:
 
 @pytest.mark.asyncio
 async def test_decline_with_reason_captures_signal():
-    from src.services.jobs.hitl_processor import HITLProcessor
     from src.models.unified import HITLDecision
+    from src.services.jobs.hitl_processor import HITLProcessor
 
     repo = InMemoryJobRepository()
     await repo.initialize()
@@ -319,8 +332,8 @@ async def test_decline_with_reason_captures_signal():
 
 @pytest.mark.asyncio
 async def test_decline_without_reason_no_signal():
-    from src.services.jobs.hitl_processor import HITLProcessor
     from src.models.unified import HITLDecision
+    from src.services.jobs.hitl_processor import HITLProcessor
 
     repo = InMemoryJobRepository()
     await repo.initialize()
@@ -350,11 +363,14 @@ async def test_refinement_gate_skips_below_min(user_repo, notif_repo, monkeypatc
     # 2 signals, min is 10 by default → skip.
     for i in range(2):
         await repo.create(_job(f"g{i}", user_id=user.id))
-        await repo.update(f"g{i}", {
-            "status": BusinessState.DECLINED,
-            "decline_reason": "nope",
-            "refine_signal_state": "pending",
-        })
+        await repo.update(
+            f"g{i}",
+            {
+                "status": BusinessState.DECLINED,
+                "decline_reason": "nope",
+                "refine_signal_state": "pending",
+            },
+        )
 
     ctx = _Ctx(repo, user_repo, notif_repo, get_settings())
     result = await refinement.run_refinement_cycle(ctx, user)
@@ -378,12 +394,17 @@ async def test_refinement_creates_proposal_and_notification(user_repo, notif_rep
     user = await user_repo.get_by_id(user.id)
 
     for i in range(10):
-        await repo.create(_job(f"s{i}", user_id=user.id, job_posting={"title": f"Role {i}", "company": "Acme"}))
-        await repo.update(f"s{i}", {
-            "status": BusinessState.DECLINED,
-            "decline_reason": "too junior",
-            "refine_signal_state": "pending",
-        })
+        await repo.create(
+            _job(f"s{i}", user_id=user.id, job_posting={"title": f"Role {i}", "company": "Acme"})
+        )
+        await repo.update(
+            f"s{i}",
+            {
+                "status": BusinessState.DECLINED,
+                "decline_reason": "too junior",
+                "refine_signal_state": "pending",
+            },
+        )
 
     # Stub the LLM client factory via a fake module so we don't import the real
     # src.agents._shared (which pulls in WeasyPrint native libs).
@@ -426,14 +447,12 @@ async def test_decline_on_override_job_does_not_capture_signal():
     """A forced-through ("Proceed Anyway") job declined later is not a filter
     false-positive: no decline signal is captured and the override signal is
     left intact rather than reset to 'pending'."""
-    from src.services.jobs.hitl_processor import HITLProcessor
     from src.models.unified import HITLDecision
+    from src.services.jobs.hitl_processor import HITLProcessor
 
     repo = InMemoryJobRepository()
     await repo.initialize()
-    await repo.create(
-        _job("o1", override_reason="genuinely remote", refine_signal_state="pending")
-    )
+    await repo.create(_job("o1", override_reason="genuinely remote", refine_signal_state="pending"))
 
     processor = HITLProcessor(_DeclineCtx(repo))
     await processor.process_decision(
@@ -474,11 +493,14 @@ async def test_refinement_skips_when_proposal_pending(user_repo, notif_repo):
     # Even with enough fresh signals, the cycle must skip.
     for i in range(10):
         await repo.create(_job(f"p{i}", user_id=user.id))
-        await repo.update(f"p{i}", {
-            "status": BusinessState.DECLINED,
-            "decline_reason": "nope",
-            "refine_signal_state": "pending",
-        })
+        await repo.update(
+            f"p{i}",
+            {
+                "status": BusinessState.DECLINED,
+                "decline_reason": "nope",
+                "refine_signal_state": "pending",
+            },
+        )
 
     ctx = _Ctx(repo, user_repo, notif_repo, get_settings())
     result = await refinement.run_refinement_cycle(ctx, user)

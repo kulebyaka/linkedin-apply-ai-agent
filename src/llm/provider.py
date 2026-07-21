@@ -1,31 +1,27 @@
 """Re-export shim for the split LLM provider package.
 
-The implementation has been split across:
-- ``base.py`` — LLMProvider enum + BaseLLMClient ABC
-- ``schema_strict.py`` — make_schema_strict for OpenAI/Grok strict JSON
-- ``providers/openai.py`` / ``grok.py`` / ``deepseek.py`` / ``anthropic.py``
-- ``factory.py`` — LLMClientFactory
+The implementation is split across:
+- ``base.py`` — LLMProvider enum + BaseLLMClient ABC + ``provider_supports_pdf``
+- ``providers/instructor_client.py`` — the single Instructor + LiteLLM client
+- ``prompt_spec.py`` — the cache-aware PromptSpec
 
-Existing imports such as ``from src.llm.provider import OpenAIClient`` keep
+Existing imports such as ``from src.llm.provider import InstructorClient`` keep
 working via the re-exports below.
 """
 
-from .base import BaseLLMClient, LLMProvider, basic_validate_json_schema
-from .factory import LLMClientFactory
+from .base import (
+    BaseLLMClient,
+    LLMProvider,
+    provider_supports_pdf,
+)
 from .prompt_spec import PromptSpec
-from .providers import AnthropicClient, DeepSeekClient, GrokClient, OpenAIClient
-from .schema_strict import make_schema_anthropic_safe, make_schema_strict
+from .providers.instructor_client import InstructorClient, litellm_model
 
 __all__ = [
-    "AnthropicClient",
     "BaseLLMClient",
-    "DeepSeekClient",
-    "GrokClient",
-    "LLMClientFactory",
+    "InstructorClient",
     "LLMProvider",
-    "OpenAIClient",
     "PromptSpec",
-    "basic_validate_json_schema",
-    "make_schema_anthropic_safe",
-    "make_schema_strict",
+    "litellm_model",
+    "provider_supports_pdf",
 ]

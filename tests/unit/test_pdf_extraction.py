@@ -7,13 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.llm.provider import (
-    AnthropicClient,
-    BaseLLMClient,
-    DeepSeekClient,
-    GrokClient,
-    OpenAIClient,
-)
+from src.llm.provider import BaseLLMClient, InstructorClient, LLMProvider, provider_supports_pdf
 from src.services.cv.pdf_extraction import (
     CVExtractionRegistry,
     CVExtractionTask,
@@ -29,24 +23,31 @@ pytestmark = pytest.mark.asyncio
 
 
 class TestProviderCapabilities:
-    def test_anthropic_supports_pdf(self):
-        assert AnthropicClient.SUPPORTS_PDF_INPUT is True
+    def test_openai_and_anthropic_support_pdf(self):
+        assert provider_supports_pdf(LLMProvider.OPENAI) is True
+        assert provider_supports_pdf(LLMProvider.ANTHROPIC) is True
 
-    def test_openai_supports_pdf(self):
-        assert OpenAIClient.SUPPORTS_PDF_INPUT is True
+    def test_deepseek_and_grok_do_not_support_pdf(self):
+        assert provider_supports_pdf(LLMProvider.DEEPSEEK) is False
+        assert provider_supports_pdf(LLMProvider.GROK) is False
 
-    def test_deepseek_does_not_support_pdf(self):
-        assert DeepSeekClient.SUPPORTS_PDF_INPUT is False
-
-    def test_grok_does_not_support_pdf(self):
-        assert GrokClient.SUPPORTS_PDF_INPUT is False
+    def test_instructor_client_supports_pdf(self):
+        assert InstructorClient.SUPPORTS_PDF_INPUT is True
 
     def test_base_default_raises_not_implemented(self):
         class Dummy(BaseLLMClient):
             def generate(self, spec, temperature=0.7, **kwargs):  # pragma: no cover
                 return ""
 
-            def generate_json(self, spec, schema=None, temperature=0.4, max_retries=3, **kwargs):  # pragma: no cover
+            def generate_json(  # pragma: no cover
+                self,
+                spec,
+                response_model=None,
+                schema=None,
+                temperature=0.4,
+                max_retries=3,
+                **kwargs,
+            ):
                 return {}
 
         d = Dummy(api_key="x", model="dummy")

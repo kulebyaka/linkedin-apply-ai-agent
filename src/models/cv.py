@@ -195,8 +195,7 @@ class CVLLMOutput(BaseModel):
     Uses string types for dates since LLMs output date strings.
 
     Usage:
-        schema = CVLLMOutput.model_json_schema()
-        result = llm.generate_json(prompt, schema=schema)
+        result = llm.generate_json(prompt, response_model=CVLLMOutput)
     """
 
     contact: ContactInfo | None = None  # Pass-through from master CV, not LLM-generated

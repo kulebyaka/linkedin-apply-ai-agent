@@ -2,7 +2,11 @@
 
 import pytest
 
-from src.models.job_filter import FilterResult, UserFilterPreferences
+from src.models.job_filter import (
+    FilterRefinement,
+    FilterResult,
+    UserFilterPreferences,
+)
 from src.models.state_machine import (
     ALLOWED_TRANSITIONS,
     BusinessState,
@@ -110,6 +114,26 @@ class TestFilterResult:
         assert restored == result
 
 
+class TestFilterRefinement:
+    """Test the FilterRefinement structured-output model."""
+
+    def test_valid(self):
+        ref = FilterRefinement(
+            proposed_learned_block="## Auto-learned criteria\n- x",
+            rationale="Declined several on-site roles.",
+        )
+        assert ref.proposed_learned_block.startswith("## Auto-learned criteria")
+        assert ref.rationale
+
+    def test_both_fields_required(self):
+        with pytest.raises(ValueError):
+            FilterRefinement(proposed_learned_block="only one")
+
+    def test_serialization_roundtrip(self):
+        ref = FilterRefinement(proposed_learned_block="block", rationale="why")
+        assert FilterRefinement(**ref.model_dump()) == ref
+
+
 class TestUserFilterPreferences:
     """Test UserFilterPreferences model validation."""
 
@@ -198,9 +222,7 @@ class TestFilteredOutState:
 
     def test_filtered_out_allows_proceed_anyway(self):
         # "Proceed Anyway" re-enters CV generation: filtered_out → processing.
-        assert ALLOWED_TRANSITIONS[BusinessState.FILTERED_OUT] == {
-            BusinessState.PROCESSING
-        }
+        assert ALLOWED_TRANSITIONS[BusinessState.FILTERED_OUT] == {BusinessState.PROCESSING}
 
     def test_queued_to_filtered_out(self):
         assert validate_transition(BusinessState.QUEUED, BusinessState.FILTERED_OUT) is True
@@ -213,9 +235,7 @@ class TestFilteredOutState:
 
     def test_filtered_out_to_processing_valid(self):
         # The only non-self transition out of filtered_out ("Proceed Anyway").
-        assert validate_transition(
-            BusinessState.FILTERED_OUT, BusinessState.PROCESSING
-        ) is True
+        assert validate_transition(BusinessState.FILTERED_OUT, BusinessState.PROCESSING) is True
 
     def test_filtered_out_to_other_states_invalid(self):
         allowed = {BusinessState.FILTERED_OUT, BusinessState.PROCESSING}

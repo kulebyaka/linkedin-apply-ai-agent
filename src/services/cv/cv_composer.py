@@ -28,11 +28,6 @@ class CVCompositionError(Exception):
     pass
 
 
-# Schemas derived from Pydantic models for LLM structured output
-FULL_CV_SCHEMA = CVLLMOutput.model_json_schema()
-JOB_SUMMARY_SCHEMA = JobSummary.model_json_schema()
-
-
 @dataclass(frozen=True)
 class CVComposerSettings:
     """Settings used by CVComposer that do not require secrets."""
@@ -154,9 +149,7 @@ class CVComposer:
         logger.info("CV composition completed successfully")
         return validated_cv
 
-    def _summarize_job(
-        self, job_posting: dict[str, Any], *, user_id: str = ""
-    ) -> dict[str, Any]:
+    def _summarize_job(self, job_posting: dict[str, Any], *, user_id: str = "") -> dict[str, Any]:
         """
         Analyze job description and extract key requirements
 
@@ -189,28 +182,21 @@ Requirements:
             cache_key=f"cv_summary:{user_id}" if user_id else "",
         )
 
-        # Generate structured summary using LLM
+        # Generate structured summary using LLM (validated into a JobSummary
+        # by the client's response_model path — no post-hoc re-validation).
         try:
             logger.info("[TIMING] Starting LLM API call for job summary")
             llm_start = time.time()
-            summary = self.llm.generate_json(
+            job_summary = self.llm.generate_json(
                 spec,
-                schema=JOB_SUMMARY_SCHEMA,
+                response_model=JobSummary,
                 temperature=self.TEMPERATURE_ANALYSIS,
-                validator=lambda data: JobSummary(**data),
             )
             llm_elapsed = time.time() - llm_start
             logger.info(f"[TIMING] LLM API call for job summary completed in {llm_elapsed:.2f}s")
         except Exception as e:
             logger.error(f"Failed to analyze job description: {e}")
             raise CVCompositionError(f"Job analysis failed: {e}") from e
-
-        # Validate with Pydantic model
-        try:
-            job_summary = JobSummary(**summary)
-        except Exception as e:
-            logger.error(f"Job summary validation failed: {e}")
-            raise CVCompositionError(f"Invalid job summary structure: {e}") from e
 
         return job_summary.model_dump()
 
@@ -247,23 +233,29 @@ Requirements:
             cache_key=f"cv_compose:{user_id}" if user_id else "",
         )
 
-        # Generate complete tailored CV using unified schema
+        # Generate complete tailored CV (validated into a CVLLMOutput by the
+        # client's response_model path). ``max_tokens`` is set generously so a
+        # full 2-page CV isn't clipped now that truncation-doubling is gone.
         try:
             logger.info("[TIMING] Starting LLM API call for full CV generation")
             llm_start = time.time()
             result = self.llm.generate_json(
                 spec,
-                schema=FULL_CV_SCHEMA,
+                response_model=CVLLMOutput,
                 temperature=self.TEMPERATURE_GENERATION,
+                max_tokens=8192,
             )
             llm_elapsed = time.time() - llm_start
-            logger.info(f"[TIMING] LLM API call for full CV generation completed in {llm_elapsed:.2f}s")
+            logger.info(
+                f"[TIMING] LLM API call for full CV generation completed in {llm_elapsed:.2f}s"
+            )
         except Exception as e:
             logger.error(f"Failed to generate CV sections: {e}")
             raise CVCompositionError(f"CV generation failed: {e}") from e
 
         logger.debug("Successfully generated all CV sections")
-        return result
+        # Downstream length-limit code mutates a plain dict.
+        return result.model_dump()
 
     def _apply_length_limits(self, generated_sections: dict[str, Any]) -> dict[str, Any]:
         """
@@ -371,7 +363,9 @@ Requirements:
             logger.error(f"Invalid interests in master CV: {e}")
             raise CVCompositionError(f"Invalid interests data: {e}") from e
 
-    def _validate_output(self, tailored_cv: dict[str, Any], master_cv: dict[str, Any]) -> CVLLMOutput:
+    def _validate_output(
+        self, tailored_cv: dict[str, Any], master_cv: dict[str, Any]
+    ) -> CVLLMOutput:
         """Legacy validation with warn-only hallucination checks."""
         logger.debug("Validating tailored CV output")
 

@@ -51,6 +51,23 @@ class FilterResult(BaseModel):
     score: int = Field(..., ge=0, le=100, description="Overall suitability score 0-100")
 
 
+class FilterRefinement(BaseModel):
+    """Structured output of ``JobFilter.generate_refinement``.
+
+    Replaces the raw ``_REFINEMENT_SCHEMA`` dict so the refiner call uses the
+    same ``response_model`` path as every other structured LLM call.
+    """
+
+    proposed_learned_block: str = Field(
+        ...,
+        description="Full '## Auto-learned criteria' markdown block.",
+    )
+    rationale: str = Field(
+        ...,
+        description="Plain-language explanation citing the signals.",
+    )
+
+
 class UserFilterPreferences(BaseModel):
     """Per-user filter configuration.
 

@@ -21,7 +21,8 @@ from src.services.cv.pdf_generator import PDFGenerator
 from src.services.db.job_repository import JobRepository
 
 from ..config.settings import get_settings
-from ..llm.provider import LLMClientFactory, LLMProvider
+from ..llm.base import LLMProvider
+from ..llm.providers.instructor_client import InstructorClient, litellm_model
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -98,8 +99,11 @@ def create_llm_client(llm_provider: str | None = None, llm_model: str | None = N
     if not api_key:
         raise ValueError(f"API key not configured for provider: {provider}")
 
-    logger.info(f"Using LLM provider: {provider}, model: {model}")
-    return LLMClientFactory.create(provider, api_key, model)
+    # Reattach the LiteLLM route prefix (``anthropic/…``, ``xai/…``); the
+    # catalog/settings store bare model ids.
+    model_str = litellm_model(provider, model)
+    logger.info(f"Using LLM provider: {provider}, model: {model_str}")
+    return InstructorClient(api_key, model_str)
 
 
 def load_master_cv() -> dict:
@@ -204,7 +208,9 @@ async def compose_cv(
 
     except Exception as e:
         elapsed = time.time() - start_time
-        logger.error(f"CV composition failed for job {job_id} in {elapsed:.2f}s: {e}", exc_info=True)
+        logger.error(
+            f"CV composition failed for job {job_id} in {elapsed:.2f}s: {e}", exc_info=True
+        )
         return {
             "tailored_cv_json": None,
             "error_message": f"CV composition failed: {str(e)}",
@@ -250,12 +256,8 @@ async def generate_pdf(
         company = job_posting.get("company", "unknown")
 
         # Generate safe filename components
-        safe_company = "".join(
-            c for c in company if c.isalnum() or c in (" ", "-", "_")
-        ).strip()
-        safe_title = "".join(
-            c for c in job_title if c.isalnum() or c in (" ", "-", "_")
-        ).strip()
+        safe_company = "".join(c for c in company if c.isalnum() or c in (" ", "-", "_")).strip()
+        safe_title = "".join(c for c in job_title if c.isalnum() or c in (" ", "-", "_")).strip()
         candidate_name = cv_json.get("contact", {}).get("full_name", "Unknown")
         safe_name = "".join(
             c for c in candidate_name if c.isalnum() or c in (" ", "-", "_")
@@ -299,7 +301,9 @@ async def generate_pdf(
 
     except Exception as e:
         elapsed = time.time() - start_time
-        logger.error(f"PDF generation failed for job {job_id} in {elapsed:.2f}s: {e}", exc_info=True)
+        logger.error(
+            f"PDF generation failed for job {job_id} in {elapsed:.2f}s: {e}", exc_info=True
+        )
         return {
             "tailored_cv_pdf_path": None,
             "error_message": f"PDF generation failed: {str(e)}",
