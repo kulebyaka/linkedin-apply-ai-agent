@@ -118,6 +118,12 @@ jobs:
                 || echo "GHCR login failed; relying on cached /root/.docker/config.json"
             fi
             docker compose pull
+            # Drop the model-catalog disk cache so the new image refetches and
+            # re-parses through ITS parser. `load_catalog` serves a <24h cache
+            # verbatim without re-parsing, so a cache written by the outgoing
+            # image would otherwise mask this release's filter changes for up to
+            # 24h. Removing it forces a clean refetch on startup.
+            rm -f data/model_catalog_cache.json
             docker compose up -d --remove-orphans
             docker compose run --rm ui-publisher
             docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile || true
