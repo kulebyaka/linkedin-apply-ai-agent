@@ -1,10 +1,18 @@
 """Single LLM provider client backed by Instructor + LiteLLM.
 
 Replaces the four hand-rolled provider adapters. Structured output is coerced
-via Instructor's tool-calling mode (``Mode.TOOLS`` — the default of
-``instructor.from_litellm``); provider routing is delegated to LiteLLM through
-prefixed model strings (``anthropic/claude-...``, ``openai/gpt-4o``,
-``xai/grok-4``, ``deepseek/deepseek-chat``).
+by Instructor, with the mode chosen per provider family:
+
+- **OpenAI-compatible** (OpenAI, DeepSeek, xAI): ``Mode.JSON`` — native
+  ``response_format={"type": "json_object"}``, no function tools. This sidesteps
+  the gpt-5.4+ restriction that *function tools + reasoning* aren't supported on
+  ``/v1/chat/completions`` (so reasoning models keep reasoning enabled).
+- **Anthropic** (not OpenAI-compatible): ``Mode.TOOLS`` — ``tool_use``, the most
+  reliable structured path for Anthropic via LiteLLM.
+
+Provider routing is delegated to LiteLLM through prefixed model strings
+(``anthropic/claude-...``, ``openai/gpt-4o``, ``xai/grok-4``,
+``deepseek/deepseek-chat``).
 
 Prompt caching is preserved for both provider families:
 - **Anthropic**: ``PromptSpec.system`` is emitted as a content-block list with
@@ -81,7 +89,16 @@ class InstructorClient(BaseLLMClient):
 
     def __init__(self, api_key: str, model: str, **kwargs: Any) -> None:
         super().__init__(api_key, model, **kwargs)
-        self._client = instructor.from_litellm(litellm.completion)
+        # Structured-output coercion mode depends on the provider family:
+        #   - OpenAI-compatible (OpenAI, DeepSeek, xAI) → ``Mode.JSON`` (native
+        #     ``response_format={"type": "json_object"}``, no function tools).
+        #     Avoids the gpt-5.4+ "function tools + reasoning_effort not
+        #     supported on /v1/chat/completions" conflict and lets reasoning
+        #     stay enabled.
+        #   - Anthropic (not OpenAI-compatible) → ``Mode.TOOLS`` (tool_use),
+        #     Anthropic's most reliable structured path via LiteLLM.
+        mode = instructor.Mode.TOOLS if self._is_anthropic else instructor.Mode.JSON
+        self._client = instructor.from_litellm(litellm.completion, mode=mode)
 
     # ------------------------------------------------------------------
     # Helpers

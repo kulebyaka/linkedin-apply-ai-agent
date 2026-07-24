@@ -12,6 +12,7 @@ import json
 from unittest.mock import patch
 
 import httpx
+import instructor
 import pytest
 from pydantic import BaseModel
 
@@ -31,6 +32,39 @@ def _capture_and_abort(captured: list):
     def fake_send(self, request, *args, **kwargs):  # noqa: ANN001
         captured.append(request)
         raise _AbortError()
+
+    return fake_send
+
+
+def _json_content_responder(payload: dict, *, cached_tokens: int = 0):
+    """Return a fake ``httpx.Client.send`` that answers with JSON in ``content``.
+
+    Mimics the OpenAI-compatible response Instructor's ``Mode.JSON`` extracts:
+    the structured object lands in ``message.content`` as a JSON string (no
+    ``tool_calls``).
+    """
+
+    def fake_send(self, request, *args, **kwargs):  # noqa: ANN001
+        body = {
+            "id": "chatcmpl-test",
+            "object": "chat.completion",
+            "created": 0,
+            "model": "gpt-4o",
+            "choices": [
+                {
+                    "index": 0,
+                    "finish_reason": "stop",
+                    "message": {"role": "assistant", "content": json.dumps(payload)},
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+                "prompt_tokens_details": {"cached_tokens": cached_tokens},
+            },
+        }
+        return httpx.Response(200, json=body, request=request)
 
     return fake_send
 
@@ -176,7 +210,7 @@ class TestGenerateJson:
         with patch.object(
             httpx.Client,
             "send",
-            _tool_call_responder("Person", {"name": "Ada", "age": 36}),
+            _json_content_responder({"name": "Ada", "age": 36}),
         ):
             result = client.generate_json(spec, response_model=Person)
 
@@ -211,7 +245,7 @@ class TestGenerateJson:
         with patch.object(
             httpx.Client,
             "send",
-            _tool_call_responder("DynamicResponse", payload),
+            _json_content_responder(payload),
         ):
             result = client.generate_json(spec, schema=schema)
 
@@ -227,11 +261,44 @@ class TestGenerateJson:
         with patch.object(
             httpx.Client,
             "send",
-            _tool_call_responder("Person", {"name": "Ada", "age": 36}),
+            _json_content_responder({"name": "Ada", "age": 36}),
         ):
             client.generate_json(spec, response_model=Person, validator=seen.append)
 
         assert seen == [{"name": "Ada", "age": 36}]
+
+
+class TestStructuredOutputMode:
+    """OpenAI-compatible providers use ``Mode.JSON`` (no function tools, so
+    gpt-5.4+ reasoning models are unaffected by the tools+reasoning restriction);
+    Anthropic keeps ``Mode.TOOLS``.
+    """
+
+    @pytest.mark.parametrize(
+        "model",
+        ["openai/gpt-4o", "openai/gpt-5.6-terra", "deepseek/deepseek-chat", "xai/grok-4"],
+    )
+    def test_openai_compatible_uses_json_mode(self, model):
+        client = InstructorClient(api_key="test", model=model)
+        assert client._client.mode == instructor.Mode.JSON
+
+    def test_anthropic_uses_tools_mode(self):
+        client = InstructorClient(api_key="test", model="anthropic/claude-sonnet-5")
+        assert client._client.mode == instructor.Mode.TOOLS
+
+    def test_json_mode_sends_response_format_and_no_tools(self):
+        """gpt-5.6-terra structured call carries response_format, not tools."""
+        captured: list = []
+        client = InstructorClient(api_key="test", model="openai/gpt-5.6-terra")
+        spec = PromptSpec(system="SYS", user="u", cache_key="")
+        with patch.object(httpx.Client, "send", _capture_and_abort(captured)):
+            with contextlib.suppress(Exception):
+                client.generate_json(spec, response_model=Person)
+        body = json.loads(captured[-1].content)
+        assert "tools" not in body
+        assert body.get("response_format", {}).get("type") == "json_object"
+        # No reasoning_effort forced — reasoning stays enabled for the model.
+        assert "reasoning_effort" not in body
 
 
 class TestSupportsPdfFlag:
@@ -277,8 +344,8 @@ class TestGenerateJsonFromPdf:
         client = InstructorClient(api_key="test", model="openai/gpt-4o")
         seen_blocks: list = []
 
-        def responder(name, payload):
-            base = _tool_call_responder(name, payload)
+        def responder(payload):
+            base = _json_content_responder(payload)
 
             def fake_send(self, request, *args, **kwargs):  # noqa: ANN001
                 seen_blocks.append(json.loads(request.content)["messages"][-1]["content"])
@@ -286,7 +353,7 @@ class TestGenerateJsonFromPdf:
 
             return fake_send
 
-        with patch.object(httpx.Client, "send", responder("Doc", {"title": "Hello"})):
+        with patch.object(httpx.Client, "send", responder({"title": "Hello"})):
             result = client.generate_json_from_pdf(b"%PDF-1.4 fake", "extract", Doc)
 
         assert isinstance(result, Doc)
@@ -318,9 +385,7 @@ class TestGenerateJsonFromPdf:
             "properties": {"title": {"type": "string"}},
             "required": ["title"],
         }
-        with patch.object(
-            httpx.Client, "send", _tool_call_responder("DynamicResponse", {"title": "X"})
-        ):
+        with patch.object(httpx.Client, "send", _json_content_responder({"title": "X"})):
             result = client.generate_json_from_pdf(b"%PDF-1.4 fake", "extract", schema=schema)
 
         assert isinstance(result, dict)

@@ -181,10 +181,11 @@ The system uses a **two-workflow pipeline** split at the HITL boundary, enabling
 
 ### 5. Multi-LLM Support (Instructor + LiteLLM)
 - A single `InstructorClient(BaseLLMClient)` (`src/llm/providers/instructor_client.py`) backs
-  **all** providers. Structured output is coerced via Instructor's tool-calling mode
-  (`instructor.from_litellm(litellm.completion)` defaults to `Mode.TOOLS`); provider routing is
-  delegated to LiteLLM through prefixed model strings (`anthropic/…`, `openai/…`, `xai/…`,
-  `deepseek/…`).
+  **all** providers. The structured-output mode is chosen per provider family in `__init__`:
+  **OpenAI-compatible** (OpenAI, DeepSeek, xAI) use `Mode.JSON` (native
+  `response_format={"type": "json_object"}`, no function tools); **Anthropic** uses `Mode.TOOLS`
+  (`tool_use`). Provider routing is delegated to LiteLLM through prefixed model strings
+  (`anthropic/…`, `openai/…`, `xai/…`, `deepseek/…`).
 - `create_llm_client` (`src/agents/_shared.py`) resolves settings, reattaches the LiteLLM route
   prefix via `litellm_model(provider, bare_model)` (note `GROK → xai`), and returns an
   `InstructorClient`. There is **no** `LLMClientFactory` anymore.
@@ -238,16 +239,25 @@ The system uses a **two-workflow pipeline** split at the HITL boundary, enabling
 - Last-admin guard: `PUT /api/admin/users/{user_id}/role` refuses (409) to demote yourself when you are the only remaining admin. The UI mirrors this guard, but the server-side check is authoritative.
 - Frontend: `ui/src/routes/admin/+layout.svelte` redirects to `/` when `authStore.isAdmin` is false. The auth store reads `role` from `/api/auth/me` and exposes `isAdmin` as a `$derived` value.
 
-#### Structured output (Instructor `Mode.TOOLS`, all providers)
+#### Structured output (per-provider mode: JSON for OpenAI-compatible, TOOLS for Anthropic)
 - Callers pass a **Pydantic `response_model`** to `generate_json` / `generate_json_from_pdf`;
-  Instructor coerces the output via **tool-calling** (`Mode.TOOLS`) and returns a validated
-  instance. Example: `self.llm.generate_json(spec, response_model=FilterResult, temperature=…)`.
-- The tool `input_schema` path is lenient about JSON-Schema constraint keywords (`minimum`/
-  `maximum`/`maxLength`/…), so the old per-provider strict-schema reshaping was **removed**
-  (`src/llm/schema_strict.py` is deleted). Confirmed by a live Anthropic gate: `FilterResult`
-  (which carries `minimum`/`maximum`) returns no 400 under `Mode.TOOLS`, and prompt caching fires
-  (`cache_read_input_tokens` non-zero on repeat). See
-  `docs/plans/completed/instructor-migration-plan.md`, Task 6.
+  Instructor coerces the output and returns a validated instance. Example:
+  `self.llm.generate_json(spec, response_model=FilterResult, temperature=…)`.
+- **Mode is selected in `InstructorClient.__init__`**: OpenAI-compatible providers (OpenAI,
+  DeepSeek, xAI) use `Mode.JSON` (native `response_format={"type": "json_object"}`, no function
+  tools); Anthropic uses `Mode.TOOLS` (`tool_use`). Both paths validate against the Pydantic model
+  and retry via Instructor/Tenacity.
+- **Why JSON mode for OpenAI-compatible**: OpenAI's gpt-5.4+ reasoning family (terra/sol/luna,
+  5.1/5.2, …) rejects *function tools combined with reasoning* on `/v1/chat/completions`
+  (`"Function tools with reasoning_effort are not supported … use /v1/responses or set
+  reasoning_effort to 'none'"`). `Mode.JSON` sends no function tools, so the conflict never arises
+  **and reasoning stays enabled** (no `reasoning_effort` override needed). This replaced an earlier
+  `reasoning_effort="none"` injection.
+- Schema constraint keywords (`minimum`/`maximum`/`maxLength`/…) are handled leniently on both
+  paths, so the old per-provider strict-schema reshaping stays **removed** (`src/llm/schema_strict.py`
+  deleted). A live Anthropic gate confirmed `FilterResult` (which carries `minimum`/`maximum`)
+  returns no 400 under `Mode.TOOLS`, and prompt caching fires (`cache_read_input_tokens` non-zero on
+  repeat). See `docs/plans/completed/instructor-migration-plan.md`, Task 6.
 - A raw `schema: dict` is still accepted by `generate_json` (builds a throwaway model, returns a
   plain `dict`) for ad-hoc call sites, but every first-party call now uses `response_model`.
 - `provider_supports_pdf(provider)` (`src/llm/base.py`) tracks PDF capability — LiteLLM 1.93.0
@@ -504,8 +514,9 @@ per-provider class to write:
 1. Add the provider to the `LLMProvider` enum (`src/llm/base.py`).
 2. Add the LiteLLM route prefix to `PROVIDER_LITELLM_PREFIX` in
    `src/llm/providers/instructor_client.py` (confirm the correct LiteLLM prefix, e.g. `xai/`,
-   `deepseek/`; verify the provider supports **tool calling** for `Mode.TOOLS`, else fall back to
-   Instructor `Mode.JSON`).
+   `deepseek/`). Structured-output mode is decided in `InstructorClient.__init__`: an
+   OpenAI-compatible provider should use `Mode.JSON` (extend the `_is_anthropic` branch logic if
+   the new provider is *not* OpenAI-compatible and needs `Mode.TOOLS`/a provider-specific mode).
 3. Add `*_api_key` / `*_model` settings to `settings.py` and the resolution branch in
    `create_llm_client` (`src/agents/_shared.py`).
 4. If the provider accepts native PDF input, add it to `_PDF_CAPABLE_PROVIDERS`
