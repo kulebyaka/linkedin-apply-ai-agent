@@ -64,6 +64,36 @@ PROVIDER_LITELLM_PREFIX: dict[LLMProvider, str] = {
 }
 
 
+@lru_cache(maxsize=128)
+def _model_flag(model: str, flag: str) -> bool:
+    """Read a boolean capability ``flag`` for ``model`` from LiteLLM's model map.
+
+    Unknown models (no map entry) return ``False`` so we never send a param the
+    model may not accept.
+    """
+    try:
+        info = litellm.get_model_info(model)
+    except Exception:
+        return False
+    return bool(info.get(flag))
+
+
+@lru_cache(maxsize=128)
+def _supports_reasoning(model: str) -> bool:
+    """Whether ``model`` accepts a ``reasoning_effort`` param at all.
+
+    ``litellm.supports_reasoning`` is the right gate — rather than "is this a
+    reasoning model" — because it is ``False`` both for non-reasoning models
+    (``gpt-4o``, ``deepseek-chat``, ``claude-3-5-sonnet``) *and* for models that
+    reason internally but reject the param (``xai/grok-4`` errors on it, while
+    ``grok-4.5`` and ``grok-3-mini`` accept it).
+    """
+    try:
+        return bool(litellm.supports_reasoning(model=model))
+    except Exception:
+        return False
+
+
 def litellm_model(provider: LLMProvider, bare_model: str) -> str:
     """Return the LiteLLM-prefixed model string for ``provider``/``bare_model``.
 
@@ -107,6 +137,40 @@ class InstructorClient(BaseLLMClient):
     @property
     def _is_anthropic(self) -> bool:
         return self.model.startswith("anthropic/")
+
+    def reasoning_kwargs(self, effort: str = "low", *, structured: bool) -> dict[str, Any]:
+        """Reasoning kwargs for this model on this path, or ``{}`` if unsupported.
+
+        Gates, in order:
+
+        1. ``litellm.supports_reasoning`` — the model must accept the param (see
+           :func:`_supports_reasoning`; notably excludes ``grok-4``, which
+           reasons but rejects it).
+        2. **Structured path on Anthropic only.** ``Mode.TOOLS`` forces the tool
+           call, and Claude 4.5 and earlier — whose only thinking mode is a
+           fixed ``budget_tokens`` budget — reject that combination outright:
+           ``"Thinking may not be enabled when tool_choice forces tool use."``
+           Adaptive-thinking models (Claude 4.6+, ``supports_adaptive_thinking``)
+           accept it. OpenAI-compatible providers are unaffected because their
+           structured path is ``Mode.JSON`` — no function tools involved.
+        3. **Anthropic, both paths.** Thinking requires ``temperature`` 1, so the
+           returned dict pins it: ``"`temperature` may only be set to 1 when
+           thinking is enabled or in adaptive mode"``. ``litellm.drop_params``
+           does not help here — the param is supported, just not at another
+           value — so the caller's temperature has to be replaced, not dropped.
+        """
+        if not _supports_reasoning(self.model):
+            return {}
+        if (
+            structured
+            and self._is_anthropic
+            and not _model_flag(self.model, "supports_adaptive_thinking")
+        ):
+            return {}
+        kwargs: dict[str, Any] = {"reasoning_effort": effort}
+        if self._is_anthropic:
+            kwargs["temperature"] = 1.0
+        return kwargs
 
     def _build_messages(self, spec: PromptSpec) -> list[dict]:
         """Translate a ``PromptSpec`` into LiteLLM/OpenAI-style messages.

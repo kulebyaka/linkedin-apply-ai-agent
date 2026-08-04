@@ -16,7 +16,7 @@ import instructor
 import pytest
 from pydantic import BaseModel
 
-from src.llm.base import LLMProvider
+from src.llm.base import BaseLLMClient, LLMProvider
 from src.llm.prompt_spec import PromptSpec
 from src.llm.providers.instructor_client import (
     InstructorClient,
@@ -390,3 +390,70 @@ class TestGenerateJsonFromPdf:
 
         assert isinstance(result, dict)
         assert result == {"title": "X"}
+
+
+class TestReasoningKwargs:
+    """Capability gating for ``reasoning_kwargs`` (reads LiteLLM's model map)."""
+
+    @pytest.mark.parametrize(
+        "model",
+        [
+            "openai/gpt-4o",  # not a reasoning model
+            "deepseek/deepseek-chat",  # not a reasoning model
+            "xai/grok-2-1212",  # not a reasoning model
+            "xai/grok-4",  # reasons internally but rejects reasoning_effort
+            "openai/not-a-real-model-xyz",  # absent from the model map
+        ],
+    )
+    @pytest.mark.parametrize("structured", [True, False])
+    def test_unsupported_models_get_nothing(self, model: str, structured: bool):
+        client = InstructorClient(api_key="test", model=model)
+        assert client.reasoning_kwargs("low", structured=structured) == {}
+
+    @pytest.mark.parametrize("model", ["openai/gpt-5-mini", "xai/grok-4.5"])
+    @pytest.mark.parametrize("structured", [True, False])
+    def test_openai_compatible_reasoning_models_on_both_paths(self, model: str, structured: bool):
+        """No function tools on the OpenAI-compatible path (``Mode.JSON``), so the
+        structured path is not restricted and temperature is left alone."""
+        client = InstructorClient(api_key="test", model=model)
+        assert client.reasoning_kwargs("low", structured=structured) == {"reasoning_effort": "low"}
+
+    def test_anthropic_pins_temperature_on_text_path(self):
+        """Extended-thinking-only Claude: fine for plain text, but thinking only
+        runs at temperature 1."""
+        client = InstructorClient(api_key="test", model="anthropic/claude-sonnet-4-5")
+        assert client.reasoning_kwargs("low", structured=False) == {
+            "reasoning_effort": "low",
+            "temperature": 1.0,
+        }
+
+    def test_anthropic_without_adaptive_thinking_opts_out_of_structured_path(self):
+        """Forced tool_choice + fixed thinking budget is a 400 on Claude 4.5."""
+        client = InstructorClient(api_key="test", model="anthropic/claude-sonnet-4-5")
+        assert client.reasoning_kwargs("low", structured=True) == {}
+
+    @pytest.mark.parametrize("model", ["anthropic/claude-sonnet-4-6", "anthropic/claude-sonnet-5"])
+    def test_anthropic_adaptive_thinking_allows_structured_path(self, model: str):
+        client = InstructorClient(api_key="test", model=model)
+        assert client.reasoning_kwargs("low", structured=True) == {
+            "reasoning_effort": "low",
+            "temperature": 1.0,
+        }
+
+    def test_effort_is_passed_through(self):
+        client = InstructorClient(api_key="test", model="openai/gpt-5-mini")
+        assert client.reasoning_kwargs("high", structured=False) == {"reasoning_effort": "high"}
+
+    def test_base_client_default_is_no_reasoning(self):
+        """The ABC default opts out so provider clients must opt in."""
+
+        class _Bare(BaseLLMClient):
+            def generate(self, spec, temperature=0.7, **kwargs):  # noqa: ANN001
+                return ""
+
+            def generate_json(self, spec, response_model=None, **kwargs):  # noqa: ANN001
+                return {}
+
+        bare = _Bare(api_key="k", model="whatever")
+        assert bare.reasoning_kwargs("low", structured=True) == {}
+        assert bare.reasoning_kwargs("low", structured=False) == {}

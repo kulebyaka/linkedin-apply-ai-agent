@@ -263,6 +263,29 @@ The system uses a **two-workflow pipeline** split at the HITL boundary, enabling
 - `provider_supports_pdf(provider)` (`src/llm/base.py`) tracks PDF capability — LiteLLM 1.93.0
   has no `supports_pdf_input` lookup. OpenAI + Anthropic support PDF; Grok + DeepSeek do not.
 
+#### Reasoning effort (`reasoning_kwargs`)
+- Call sites never set `reasoning_effort` themselves — they ask the client:
+  `self.llm.reasoning_kwargs("low", structured=…)` returns completion kwargs or `{}`.
+  `BaseLLMClient.reasoning_kwargs` defaults to `{}` (opt-in); `InstructorClient` overrides it.
+- **Gates** (in order): `litellm.supports_reasoning(model)` must be True — it is `False` both for
+  non-reasoning models (`gpt-4o`, `deepseek-chat`, `claude-3-5-sonnet`) *and* for models that reason
+  but reject the param (`xai/grok-4`; `grok-4.5` / `grok-3-mini` accept it). Then, on the
+  **structured path with Anthropic only**, `Mode.TOOLS` forces the tool call and Claude 4.5-and-earlier
+  reject that with thinking on (`"Thinking may not be enabled when tool_choice forces tool use."`);
+  adaptive-thinking models (4.6+, `supports_adaptive_thinking`) are fine. OpenAI-compatible providers
+  are unaffected — their structured path is `Mode.JSON`, no function tools.
+- **Anthropic pins `temperature: 1.0`** in the returned dict on both paths (`"`temperature` may only
+  be set to 1 when thinking is enabled or in adaptive mode"`). `litellm.drop_params` does *not*
+  rescue this — the param is supported, just not at another value. So merge the reasoning kwargs
+  **over** the call's own kwargs (`call_kwargs.update(...)`), never pass `temperature` alongside them
+  or Python raises on the duplicate keyword.
+- **Where it's enabled**: only `JobFilter.generate_prompt_from_preferences` and
+  `JobFilter.generate_refinement` (`JobFilter.PROMPT_AUTHORING_REASONING = "low"`) — rare,
+  user-triggered prompt-authoring work. Deliberately **not** on `evaluate_job`, CV composition, or
+  PDF extraction: measured on the real filter prompt, reasoning cost ~7x the output tokens and ~5x
+  the latency without changing a single verdict, and `FilterResult` already declares `reasoning`
+  before `score` so the model reasons in-schema for ~150 tokens instead of ~3000.
+
 #### Prompt caching (preserved both providers)
 - **Anthropic**: `PromptSpec.system` is emitted as a content-block list with
   `cache_control: {"type": "ephemeral"}`; LiteLLM maps it onto Anthropic's top-level `system`
