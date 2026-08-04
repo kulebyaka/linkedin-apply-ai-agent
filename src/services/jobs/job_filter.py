@@ -39,6 +39,17 @@ class JobFilter:
 
     TEMPERATURE = 0.2  # Low temperature for consistent evaluations
 
+    #: Reasoning depth requested for the two prompt-authoring calls
+    #: (:meth:`generate_prompt_from_preferences` / :meth:`generate_refinement`).
+    #: Those are rare, user-triggered, and genuinely reasoning-shaped — writing
+    #: and revising an evaluation prompt. Per-job :meth:`evaluate_job` is
+    #: deliberately left without reasoning: measured on this prompt it cost ~7x
+    #: the output tokens and ~5x the latency without changing a single verdict,
+    #: and ``FilterResult`` already declares ``reasoning`` before ``score`` so
+    #: the model reasons in-schema. ``low`` is ample for prompt authoring; the
+    #: client returns ``{}`` for models that don't accept the param.
+    PROMPT_AUTHORING_REASONING = "low"
+
     def __init__(
         self,
         llm_client: BaseLLMClient,
@@ -124,8 +135,15 @@ class JobFilter:
             user_vars={"natural_language_prefs": natural_language_prefs},
         )
 
+        # Reasoning kwargs come last: on Anthropic they replace ``temperature``
+        # (thinking only runs at 1), so they must override, not sit alongside.
+        call_kwargs: dict[str, Any] = {"temperature": 0.4}
+        call_kwargs.update(
+            self.llm.reasoning_kwargs(self.PROMPT_AUTHORING_REASONING, structured=False)
+        )
+
         try:
-            generated = self.llm.generate(spec, temperature=0.4)
+            generated = self.llm.generate(spec, **call_kwargs)
         except Exception as e:
             logger.error(f"Prompt generation failed: {e}")
             raise JobFilterError(f"Prompt generation failed: {e}") from e
@@ -174,11 +192,16 @@ class JobFilter:
             },
         )
 
+        call_kwargs: dict[str, Any] = {"temperature": 0.3}
+        call_kwargs.update(
+            self.llm.reasoning_kwargs(self.PROMPT_AUTHORING_REASONING, structured=True)
+        )
+
         try:
             raw = self.llm.generate_json(
                 spec,
                 response_model=FilterRefinement,
-                temperature=0.3,
+                **call_kwargs,
             )
         except Exception as e:
             logger.error(f"Refinement generation failed: {e}")

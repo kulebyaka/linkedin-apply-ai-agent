@@ -27,6 +27,9 @@ class MockLLMClient(BaseLLMClient):
         self._generate_response: str | None = None
         self.generate_json_calls: list[dict] = []
         self.generate_calls: list[dict] = []
+        #: When set, stands in for a reasoning-capable model: the value is
+        #: returned from ``reasoning_kwargs`` regardless of path.
+        self.reasoning_override: dict | None = None
 
     def set_generate_json_response(self, response: dict):
         self._generate_json_response = response
@@ -34,10 +37,15 @@ class MockLLMClient(BaseLLMClient):
     def set_generate_response(self, response: str):
         self._generate_response = response
 
+    def reasoning_kwargs(self, effort: str = "low", *, structured: bool) -> dict:
+        if self.reasoning_override is None:
+            return {}
+        return {**self.reasoning_override, "effort_asked": effort, "structured_asked": structured}
+
     def generate(self, spec: PromptSpec, temperature: float = 0.7, **kwargs) -> str:
         prompt_text = (spec.system or "") + "\n" + spec.user
         self.generate_calls.append(
-            {"spec": spec, "prompt": prompt_text, "temperature": temperature}
+            {"spec": spec, "prompt": prompt_text, "temperature": temperature, "kwargs": kwargs}
         )
         if self._generate_response is not None:
             return self._generate_response
@@ -60,6 +68,7 @@ class MockLLMClient(BaseLLMClient):
                 "schema": schema,
                 "response_model": response_model,
                 "temperature": temperature,
+                "kwargs": kwargs,
             }
         )
         if self._generate_json_response is not None:
@@ -392,6 +401,67 @@ class TestGeneratePromptFromPreferences:
 
         with pytest.raises(JobFilterError, match="Prompt generation failed"):
             job_filter.generate_prompt_from_preferences("test")
+
+
+# ---------------------------------------------------------------------------
+# Reasoning effort on the prompt-authoring calls
+# ---------------------------------------------------------------------------
+
+
+class TestPromptAuthoringReasoning:
+    """The two prompt-authoring calls ask for reasoning; evaluate_job does not."""
+
+    def test_prompt_generation_requests_low_reasoning_on_text_path(self, job_filter, mock_llm):
+        mock_llm.reasoning_override = {"reasoning_effort": "low"}
+        mock_llm.set_generate_response("Generated prompt")
+        job_filter.generate_prompt_from_preferences("remote only")
+
+        kwargs = mock_llm.generate_calls[0]["kwargs"]
+        assert kwargs["reasoning_effort"] == "low"
+        assert kwargs["effort_asked"] == "low"
+        assert kwargs["structured_asked"] is False
+
+    def test_refinement_requests_low_reasoning_on_structured_path(self, job_filter, mock_llm):
+        mock_llm.reasoning_override = {"reasoning_effort": "low"}
+        mock_llm.set_generate_json_response(
+            {
+                "proposed_learned_block": "## Auto-learned criteria\n- avoid hybrid",
+                "rationale": "user declined hybrid roles",
+            }
+        )
+        job_filter.generate_refinement("", ["hybrid"], [])
+
+        kwargs = mock_llm.generate_json_calls[0]["kwargs"]
+        assert kwargs["reasoning_effort"] == "low"
+        assert kwargs["structured_asked"] is True
+
+    def test_reasoning_overrides_temperature_without_duplicate_kwarg(self, job_filter, mock_llm):
+        """Anthropic pins temperature to 1 alongside reasoning — the call must
+        accept that as an override, not raise on a duplicate keyword."""
+        mock_llm.reasoning_override = {"reasoning_effort": "low", "temperature": 1.0}
+        mock_llm.set_generate_response("Generated prompt")
+        job_filter.generate_prompt_from_preferences("remote only")
+
+        assert mock_llm.generate_calls[0]["temperature"] == 1.0
+
+    def test_unsupported_model_keeps_tuned_temperature(self, job_filter, mock_llm):
+        mock_llm.reasoning_override = None  # client reports no reasoning support
+        mock_llm.set_generate_response("Generated prompt")
+        job_filter.generate_prompt_from_preferences("remote only")
+
+        assert mock_llm.generate_calls[0]["temperature"] == 0.4
+        assert "reasoning_effort" not in mock_llm.generate_calls[0]["kwargs"]
+
+    def test_evaluate_job_never_requests_reasoning(
+        self, job_filter, mock_llm, job_posting, good_filter_result_dict
+    ):
+        mock_llm.reasoning_override = {"reasoning_effort": "low"}
+        mock_llm.set_generate_json_response(good_filter_result_dict)
+        job_filter.evaluate_job(job_posting)
+
+        call = mock_llm.generate_json_calls[0]
+        assert "reasoning_effort" not in call["kwargs"]
+        assert call["temperature"] == JobFilter.TEMPERATURE
 
 
 # ---------------------------------------------------------------------------
