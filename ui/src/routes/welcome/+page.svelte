@@ -59,14 +59,14 @@
 			name: 'HITL Review',
 			tag: 'YOU',
 			description:
-				'Review AI-generated CVs in a Tinder-style interface. Decline, ask the AI to Retry with feedback, or Mark Reviewed and open the job in LinkedIn to apply manually.',
+				'Review AI-generated CVs in a Tinder-style interface. Decline, ask the AI to Retry with feedback, or Mark Reviewed and open the job in LinkedIn to apply manually. Your decline reasons also teach the filter over time.',
 		},
 		{
 			num: '06',
 			name: 'Application',
 			tag: 'AI',
 			description:
-				"Auto-application is on the roadmap — for v1 you apply manually via the LinkedIn link surfaced in the review queue. Approved jobs still flow through the state machine so future automation can pick them up.",
+				"Auto-application is on the roadmap — nothing is ever submitted on your behalf. You apply manually via the LinkedIn link in the review queue; reviewed jobs are still recorded so future automation can pick them up.",
 			wip: { label: 'WIP', tooltip: WIP.AUTO_APPLY.tooltip },
 		},
 		{
@@ -74,41 +74,46 @@
 			name: 'History',
 			tag: 'LOG',
 			description:
-				'The API records every decision today (`GET /api/hitl/history`); a dedicated history view in the UI is next.',
-			wip: { label: 'WIP', tooltip: WIP.HISTORY_VIEW.tooltip },
+				'Every job the agent has ever touched shows up on the Applications page — filter by status, source or date, re-download any CV, see why a job was filtered out, or override the filter with Proceed Anyway.',
 		},
 	];
 
 	const features = [
 		{
 			code: 'LLM',
-			title: 'Multi-LLM Support',
+			title: 'Pick Your Model',
 			description:
-				'Switch between OpenAI, Anthropic, DeepSeek, or Grok via a single environment variable.',
+				'Choose the provider and model per job — OpenAI, Anthropic, DeepSeek or Grok — separately for CV writing and filtering. Live prices shown in the dropdown.',
 		},
 		{
 			code: 'AI',
 			title: 'Smart Filtering',
 			description:
-				'Detect hidden disqualifiers — visa requirements, experience minimums — before wasting a tailored CV.',
+				'Detect hidden disqualifiers — visa requirements, experience minimums, fake remote — before wasting a tailored CV.',
+		},
+		{
+			code: 'LRN',
+			title: 'A Filter That Learns',
+			description:
+				'Your declines and overrides become a suggested filter tweak. It is only ever a proposal — nothing changes until you accept it.',
 		},
 		{
 			code: 'USER',
 			title: 'Per-User CVs',
 			description:
-				'Your master CV is stored securely in your account. Every generated PDF stays in your private directory.',
+				'Upload your master CV as JSON, or drop in a PDF resume and let the AI extract it. Every generated PDF stays in your private directory.',
 		},
 		{
 			code: 'KEY',
 			title: 'Keyboard-Driven',
 			description:
-				'← → navigate, 1 decline, 2 retry, 3 approve. Full keyboard control in the review queue.',
+				'← → navigate, 1 decline, 2 retry, 3 mark reviewed + open in LinkedIn. Full keyboard control in the review queue.',
 		},
 		{
 			code: 'SCH',
 			title: 'Scheduled Scraping',
 			description:
-				'Set keywords and filters once. The agent fetches fresh LinkedIn jobs every hour automatically.',
+				'Set keywords and filters once. The agent fetches fresh LinkedIn jobs every hour, skipping anything it has already seen.',
 		},
 		{
 			code: 'RPT',
@@ -116,13 +121,19 @@
 			description:
 				"Not satisfied? Tell the AI exactly what to fix and it regenerates on the spot.",
 		},
+		{
+			code: 'BEL',
+			title: 'Nothing Gets Lost',
+			description:
+				'Jobs are recorded the moment they are found, failed scrapes retry on a backoff, and the bell tells you when something needs you.',
+		},
 	];
 
 	const quickStart = [
 		{
 			num: '01',
 			action: 'Upload your master CV',
-			detail: 'Paste your full work history as structured JSON',
+			detail: 'Paste your full work history as JSON, or upload a PDF resume and let the AI extract it',
 			href: '/settings',
 		},
 		{
@@ -383,7 +394,7 @@
 		<div class="mx-auto max-w-4xl">
 
 			<!-- Section header -->
-			<div class="mb-12 flex items-center gap-4 section-item" style="--i:20">
+			<div class="mb-12 flex items-center gap-4 section-item" style="--i:21">
 				<div
 					class="border-2 border-[var(--color-foreground)] bg-[var(--color-foreground)] px-3 py-1 font-mono text-xs font-bold uppercase tracking-wider text-[var(--color-primary)]"
 				>
@@ -399,7 +410,7 @@
 					<a
 						href={step.href}
 						class="group flex items-center gap-4 border-2 border-[var(--color-foreground)] bg-white p-4 shadow-brutal transition-all duration-150 hover:-translate-y-0.5 hover:bg-[var(--color-primary)] hover:shadow-brutal-lg section-item"
-						style="--i:{21 + i}"
+						style="--i:{22 + i}"
 					>
 						<!-- Number -->
 						<div
@@ -440,7 +451,7 @@
 
 	<!-- ━━━━━━━━━━━━━━━━ CTA ━━━━━━━━━━━━━━━━ -->
 	<section class="bg-[var(--color-primary)] px-4 py-16 sm:px-8">
-		<div class="mx-auto max-w-4xl section-item" style="--i:27">
+		<div class="mx-auto max-w-4xl section-item" style="--i:28">
 			<div
 				class="flex flex-col items-start gap-6 sm:flex-row sm:items-center sm:justify-between"
 			>

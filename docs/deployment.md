@@ -115,6 +115,28 @@ Active config:
 - UI build → `VITE_API_BASE_URL=""` (baked into the image), so the client uses relative `/api/*` URLs
 - Caddy config rendered from `Caddyfile` at deploy time using GH repo variables `APP_DOMAIN` and `ACME_EMAIL`
 
+### VPS `.env` essentials
+
+The API container is `env_file: .env`, and that file is **hand-managed and never written by CI** — a
+new setting means you must SSH in and add it. Settings that must not be left at their defaults in
+production:
+
+| Key | Why |
+|---|---|
+| `REPO_TYPE=sqlite` | The default is `memory` — every job would be lost on each redeploy |
+| `JWT_SECRET` | Must be a real 32+ char random value; the placeholder is rejected at signing time |
+| `DEV_AUTH_BYPASS=false` | The app **refuses to start** if this is true with a non-localhost `APP_URL` |
+| `RESEND_API_KEY`, `RESEND_FROM` | No magic links without them; `RESEND_FROM` must be a verified domain |
+| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / … | At least one, matching `PRIMARY_LLM_PROVIDER` |
+| `LINKEDIN_SEARCH_SCHEDULE_ENABLED=true` | Otherwise no browser launches and no scraping happens |
+| `LINKEDIN_EMAIL` / `LINKEDIN_PASSWORD` | Needed for the scraper session |
+| `ADMIN_ALERT_EMAIL` | Empty means silent failures — this is how you learn the LinkedIn session died |
+| `SEED_JOBS_FROM_FILE=false` | `true` replaces scraping entirely with fixture replay |
+
+`./data` and `./logs` are bind-mounted into the container, so the SQLite DB, generated PDFs, the
+model-catalog cache, and the admin-alert cooldown state all persist across deploys under
+`/opt/linkedin-apply/data/`. Back that directory up alongside the `caddy_data` volume.
+
 ## Stack layout on the VPS
 
 ```
@@ -150,7 +172,15 @@ gh release create v0.1.1 --generate-notes
 gh workflow run release.yml --ref master -f tag=v0.1.0
 ```
 
-The workflow builds linux/amd64 images for both api and ui, pushes them to GHCR with `:<tag>` and `:latest`, scps the rendered `docker-compose.yml` + `Caddyfile`, then SSHes to the VPS and runs `compose pull && up -d --remove-orphans && run --rm ui-publisher`. Watchtower is a safety net only — UI artifact refresh requires the publisher step, which only the workflow runs.
+The workflow builds linux/amd64 images for both api and ui, pushes them to GHCR with `:<tag>` and `:latest`, scps the rendered `docker-compose.yml` + `Caddyfile`, then SSHes to the VPS and, in order:
+
+1. Refreshes GHCR auth **best-effort** — persistent creds live in `/root/.docker/config.json` after the first successful login, so a missing or invalid `GHCR_PULL_TOKEN` doesn't fail the deploy.
+2. `docker compose pull`.
+3. **Deletes `data/model_catalog_cache.json`.** `load_catalog` serves a <24h disk cache verbatim without re-parsing, so a cache written by the outgoing image would mask this release's catalog/filter changes for up to 24 hours. Removing it forces a clean refetch on startup.
+4. `docker compose up -d --remove-orphans`, then `run --rm ui-publisher`, then a best-effort `caddy reload`.
+5. **Prunes old release images.** `docker image prune -f` alone only drops dangling layers and leaves the previous version-tagged image (~1.9 GB each) behind — which is what fills the 45 GB disk over successive releases. The step explicitly `docker rmi`s every tag of *our two* images except the just-deployed tag and `:latest`, scoped so other projects sharing the box are untouched, and only then runs `image prune -f`.
+
+Watchtower is a safety net only — UI artifact refresh requires the publisher step, which only the workflow runs.
 
 ## Manual operations on the VPS
 

@@ -2,11 +2,7 @@ export const WIP = {
 	AUTO_APPLY: {
 		label: 'Auto-Apply',
 		tooltip:
-			"Auto-apply is coming soon. Approve marks the job as reviewed — open it in LinkedIn to apply manually.",
-	},
-	HISTORY_VIEW: {
-		label: 'History view',
-		tooltip: 'The API records every decision; the UI surface is next.',
+			"Auto-apply isn't built yet — nothing is ever submitted on your behalf. Use “Mark Reviewed + Open in LinkedIn” to record your review and apply by hand.",
 	},
 	GENERATE_PAGE_SCOPE: {
 		label: 'MVP',
@@ -16,12 +12,7 @@ export const WIP = {
 	V1_BETA: {
 		label: 'v1 beta',
 		tooltip:
-			'Early release. WIP surfaces: auto-apply, history view. Backend records every decision; UI catches up next.',
-	},
-	DEEPSEEK_GROK_PICKER: {
-		label: 'Server config only',
-		tooltip:
-			'DeepSeek and Grok work if their API keys are configured server-side. They cannot be selected here because the browser cannot validate the key.',
+			'Early release. Everything up to the apply step works: scraping, filtering, CV tailoring, review, and history. The one gap is auto-apply — you apply manually on LinkedIn.',
 	},
 } as const;
 

@@ -85,6 +85,10 @@ data/linkedin_cookies.json.*
 data/linkedin_debug/
 data/vps_snapshot/
 data/*.html
+# Runtime cache of the LiteLLM pricing JSON — refetched on startup and deleted
+# by the release workflow on deploy. Never commit it; a stale copy would mask
+# the running image's catalog filter for up to 24h.
+data/model_catalog_cache.json
 !data/cv/master_cv.example.json
 scripts/test_job.json
 

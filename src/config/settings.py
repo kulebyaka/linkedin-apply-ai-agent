@@ -87,7 +87,7 @@ class Settings(BaseSettings):
     # PDF / CV Template  (same for everyone — change via CV_TEMPLATE_NAME in .env)
     # -------------------------------------------------------------------------
     cv_template_dir: str = "src/templates/cv"
-    cv_template_name: str = "compact"   # modern | compact | classic | minimal | profile-card
+    cv_template_name: str = "compact"   # modern | compact | profile-card
 
     # -------------------------------------------------------------------------
     # LinkedIn Search — global fallback (env-specific — set in .env)
@@ -166,7 +166,6 @@ class Settings(BaseSettings):
     cv_composer_max_retries: int = 3
     cv_composer_enable_hallucination_checks: bool = True
     cv_composer_hallucination_policy: str = "strict"    # "strict" | "warn" | "disabled"
-    cv_composer_model_override: str | None = None       # env-specific override
 
     # -------------------------------------------------------------------------
     # CV Length Limits  (same for everyone — targets a 2-page output)

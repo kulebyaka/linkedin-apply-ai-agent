@@ -1,10 +1,19 @@
 """Eval-specific fixtures and configuration"""
 
+import importlib.util
 import json
 import os
 from pathlib import Path
 
 import pytest
+
+# `deepeval` is deliberately NOT a declared dependency — the eval tier calls real
+# LLMs and costs money, so it's installed on demand (`uv pip install deepeval`).
+# Without this guard, a bare `pytest` run dies with 4 collection ImportErrors
+# before any unit test runs. Skip the modules instead so the default run is clean
+# and `-m eval` still works once deepeval is present.
+if importlib.util.find_spec("deepeval") is None:
+    collect_ignore_glob = ["test_*.py"]
 
 
 # Automatically mark all tests in eval/ directory

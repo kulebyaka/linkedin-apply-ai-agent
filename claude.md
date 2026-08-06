@@ -4,627 +4,306 @@ This document provides context for Claude Code (or any AI assistant) to effectiv
 
 **IMPORTANT**: The `implementation-plan.md` file is the **source of truth** for all functional and non-functional requirements, architecture decisions, and design specifications. Always refer to it when making architectural decisions or implementing features.
 
+Derivable detail (directory layout, dependency list, API routes, model fields, command lines) is
+deliberately **not** duplicated here — read the code. What follows is the part the code can't tell
+you: design rationale, non-obvious contracts, and gotchas. Node-level workflow detail is in
+`agents.md`; LLM-layer internals in `src/llm/CLAUDE.md`.
+
 ## Project Overview
 
-**LinkedIn Job Application Agent** is an intelligent automation system that:
-- Supports multiple users with magic-link email authentication (via Resend.com)
-- Fetches job postings from LinkedIn hourly (per-user search preferences)
-- Uses LLM to filter jobs and detect hidden disqualifiers
-- Tailors CV for each job using AI (per-user master CV stored in DB)
-- Generates professional PDF resumes
-- Automates LinkedIn job applications via browser automation
-- Implements Human-in-the-Loop (HITL) approval with Tinder-like UI
-- Supports multiple LLM providers (OpenAI, DeepSeek, Grok, Anthropic)
+**LinkedIn Job Application Agent** is a self-hosted, multi-user system that:
+- Authenticates users with magic-link email (Resend.com) + JWT cookie
+- Scrapes LinkedIn job postings hourly per user (opt-in scheduler, per-user search preferences)
+- Uses an LLM to filter jobs and detect hidden disqualifiers
+- Tailors each user's master CV per job and renders a PDF
+- Puts every result through a Tinder-like batch Human-in-the-Loop review
+- Supports four LLM providers (OpenAI, Anthropic, DeepSeek, Grok), selectable per user *and* per
+  operation
 
-## Architecture
+**It does not apply to jobs.** There is no application workflow and no Easy Apply automation — the
+old stubs were deleted rather than left to rot. "Approve" in the review UI records
+`BusinessState.APPROVED` and opens the LinkedIn tab; the user applies by hand. Any doc or comment
+suggesting otherwise is stale — fix it.
 
-### Core Technology Stack
-- **Workflow Orchestration**: LangGraph (state machine for agent workflow)
-- **Backend Framework**: FastAPI (for HITL UI API)
-- **Authentication**: Magic link via Resend.com + JWT (httpOnly cookie)
-- **Browser Automation**: Playwright
-- **Data Validation**: Pydantic v2
-- **PDF Generation**: WeasyPrint + Jinja2
-- **LLM Integration**: Multi-provider support (OpenAI, Anthropic, DeepSeek, Grok)
-- **Auth Dependencies**: `resend` (email sending), `pyjwt` (JWT tokens)
+## Pipeline Architecture
 
-### Directory Structure
+The pipeline is **split at the HITL boundary** so generated CVs can be reviewed in a batch rather
+than one at a time:
 
-```
-src/
-├── context.py                  # AppContext DI container (replaces module globals)
-├── agents/                     # LangGraph workflow definitions (async-native)
-│   ├── _shared.py              # Shared workflow utilities (LLM init, CV compose, PDF gen)
-│   ├── preparation_workflow.py # Main pipeline: job → CV → PDF → DB
-│   ├── application_workflow.py # Apply to jobs after HITL approval (stubs)
-│   └── retry_workflow.py       # Re-compose CV with user feedback
-├── llm/                        # LLM provider integrations
-│   ├── base.py                 # LLMProvider enum + BaseLLMClient ABC + provider_supports_pdf
-│   ├── provider.py             # Re-export shim (BaseLLMClient, InstructorClient, LLMProvider, …)
-│   └── providers/
-│       └── instructor_client.py # Single Instructor + LiteLLM client (all providers)
-├── services/                   # Business logic services (grouped by domain)
-│   ├── auth/                   # Authentication & user management
-│   │   ├── auth.py             # AuthService: magic link + JWT authentication
-│   │   └── user_repository.py  # UserRepository: user CRUD + search prefs + magic links
-│   ├── cv/                     # CV composition, validation & PDF generation
-│   │   ├── cv_composer.py      # LLM-powered CV tailoring
-│   │   ├── cv_validator.py     # CV validation with configurable hallucination policy
-│   │   ├── cv_prompts.py       # CV composition prompts + PromptLoader
-│   │   └── pdf_generator.py    # PDF generation from JSON (WeasyPrint)
-│   ├── db/                     # Persistence layer (Piccolo ORM + repository)
-│   │   ├── job_repository.py   # Data access layer (in-memory + SQLite via Piccolo)
-│   │   ├── tables.py           # Piccolo ORM table definitions
-│   │   └── piccolo_app.py      # Piccolo app config for migrations
-│   ├── jobs/                   # Job pipeline, queue, filter, scheduling, HITL
-│   │   ├── job_orchestrator.py # Domain service: job submission & status queries
-│   │   ├── hitl_processor.py   # Domain service: HITL decision processing
-│   │   ├── job_filter.py       # LLM-based job filtering with two-threshold routing
-│   │   ├── job_source.py       # Job source adapters (URL, manual, LinkedIn)
-│   │   ├── job_queue.py        # Async job queue + ConsumerManager for lifecycle
-│   │   ├── job_fixtures.py     # Record/replay scraped jobs for testing
-│   │   └── scheduler.py        # APScheduler-based per-user LinkedIn search scheduler
-│   └── linkedin/               # LinkedIn scraping & browser automation
-│       ├── browser_automation.py # Playwright stealth browser with cookie auth
-│       ├── linkedin_scraper.py # LinkedIn job search results scraper
-│       └── linkedin_search.py  # LinkedIn search URL builder + filters
-├── models/                     # Pydantic data models
-│   ├── job.py                  # Job posting models
-│   ├── cv.py                   # CV data models
-│   ├── cv_attempt.py           # CVCompositionAttempt for retry history tracking
-│   ├── job_filter.py           # FilterResult + UserFilterPreferences models
-│   ├── state_machine.py        # BusinessState + WorkflowStep enums, transition validation
-│   ├── unified.py              # Unified models for two-workflow architecture
-│   └── user.py                 # User, auth, and search preference models
-├── api/                        # FastAPI endpoints (thin adapters)
-│   └── main.py                 # REST API — delegates to domain services
-├── config/                     # Configuration
-│   └── settings.py             # Pydantic settings with env vars
-└── utils/                      # Utilities
-    └── logger.py               # Logging setup
-
-data/
-├── cv/                         # Legacy master CV location (now stored in User DB record)
-├── jobs/                       # Fetched job data
-└── generated_cvs/              # Tailored CV PDFs (per-user: {user_id}/{job_id}.pdf)
-
-prompts/
-└── job_filter/
-    ├── default_filter_prompt.txt       # Default LLM filter prompt template
-    └── generate_prompt_from_prefs.txt  # Meta-prompt: natural language → filter prompt
-```
-
-## Two-Workflow Pipeline Architecture
-
-The system uses a **two-workflow pipeline** split at the HITL boundary, enabling batch review of generated CVs.
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         PREPARATION WORKFLOW                                 │
-│  (runs continuously, processes jobs, saves to DB for batch review)          │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│   Job Source ──► Extract ──► Filter ──► Compose CV ──► Generate PDF ──► DB │
-│   (URL/Manual)                                                    (pending) │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-                        ┌───────────────────────┐
-                        │    HITL BOUNDARY      │
-                        │  (Tinder-like batch   │
-                        │   review UI)          │
-                        │                       │
-                        │  ✓ Approve            │
-                        │  ✗ Decline            │
-                        │  ↻ Retry + feedback   │
-                        └───────────────────────┘
-                                    │
-              ┌─────────────────────┼─────────────────────┐
-              ▼                     ▼                     ▼
-┌─────────────────────┐  ┌─────────────────────┐  ┌─────────────────────┐
-│ APPLICATION WORKFLOW│  │  RETRY WORKFLOW     │  │      DECLINED       │
-│ (triggered on       │  │  (regenerate CV     │  │   (no action)       │
-│  approve)           │  │   with feedback)    │  │                     │
-├─────────────────────┤  ├─────────────────────┤  └─────────────────────┘
-│ Load ──► Apply ──►  │  │ Load ──► Compose    │
-│          Update DB  │  │   ──► PDF ──►       │
-│                     │  │      Update DB      │
-│ (stubs only -       │  │                     │
-│  deep agent future) │  │ (loops back to      │
-│                     │  │  HITL pending)      │
-└─────────────────────┘  └─────────────────────┘
-```
+- **Discovery** (`src/services/jobs/scheduler.py`) — not a graph. Per-user LinkedIn search on an
+  APScheduler interval; every discovered job is persisted as `queued` *at discovery* and pushed onto
+  an `asyncio` queue drained by a single `ConsumerManager` task.
+- **Preparation** (`src/agents/preparation_workflow.py`) — extract → filter → compose CV →
+  generate PDF → save.
+- **HITL boundary** — batch review UI: decline / retry-with-feedback / mark-reviewed.
+- **Retry** (`src/agents/retry_workflow.py`) — re-composes the CV with user feedback and loops the
+  record back to `pending`.
+- **Dispatcher** (`src/agents/dispatcher.py`) — the *only* way workflows are invoked. Owns the
+  `config["configurable"]` dict, workflow-thread registration, and failure persistence. Four call
+  sites previously duplicated this; don't add a fifth by calling `ainvoke` directly.
+- **Shared** (`src/agents/_shared.py`) — LLM client construction, CV compose, PDF gen, master CV
+  loading, config accessors.
 
 ### Workflow Modes
 
 - **MVP Mode** (`mode="mvp"`): Generate PDF only, skip HITL, status = `completed`
 - **Full Mode** (`mode="full"`): Generate PDF, save to DB with status = `pending` for HITL review
 
-### Workflow Files
-
-| Workflow | File | Description |
-|----------|------|-------------|
-| Preparation | `src/agents/preparation_workflow.py` | Main pipeline: job input → CV PDF → DB |
-| Retry | `src/agents/retry_workflow.py` | Re-compose CV with user feedback |
-| Application | `src/agents/application_workflow.py` | Apply to job (stubs only) |
-| Shared | `src/agents/_shared.py` | Common utilities: LLM init, CV compose, PDF gen, master CV loading |
-
 ## Key Design Patterns
 
 ### 1. Dependency Injection via AppContext
 - `src/context.py` defines a single `AppContext` dataclass holding all shared dependencies
 - Created once at startup via `create_app_context()` and stored in `app.state.ctx`
-- Includes `user_repository: UserRepository` and `auth_service: AuthService`
 - No module-level globals — all dependencies are explicit and injected
-- Workflow nodes receive `repository` via LangGraph's `config["configurable"]` dict
-- Domain services (`JobOrchestrator`, `HITLProcessor`) receive the full `AppContext`
+- Workflow nodes receive repositories via LangGraph's `config["configurable"]` dict
+- Domain services (`JobOrchestrator`, `HITLProcessor`, `WorkflowDispatcher`) receive the full `AppContext`
+- Most `AppContext` fields are `| None`: optional subsystems (scheduler, browser, notification repo,
+  schedulers) are only wired when their config enables them. Guard before use.
 
 ### 2. LangGraph Workflows (Async-Native)
 - All workflow node functions are `async def` — use `await` directly, no `asyncio.run()` hacks
-- Invoked via `workflow.ainvoke()` / `workflow.astream()`
+- Invoked via `workflow.ainvoke()` (through the dispatcher), compiled with a `MemorySaver` checkpointer
 - Shared logic extracted to `src/agents/_shared.py` to eliminate duplication
 - State management with TypedDict classes
-- Repository passed via `config["configurable"]["repository"]`
+- **`current_step` (a `WorkflowStep`) and `target_status` (a `BusinessState`) are separate fields.**
+  Routing functions read `target_status`. Writing a `BusinessState` into `current_step` mixed the two
+  enums and was the historical source of routing bugs.
+- Nodes signal business outcomes by setting `target_status` / `error_message`, not by raising.
 
 ### 3. Job Lifecycle State Machine
 - `src/models/state_machine.py` defines `BusinessState` and `WorkflowStep` enums
-- `BusinessState`: queued → processing → cv_ready/pending_review → approved/declined/retrying → applied/failed; also `filtered_out` (terminal, reachable from queued/processing)
-- `WorkflowStep`: transient step tracking (extracting, composing_cv, generating_pdf, etc.)
-- `ALLOWED_TRANSITIONS` map enforces valid state changes; raises `InvalidStateTransitionError` on violations
-- Both `InMemoryJobRepository` and `SQLiteJobRepository` validate transitions on `update()`
+- `BusinessState`: `queued` → `processing` → `completed` (MVP) or `pending` (HITL) →
+  `approved`/`declined`/`retrying`; plus `failed`, `filtered_out`, `scrape_failed`, and the
+  reserved-but-unused `applying`/`applied`
+- Two deliberate name/value mismatches, preserved for data + frontend compatibility:
+  `COMPLETED = "completed"` means "CV ready", `PENDING = "pending"` means "pending HITL review"
+- `ALLOWED_TRANSITIONS` enforces valid changes; violations raise `InvalidStateTransitionError`.
+  Both `InMemoryJobRepository` and `SQLiteJobRepository` validate on `update()`
+- `filtered_out` is how LLM-rejected jobs are recorded without generating a CV. It is **not**
+  terminal: "Proceed Anyway" transitions it to `processing`
+- `scrape_failed` self-transitions so idempotent re-attempts can bump the counter
+- `failed` → `queued` exists only for admin-initiated retry
+- `approved` is terminal in practice, since nothing consumes it
 
 ### 4. Domain Services (Thin API Handlers)
-- `JobOrchestrator`: job submission, status queries, workflow dispatch
-- `HITLProcessor`: approve/decline/retry decisions, pending retrieval, history
+- `JobOrchestrator`: job submission, status queries, workflow dispatch, "Proceed Anyway"
+- `HITLProcessor`: approve/decline/retry decisions, pending retrieval, history. Serializes decisions
+  per job with an in-process lock so a double-click can't race two workflows onto one record
 - API endpoints are thin adapters — extract context, call service, return result
 
 ### 5. Multi-LLM Support (Instructor + LiteLLM)
-- A single `InstructorClient(BaseLLMClient)` (`src/llm/providers/instructor_client.py`) backs
-  **all** providers. Structured output is coerced via Instructor's tool-calling mode
-  (`instructor.from_litellm(litellm.completion)` defaults to `Mode.TOOLS`); provider routing is
-  delegated to LiteLLM through prefixed model strings (`anthropic/…`, `openai/…`, `xai/…`,
-  `deepseek/…`).
-- `create_llm_client` (`src/agents/_shared.py`) resolves settings, reattaches the LiteLLM route
-  prefix via `litellm_model(provider, bare_model)` (note `GROK → xai`), and returns an
-  `InstructorClient`. There is **no** `LLMClientFactory` anymore.
-- Abstract `BaseLLMClient` interface preserved; `generate_json` gained a preferred
-  `response_model: type[BaseModel]` param (typed `@overload`s so callers get the model type back).
-- Easy switching via environment variables; `litellm.drop_params = True` drops sampling params a
-  model rejects (e.g. `temperature` on Opus 4.x / Sonnet 5) instead of gating per-model.
+- A single `InstructorClient(BaseLLMClient)` (`src/llm/providers/instructor_client.py`) backs **all**
+  providers; provider routing is delegated to LiteLLM via prefixed model strings
+  (`anthropic/…`, `openai/…`, `xai/…`, `deepseek/…`). There is **no** `LLMClientFactory`.
+- Settings and the model catalog store **bare** model ids; the route prefix is reattached in
+  `create_llm_client` (note `grok → xai/`).
+- Model choice is **per operation**: `UserModelPreferences.{cv_generation, job_filtering,
+  filter_prompt_generation}` is resolved by the caller and passed to `create_llm_client` as an
+  override, falling back to `PRIMARY_LLM_PROVIDER` + that provider's `*_MODEL`.
+- The model *list* is fetched, not hardcoded — see the catalog notes in `src/llm/CLAUDE.md`.
+- Structured output, prompt caching, retry behaviour, and the steps for adding a provider are all
+  documented in **`src/llm/CLAUDE.md`**.
 
 ### 6. Repository Pattern
-- `JobRepository` abstract interface for data persistence
+- `JobRepository` abstract interface for data persistence (`src/services/db/`)
 - `InMemoryJobRepository` (with `asyncio.Lock` for thread safety) for development
-- `SQLiteJobRepository` via Piccolo ORM for production
+- `SQLiteJobRepository` via Piccolo ORM for production; `UserRepository` and
+  `NotificationRepository` ride the same engine
+- `REPO_TYPE` defaults to `memory`, so **persistence is opt-in** — a restart otherwise loses every job
 - Supports `CVCompositionAttempt` tracking for retry history
+- Schema changes go through `src/services/db/migrations.py`: each migration inspects the live schema,
+  no-ops when already applied, and records itself in `schema_migrations`. That is what lets legacy
+  DBs upgrade in place. Add columns there, not with ad-hoc ALTERs at startup.
 
 ### 7. CV Validation (Extracted from Composer)
-- `CVValidator` in `src/services/cv_validator.py` handles hallucination checks
+- `CVValidator` in `src/services/cv/cv_validator.py` handles hallucination checks
 - Configurable `HallucinationPolicy`: STRICT (raises), WARN (logs), DISABLED (skips)
 - `CVComposer` delegates validation to `CVValidator` after composition
 
 ### 8. Job Source Adapters
-- Abstract interface in `src/services/job_source.py`
-- Adapters for URL extraction, manual input, LinkedIn API
+- Abstract interface in `src/services/jobs/job_source.py`
+- Adapters for URL extraction, manual input, LinkedIn
 - Factory pattern: `JobSourceFactory.get_adapter(source)`
+- **Filtering applies to `linkedin` jobs only.** A manually submitted description is never filtered —
+  the user asked for it explicitly.
 
 ### 9. Multi-User Authentication
 - Magic link flow: user enters email → `AuthService` generates token → sends email via Resend.com → user clicks link → JWT cookie set
-- `AuthService` in `src/services/auth.py`: magic link generation/verification, JWT creation/decoding
-- `UserRepository` in `src/services/user_repository.py`: user CRUD, magic link storage, search preferences
-- Open registration: first login auto-creates user account
+- `AuthService` in `src/services/auth/auth.py`; `UserRepository` / `MagicLinkRepository` /
+  `UserService` alongside it
+- Open registration: first login auto-creates the account with role `trial`
 - JWT stored in httpOnly cookie (`auth_token`), 30-day expiry
-- FastAPI dependencies: `get_current_user` (401 on missing auth), `get_optional_user` (returns None)
-- All job data is user-scoped: `user_id` FK on `Job` and `CVAttemptTable`
+- FastAPI dependencies live in `src/api/deps.py` (re-exported from `src/api/main.py` for
+  back-compat with older tests): `get_current_user` (401 on missing auth), `get_optional_user`
+  (returns None), `get_admin_user` (403 unless admin)
+- All job data is user-scoped: `user_id` on `Job` and `CVAttemptTable`
+- `jwt_secret` is validated twice: at import (placeholder tolerated so tests can import Settings)
+  and again in `AuthService` before signing anything
 
 ### 10. Per-User Data Ownership
-- `JobRecord` includes `user_id` field — all list queries filter by user
-- Master CV stored as JSON in `UserTable.master_cv_json` (loaded from DB, not filesystem)
-- Search preferences stored as JSON in `UserTable.search_preferences`
+- `JobRecord` includes `user_id` — all list queries filter by user
+- Master CV stored as JSON in `UserTable.master_cv_json`. **There is still a filesystem fallback**:
+  when a user record has no CV, call sites fall back to `MASTER_CV_PATH`
+  (`data/cv/master_cv.json`), which is why a missing CV surfaces as `FileNotFoundError`
+- Search / filter / model preferences stored as JSON on the user row
 - PDF output stored in per-user directories: `data/generated_cvs/{user_id}/{job_id}.pdf`
-- Scheduler iterates all users with configured search preferences, runs separate LinkedIn searches per user
 - `JobRepository.get_for_user(job_id, user_id)` enforces ownership verification
+- Scheduler state is **per user** (`UserLastRun`), not global: one user's slow or failing search
+  never blocks another's, and an on-demand manual run is never dropped because a scheduled run is
+  in flight
 
 ### 11. Admin & Roles
 - `UserRole` enum (`src/models/user.py`): `trial`, `premium`, `admin`. Default is `trial`; the enum is the extension point for future tiers.
-- Persisted as a `role` `Varchar(20)` column on `UserTable` with an index; new sign-ups land in `trial`. `UserRepository.initialize()` runtime-migrates older DBs by adding the column and defaulting existing rows to `"trial"` (same pattern as `filter_preferences`).
-- `UserRepository` exposes `set_role(user_id, role)` and `list_all_users(limit, offset)` for admin operations.
-- Authorization in the API uses two layered dependencies in `src/api/main.py`:
-  - `get_current_user` — extracts the JWT and 401s when missing.
-  - `get_admin_user` — depends on `get_current_user` and raises `HTTPException(403)` when `user.role != "admin"`. Type alias: `AdminUser = Annotated[User, Depends(get_admin_user)]`.
-- Admin-scope repository methods are additive on top of the user-scoped ones: `list_all_jobs`, `count_all_jobs`, `count_by_status_global`, `list_jobs_with_errors`, `delete`. User-scoped methods (`list_for_user`, `get_for_user`, etc.) remain the default path for non-admin callers.
+- Persisted as a `role` `Varchar(20)` column on `UserTable` with an index; runtime-migrated onto older DBs by `migrations.py`.
+- Two layered dependencies: `get_current_user` (401 when unauthenticated) and `get_admin_user`
+  (403 unless `role == "admin"`). Type alias: `AdminUser = Annotated[User, Depends(get_admin_user)]`.
+- Admin-scope repository methods are **additive** on top of the user-scoped ones (`list_all_jobs`, `count_all_jobs`, …). User-scoped methods (`list_for_user`, `get_for_user`, …) remain the default path for non-admin callers.
 - Bootstrapping the first admin: `uv run python scripts/promote_user.py --email you@example.com --role admin`. The same script supports `--role trial|premium|admin` and `--list-admins`.
 - Last-admin guard: `PUT /api/admin/users/{user_id}/role` refuses (409) to demote yourself when you are the only remaining admin. The UI mirrors this guard, but the server-side check is authoritative.
-- Frontend: `ui/src/routes/admin/+layout.svelte` redirects to `/` when `authStore.isAdmin` is false. The auth store reads `role` from `/api/auth/me` and exposes `isAdmin` as a `$derived` value.
+- Frontend: `ui/src/routes/admin/+layout.svelte` redirects to `/` when `auth.isAdmin` is false, and
+  `/admin` redirects to `/admin/jobs`. The guard is convenience only — the API is the real boundary.
 
-#### Structured output (Instructor `Mode.TOOLS`, all providers)
-- Callers pass a **Pydantic `response_model`** to `generate_json` / `generate_json_from_pdf`;
-  Instructor coerces the output via **tool-calling** (`Mode.TOOLS`) and returns a validated
-  instance. Example: `self.llm.generate_json(spec, response_model=FilterResult, temperature=…)`.
-- The tool `input_schema` path is lenient about JSON-Schema constraint keywords (`minimum`/
-  `maximum`/`maxLength`/…), so the old per-provider strict-schema reshaping was **removed**
-  (`src/llm/schema_strict.py` is deleted). Confirmed by a live Anthropic gate: `FilterResult`
-  (which carries `minimum`/`maximum`) returns no 400 under `Mode.TOOLS`, and prompt caching fires
-  (`cache_read_input_tokens` non-zero on repeat). See
-  `docs/plans/completed/instructor-migration-plan.md`, Task 6.
-- A raw `schema: dict` is still accepted by `generate_json` (builds a throwaway model, returns a
-  plain `dict`) for ad-hoc call sites, but every first-party call now uses `response_model`.
-- `provider_supports_pdf(provider)` (`src/llm/base.py`) tracks PDF capability — LiteLLM 1.93.0
-  has no `supports_pdf_input` lookup. OpenAI + Anthropic support PDF; Grok + DeepSeek do not.
+### 12. Failure Handling & Recovery
+- **Persist at discovery.** Jobs are written as `queued` when scraped, not when finished, so a crash
+  leaves a visible row instead of a silent gap.
+- **Scrape quality gate.** A description under `SCRAPER_MIN_DESCRIPTION_CHARS` (200) becomes
+  `scrape_failed` rather than feeding an empty description to the CV composer. Re-attempts are gated
+  by `SCRAPER_MAX_ATTEMPTS` *and* `SCRAPER_RETRY_BACKOFF_MINUTES` (`_should_retry_scrape`), so a
+  permanently broken posting can't churn every tick.
+- **Startup recovery** (`src/services/jobs/recovery.py`) re-enqueues or re-dispatches rows left in
+  `queued`/`processing`/`retrying`, bounded by `recovery_attempts` so poison rows can't loop.
+- **The dispatcher never clobbers a terminal state.** On exception it writes `failed` only if
+  `ALLOWED_TRANSITIONS` permits it from the current status; it can synthesize a `failed` record when
+  the workflow died before `save_to_db`.
+- **The filter fails open.** If LLM evaluation raises, the job passes through to CV composition. A
+  broken filter degrades quality; it never blocks the pipeline.
+- **Session-death detection** (`src/services/alerts.py`): a batch of ≥5 detail pages coming back ≥50%
+  empty is treated as a stale `li_at` cookie and emails `ADMIN_ALERT_EMAIL`, with cooldown state
+  persisted to disk so restarts don't re-alert. `JobRecord.session_authenticated` records the
+  per-job signal. **Cookie re-capture is manual, and a replayed `li_at` is often rejected outright by
+  LinkedIn** — this is the most fragile part of the system.
 
-#### Prompt caching (preserved both providers)
-- **Anthropic**: `PromptSpec.system` is emitted as a content-block list with
-  `cache_control: {"type": "ephemeral"}`; LiteLLM maps it onto Anthropic's top-level `system`
-  array carrying the cache breakpoint.
-- **OpenAI-compatible**: `PromptSpec.cache_key` rides in `extra_body={"prompt_cache_key": …}` (a
-  bare kwarg is dropped by LiteLLM). OpenAI auto-caches on the stable prefix regardless.
+### 13. Auto-Refining Filter Prompt
+- Declines and "Proceed Anyway" overrides become signals on the job row (`decline_reason`,
+  `override_reason`, `refine_signal_state`: pending → proposed → consumed). Each signal feeds the
+  refiner exactly once.
+- A weekly `RefinementScheduler` makes one LLM call per opted-in user and produces a
+  `RefinementProposal` for the *auto-learned block* of their `custom_prompt`, plus a persistent
+  notification linking to `/settings#filter`.
+- **The proposal is never applied automatically.** Accept splices the block between the auto-learned
+  markers (`apply_learned_block`); reject discards. Both consume the signals.
+- `AUTO_REFINE_ENABLED` is a global kill switch; the per-user opt-in defaults to **off**.
 
-#### generate_json resilience
-- **Retries**: Instructor's built-in (Tenacity) retry handles invalid/failed structured output,
-  bounded by `max_retries` (default 3). The old hand-rolled truncation-doubling +
-  retry-with-feedback loop (`LLMTruncatedError`, `build_retry_feedback`) is **gone**. Large CV
-  compositions pass a generous `max_tokens=8192` in `CVComposer._compose_all_sections` instead.
-- **Validator**: `generate_json(..., validator=callable)` still runs a caller-supplied check on
-  the parsed dict; first-party call sites rely on `response_model` validation instead.
+### 14. Notifications
+- `src/services/notifications/` + `/api/notifications/*`: persistent, user-scoped, with an unread
+  count driving the nav bell. Used by the refiner today.
+- Distinct from `AdminAlertService`, which emails the *operator* about infrastructure problems.
+- There is **no** per-job failure webhook or Telegram delivery yet (see
+  `docs/plans/telegram-job-notifications.md`).
 
-#### Model catalog (dynamic — up-to-date model list + prices)
-- `src/llm/model_catalog.py` holds a **static** `MODEL_CATALOG` (dashed real IDs, e.g.
-  `claude-opus-4-8`) used as the offline fallback.
-- `src/llm/pricing_source.py` fetches the community-maintained LiteLLM pricing JSON
-  (`model_prices_and_context_window.json`) — the source of the current model **list** *and*
-  prices for OpenAI/Anthropic/DeepSeek/xAI. Load order: fresh disk cache → live refetch →
-  stale cache → static fallback. Disk cache at `data/model_catalog_cache.json` (TTL 24h).
-- Wired via `AppContext.model_catalog` + `AppContext.refresh_model_catalog()`; loaded at
-  startup (non-blocking) and refreshed daily by `ModelCatalogScheduler`
-  (`src/services/jobs/model_catalog_scheduler.py`). The `/api/llm/models` endpoint reads the
-  context-held catalog. Config: `MODEL_CATALOG_DYNAMIC_ENABLED`, `MODEL_CATALOG_CACHE_PATH`,
-  `MODEL_CATALOG_REFRESH_HOURS`, `MODEL_CATALOG_URL`.
+### 15. Search Query Translation
+- LinkedIn treats a comma as literal text, not "OR". `linkedin_search.py` rewrites a comma list
+  (`Junior Accountant, Finance Assistant`) into `"Junior Accountant" OR "Finance Assistant"`.
+- A query already using standalone uppercase `OR`/`AND`/`NOT`, quotes, or parentheses is returned
+  **unchanged**, so a power user's query is never mangled.
 
-See `src/llm/provider.py` module documentation for detailed implementation.
+## Master CV Format
 
-## Important Implementation Details
-
-### Preparation Workflow Nodes
-1. **extract_job_node**: Extracts structured job data from source (URL/manual/LinkedIn)
-2. **filter_job_node**: LLM evaluates job suitability (LinkedIn only); scores 0-100, hard rejects go to `save_filtered_out_node`, warnings surfaced in HITL review
-3. **save_filtered_out_node**: Persists a minimal `JobRecord` with status=`filtered_out` for LLM-rejected jobs; terminal — workflow ends here
-4. **compose_cv_node**: LLM tailors CV to job description
-5. **generate_pdf_node**: Creates PDF from tailored CV JSON
-6. **save_to_db_node**: Persists job record (MVP: completed, Full: pending)
-
-### Retry Workflow Nodes
-1. **load_from_db_node**: Loads job record for retry
-2. **compose_cv_node**: Re-composes CV with user feedback
-3. **generate_pdf_node**: Regenerates PDF
-4. **update_db_node**: Updates record, returns to pending status
-
-### Application Workflow Nodes (Stubs)
-1. **load_from_db_node**: Loads approved job
-2. **apply_deep_agent_node**: Browser automation via Playwright (not implemented)
-3. **apply_linkedin_node**: LinkedIn Easy Apply automation (not implemented)
-4. **apply_manual_node**: Marks job for manual application
-5. **update_db_node**: Records application result
-
-### Master CV Format
-- Stored as JSON in each user's DB record (`UserTable.master_cv_json`)
-- Uploaded via Settings UI or API (`PUT /api/users/me`)
-- Schema defined in `src/models/cv.py`
-- Contains comprehensive work history, skills, projects
-- LLM recomposes relevant portions for each job
-- Loaded from user record and passed via workflow state (`master_cv` key)
-
-## API Endpoints
-
-### Authentication (public)
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/auth/login` | Request magic link email |
-| GET | `/api/auth/verify?token=...` | Verify magic link, set JWT cookie |
-| GET | `/api/auth/me` | Get current authenticated user |
-| POST | `/api/auth/logout` | Clear auth cookie |
-
-### User Settings (requires auth)
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| PUT | `/api/users/me` | Update user profile (display_name, master_cv_json, search_preferences) |
-| GET | `/api/users/me/search-preferences` | Get current search preferences |
-| PUT | `/api/users/me/search-preferences` | Update search preferences |
-| GET | `/api/users/me/filter-preferences` | Get current filter preferences |
-| PUT | `/api/users/me/filter-preferences` | Update filter preferences |
-| POST | `/api/users/me/filter-preferences/generate-prompt` | Generate filter prompt from natural language description |
-
-### Jobs & HITL (requires auth, user-scoped)
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/jobs/submit` | Submit job for CV generation (URL or manual input) |
-| GET | `/api/jobs/{job_id}/status` | Get job status and details |
-| GET | `/api/jobs/{job_id}/pdf` | Download generated CV PDF |
-| GET | `/api/jobs/{job_id}/html` | Get generated CV as HTML |
-| GET | `/api/hitl/pending` | Get all jobs pending HITL review |
-| POST | `/api/hitl/{job_id}/decide` | Submit HITL decision (approve/decline/retry) |
-| GET | `/api/hitl/history` | Get application history |
-| DELETE | `/api/jobs/cleanup` | Clean up old job records |
-
-### System (public)
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/jobs/linkedin-search` | Trigger LinkedIn job search manually |
-| GET | `/api/jobs/linkedin-search/status` | Get scheduler state and last run info |
-| GET | `/api/health` | Health check (includes queue consumer status) |
-
-### Admin (requires `role == "admin"`)
-
-All routes depend on `get_admin_user`, which raises 403 for non-admin callers.
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/admin/jobs` | Paged, filterable list of jobs across all users (filters: `user_id`, `status`, `source`, `created_from`, `created_to`, `search`, `limit`, `offset`) |
-| GET | `/api/admin/jobs/{job_id}` | Full job detail for any user |
-| POST | `/api/admin/jobs/{job_id}/retry` | Re-enqueue a `failed` job (409 otherwise) |
-| DELETE | `/api/admin/jobs/{job_id}` | Delete a job record + associated PDF (best-effort) |
-| POST | `/api/admin/jobs/bulk-delete` | Delete up to 100 jobs by id list |
-| GET | `/api/admin/queue` | Consumer snapshot + scheduler state + global status counts (24h / 7d) |
-| POST | `/api/admin/scheduler/run/{user_id}` | Manually fire the LinkedIn search for a specific user |
-| GET | `/api/admin/errors` | Paged list of jobs whose `error_message` or `last_scrape_error` is non-null |
-| GET | `/api/admin/users` | Paged user list with derived per-status job counts and `last_job_at` |
-| PUT | `/api/admin/users/{user_id}/role` | Change a user's role; refuses to demote the last admin (409) |
-
-## Data Models
-
-### User & Auth Models (`src/models/user.py`)
-
-- `UserRole` - Enum of role values: `TRIAL = "trial"`, `PREMIUM = "premium"`, `ADMIN = "admin"`. Extensible.
-- `User` - User entity: id, email, display_name, `role` (`UserRole`, default `trial`), master_cv_json, search_preferences, filter_preferences, timestamps
-- `LoginRequest` - Email input for magic link request
-- `LoginResponse` - Success message after magic link sent
-- `VerifyRequest` - Token for magic link verification
-- `AuthResponse` - User object + message after successful auth
-- `UserUpdateRequest` - Optional fields for profile update (display_name, master_cv_json, search_preferences, filter_preferences)
-- `UserSearchPreferences` - Mirrors LinkedInSearchParams: keywords, location, remote_filter, date_posted, experience_level, job_type, easy_apply_only, max_jobs
-
-### Core Models (`src/models/unified.py`)
-
-- `JobSubmitRequest` - Input for job submission (source, mode, url/job_description)
-- `JobSubmitResponse` - Response with job_id and status
-- `HITLDecision` - User decision (approved/declined/retry + feedback + reasoning)
-- `HITLDecisionResponse` - Response after decision processed
-- `PendingApproval` - Job details for HITL review UI (includes `filter_result` for score badge display)
-- `JobStatusResponse` - Full job status with CV and PDF info
-- `JobRecord` - Database record (includes `user_id` for ownership, `filter_result` for LLM filter output)
-- `ApplicationHistoryItem` - History entry for completed jobs
-
-### State Machine (`src/models/state_machine.py`)
-
-- `BusinessState` - Job lifecycle states: queued, processing, cv_ready, pending_review, approved, declined, retrying, applying, applied, failed, filtered_out
-  - `filtered_out`: terminal state for LLM-rejected jobs (score below reject threshold or hard disqualifier); reachable from `queued` and `processing`
-- `WorkflowStep` - Transient step tracking: extracting, filtering, composing_cv, generating_pdf, etc.
-- `ALLOWED_TRANSITIONS` - Valid state change map, enforced by repository
-- `InvalidStateTransitionError` - Raised on illegal transitions
-
-### CV Attempt History (`src/models/cv_attempt.py`)
-
-- `CVCompositionAttempt` - Tracks each CV composition: attempt_number, user_feedback, cv_json, pdf_path
-
-### Job Filter Models (`src/models/job_filter.py`)
-
-- `FilterResult` - LLM filter output: score (0-100), red_flags (list), disqualified (bool), disqualifier_reason (str|None), reasoning (str)
-- `UserFilterPreferences` - Per-user filter config: natural_language_prefs, custom_prompt, reject_threshold (default 30), warning_threshold (default 70), enabled (bool)
-
-## Implementation Status
-
-| Component | Status | Notes |
-|-----------|--------|-------|
-| **Multi-User Auth** | ✅ Complete | `src/services/auth.py` - magic link + JWT, `src/services/user_repository.py` - user CRUD |
-| **User Models** | ✅ Complete | `src/models/user.py` - User, auth, search preferences models |
-| **Per-User Data Ownership** | ✅ Complete | user_id FK on all job data, per-user CV storage and search prefs |
-| **Per-User Search Scheduler** | ✅ Complete | `src/services/scheduler.py` - iterates users with search preferences |
-| **Frontend Auth Flow** | ✅ Complete | Login, magic link verify, protected routes, auth state store |
-| **Settings UI** | ✅ Complete | Profile editing, CV upload (JSON), search preferences configuration |
-| **AppContext DI** | ✅ Complete | `src/context.py` - includes UserRepository + AuthService |
-| **Async-Native Workflows** | ✅ Complete | All workflow nodes are `async def`, use `ainvoke()` |
-| **Shared Workflow Utils** | ✅ Complete | `src/agents/_shared.py` - deduplicated across 3 workflows |
-| **Job Lifecycle State Machine** | ✅ Complete | `src/models/state_machine.py` - BusinessState + WorkflowStep + transition validation |
-| **Domain Services** | ✅ Complete | `JobOrchestrator` + `HITLProcessor` - thin API handlers, user-scoped |
-| **CV Validator** | ✅ Complete | `src/services/cv_validator.py` - configurable hallucination policy |
-| **CV Attempt History** | ✅ Complete | `src/models/cv_attempt.py` + repository methods |
-| **Consumer Manager** | ✅ Complete | `src/services/job_queue.py` - resilient queue consumer lifecycle |
-| **LLM Provider Layer** | ✅ Complete | `src/llm/provider.py` |
-| **Preparation Workflow** | ✅ Complete | `src/agents/preparation_workflow.py` |
-| **Retry Workflow** | ✅ Complete | `src/agents/retry_workflow.py` |
-| **Compose Tailored CV** | ✅ Complete | `src/services/cv_composer.py` |
-| **Generate PDF** | ✅ Complete | `src/services/pdf_generator.py` (WeasyPrint + Jinja2) |
-| **HITL API Endpoints** | ✅ Complete | `src/api/main.py` (thin adapters to domain services) |
-| **Unified Data Models** | ✅ Complete | `src/models/unified.py` |
-| **Job Repository (DAL)** | ✅ Complete | `src/services/job_repository.py` (in-memory + SQLite, user-scoped queries) |
-| **Job Source Adapters** | ✅ Complete | `src/services/job_source.py` - LinkedIn adapter with field mapping |
-| **Browser Automation** | ✅ Complete | `src/services/browser_automation.py` - stealth Playwright with cookie auth |
-| **LinkedIn Job Scraper** | ✅ Complete | `src/services/linkedin_scraper.py` - search results parser with dedup |
-| **LinkedIn Search Builder** | ✅ Complete | `src/services/linkedin_search.py` - URL builder with filter models |
-| **Async Job Queue** | ✅ Complete | `src/services/job_queue.py` - queue with ConsumerManager, user_id tagging |
-| **LinkedIn Search Scheduler** | ✅ Complete | `src/services/scheduler.py` - per-user search with APScheduler |
-| **HITL Frontend UI** | ✅ Complete | Svelte 5 SPA with Tinder-like review interface |
-| **Application Workflow** | 🟡 Stubs | `src/agents/application_workflow.py` - stubs only |
-| **Job Filter (LLM)** | ✅ Complete | `src/services/job_filter.py` — two-threshold routing, hidden disqualifier detection, per-user prompt, HITL badge |
-| **Admin Role & Admin Page** | ✅ Complete | `UserRole` enum + `role` column, `get_admin_user` dependency, `/api/admin/*` endpoints, `/admin` UI (jobs / queue / errors / users), `scripts/promote_user.py` CLI |
+- Stored as JSON in each user's DB record (`UserTable.master_cv_json`), schema in `src/models/cv.py`
+- Uploaded via Settings UI or API (`PUT /api/users/me`), or extracted from an uploaded PDF resume by
+  an LLM: `POST /api/users/me/master-cv/extract` returns 202 with an `extraction_id` to poll at
+  `GET /api/users/me/master-cv/extract/{extraction_id}`. Non-obvious constraints:
+  - It reuses the user's **`cv_generation`** model choice, and 400s unless that provider is
+    PDF-capable (`provider_supports_pdf` → OpenAI and Anthropic only; DeepSeek and Grok are not)
+  - One extraction in flight per user; a second returns 409
+  - MIME and provider capability are checked *before* the body is read; size
+    (`PDF_CV_UPLOAD_MAX_BYTES`) and page count (`PDF_CV_UPLOAD_MAX_PAGES`) after
+  - `src.agents._shared` is imported lazily here because it pulls in WeasyPrint's native libs
+- Contains comprehensive work history, skills, projects — the LLM recomposes relevant portions per job
+- Loaded from the user record and passed via workflow state under the `master_cv` key
 
 ## Development Guidelines
 
-### Testing Strategy
+- **Use `uv`, not `pip`.** `uv sync` to install, `uv run <cmd>` to execute. There is no
+  `requirements.txt` / `requirements-test.txt`.
+- Line length 100 (black + ruff). `uv run ruff check src/ tests/`, `uv run mypy src/`.
+- **macOS `DYLD_LIBRARY_PATH` conflict.** WeasyPrint needs `/opt/homebrew/lib` on
+  `DYLD_LIBRARY_PATH` to find gobject; Chromium **crashes** when it is set. So
+  `browser_automation.py` (and the `scripts/linkedin_*` probes) strip `DYLD_*` from the browser
+  subprocess env — a no-op on Linux. If PDF generation fails with a library error, export it; if the
+  browser dies instantly, that stripping is what you're relying on.
+- There is **no CI test job** — `release.yml` only builds and deploys. Run the suite locally.
 
-- Unit tests for each service class
-- Integration tests for workflow
-- Mock LLM responses for determinism
-- Playwright tests for browser automation
-- API endpoint tests with TestClient
-- HITL E2E tests (`tests/e2e/test_hitl_review.py`): Full Playwright tests for the HITL review UI covering approve/decline/retry flows, PDF download, CV preview, and job description rendering. Servers are auto-started by fixtures. Run with: `pytest tests/e2e/test_hitl_review.py -v -m e2e`
+### Testing
 
-### Configuration
+- Mock LLM responses for determinism; `job_fixtures` can record/replay real scraped jobs and LLM
+  responses.
+- Markers are strict (`--strict-markers`): `unit`, `integration`, `eval`, `e2e`, `llm`, `slow`,
+  `expensive`. `unit` is declared but not actually applied — select that tier by path.
+- `uv run pytest -m "not e2e"` is the everyday loop (~820 tests, ~9s). A bare `uv run pytest` also
+  runs E2E, which auto-starts its own API + Vite servers and needs a Chromium binary.
+- The eval tier is skipped unless `deepeval` is installed on purpose (it isn't a declared
+  dependency, and those tests spend real money).
+- Details in `docs/testing_guide.md` and `tests/README.md`.
 
-All settings in `.env`:
-- Credentials (LinkedIn, LLM APIs)
-- Provider selection (primary/fallback)
-- Paths and directories
-- Workflow parameters (fetch interval, concurrency)
-- API server settings
-- **Authentication Configuration:**
-  - `RESEND_API_KEY` - Resend.com API key for sending magic link emails
-  - `JWT_SECRET` - Secret key for JWT token signing
-  - `MAGIC_LINK_TTL_MINUTES=15` - Magic link token validity period
-  - `JWT_EXPIRY_DAYS=30` - JWT session duration
-  - `APP_URL=http://localhost:5173` - Base URL for magic link callback
-  - `DEV_AUTH_BYPASS=true` + `DEV_AUTH_EMAIL=dev@local.test` - Local-only auth bypass for browser/UX testing. Exposes `POST /api/auth/dev-login` which mints a JWT cookie for the dev user without an email round-trip. Server refuses to start if true and `APP_URL` is non-localhost; route returns 404 when false. See `.claude/skills/web-browser/SKILL.md` for usage.
-- **Repository Configuration:**
-  - `REPO_TYPE=memory` (default) or `REPO_TYPE=sqlite` for persistent storage
-  - `DB_PATH=./data/jobs.db` (SQLite database path)
-- **LinkedIn Search Configuration:**
-  - `LINKEDIN_SEARCH_KEYWORDS`, `LINKEDIN_SEARCH_LOCATION` - fallback search filters (used when no users have configured preferences)
-  - `LINKEDIN_SEARCH_REMOTE_FILTER` - "remote", "on-site", "hybrid"
-  - `LINKEDIN_SEARCH_SCHEDULE_ENABLED=false` - enable hourly scheduled searches
-  - `LINKEDIN_SEARCH_INTERVAL_HOURS=1` - search frequency
-  - `LINKEDIN_SESSION_COOKIE_PATH=./data/linkedin_cookies.json` - cookie persistence
-- **Job Filter Configuration:**
-  - `JOB_FILTER_ENABLED=true` - enable LLM-based job filtering globally
-  - `JOB_FILTER_REJECT_THRESHOLD=30` - jobs scoring below this are saved as `filtered_out` (skips CV generation)
-  - `JOB_FILTER_WARNING_THRESHOLD=70` - jobs scoring below this show warning badge + red flags in HITL review
+### Configuration (`.env`)
+
+Full list in `src/config/settings.py`. The non-obvious ones:
+
+- `DEV_AUTH_BYPASS=true` + `DEV_AUTH_EMAIL=dev@local.test` — local-only auth bypass for browser/UX
+  testing. Exposes `POST /api/auth/dev-login`, which mints a JWT cookie for the dev user with no
+  email round-trip. **The server refuses to start if this is true and `APP_URL` is non-localhost**;
+  the route 404s when false. See `.claude/skills/web-browser/SKILL.md` for usage.
+- `REPO_TYPE=memory` (default) or `sqlite` — memory is the default, so persistence is **opt-in**.
+- `JOB_FILTER_REJECT_THRESHOLD=30` / `JOB_FILTER_WARNING_THRESHOLD=70` — two-threshold routing:
+  below reject → saved as `filtered_out` and CV generation is skipped; below warning → warning
+  badge + red flags shown in HITL review. Per-user values override both.
+- `LINKEDIN_SEARCH_KEYWORDS` / `LINKEDIN_SEARCH_LOCATION` — **fallback only**, used when no users
+  have configured search preferences.
+- `SEED_JOBS_FROM_FILE=true` **disables LinkedIn scraping entirely** and replays
+  `SCRAPED_JOBS_PATH` instead. Easy to forget when debugging "why isn't it scraping".
+- `LINKEDIN_SEARCH_SCHEDULE_ENABLED=false` by default — without it, no browser is launched and no
+  queue consumer starts (except one spun up by startup recovery).
+- `ADMIN_ALERT_EMAIL` empty disables all operator alerts.
+- `CV_TEMPLATE_NAME` must name a directory under `src/templates/cv/`: `modern`, `compact`,
+  `profile-card`. Anything else raises at `PDFGenerator` construction.
 
 **Never commit `.env` or real CV data to git!**
 
 ## Common Tasks
 
-### Adding a New LLM Provider
-
-Providers are now added through LiteLLM + Instructor — there is a single `InstructorClient`, no
-per-provider class to write:
-
-1. Add the provider to the `LLMProvider` enum (`src/llm/base.py`).
-2. Add the LiteLLM route prefix to `PROVIDER_LITELLM_PREFIX` in
-   `src/llm/providers/instructor_client.py` (confirm the correct LiteLLM prefix, e.g. `xai/`,
-   `deepseek/`; verify the provider supports **tool calling** for `Mode.TOOLS`, else fall back to
-   Instructor `Mode.JSON`).
-3. Add `*_api_key` / `*_model` settings to `settings.py` and the resolution branch in
-   `create_llm_client` (`src/agents/_shared.py`).
-4. If the provider accepts native PDF input, add it to `_PDF_CAPABLE_PROVIDERS`
-   (`src/llm/base.py`, consumed by `provider_supports_pdf`).
-5. Document in README. Prompt caching / cache-control wiring is handled generically by
-   `InstructorClient` (Anthropic `cache_control` block vs OpenAI `extra_body` cache key).
-
-### Modifying CV Tailoring Logic
-
-1. Update prompts in `src/services/cv_prompts.py`
-2. Adjust `CVComposer` methods in `src/services/cv_composer.py`
-3. Validation logic is in `src/services/cv_validator.py` — update `CVValidator` if changing what gets checked
-4. Test with various job descriptions
-5. Consider adding user feedback loop
-
-### Adding New Workflow Step
-
-1. If the logic is shared across workflows, add it to `src/agents/_shared.py`
-2. Define `async def` node function in the appropriate workflow file — receive repository via `config["configurable"]["repository"]`
-3. Add node to workflow graph
-4. Update state TypedDict if needed
-5. Use `BusinessState` and `WorkflowStep` enums from `src/models/state_machine.py` for status updates
-6. If adding a new state, update `ALLOWED_TRANSITIONS` in `state_machine.py`
-7. Add routing logic
-8. Update tests
-
-### Debugging Workflow Issues
-
-1. Check logs (configured in `src/utils/logger.py`)
-2. Inspect workflow state at each node
-3. Use LangGraph visualization tools
-4. Test nodes individually before integration
+Step-by-step procedures (adding an LLM provider, changing CV tailoring, adding a workflow step,
+debugging a workflow run) live in the `project-howtos` skill — invoke it rather than duplicating
+them here. LLM-layer internals: `src/llm/CLAUDE.md`.
 
 ## Next Steps
 
-1. **Implement Application Workflow** - Deep agent with Playwright MCP for browser automation
-2. **LinkedIn Easy Apply** - Automated application submission via browser automation
+1. **Durable LinkedIn session auth** — persistent browser profile instead of cookie capture/replay
+   (`docs/plans/persistent-browser-profile-auth.md`). Blocks everything downstream.
+2. **LinkedIn Easy Apply** — LinkedIn moved it to a React SDUI modal, so prior work is stale
+   (`docs/plans/sdui-easy-apply-rework.md`, `docs/plans/ARCHITECTURE-browser-agent.md`).
+3. **Job notifications** — Telegram delivery (`docs/plans/telegram-job-notifications.md`).
 
 ## Reference Implementations
 
-The `Obsolete/` directory contains **two production-ready projects** that serve as valuable reference implementations:
-
-### 1. **Auto_job_applier_linkedIn** (GodsScion)
-- **Status:** Production-ready, actively maintained
-- **Architecture:** Selenium-based web automation with AI integration
-- **Key Features:**
-  - Web scraping with undetected-chromedriver (stealth mode)
-  - Multi-LLM support (OpenAI, DeepSeek, Gemini)
-  - Intelligent form filling with AI-powered question answering
-  - Application history tracking (CSV + Flask web UI)
-  - Comprehensive configuration system (5 config files)
-  - Robust error handling and logging
-- **Useful Components:**
-  - `modules/clickers_and_finders.py` - Reusable Selenium utilities
-  - `modules/ai/` - Multi-provider AI integration patterns
-  - `modules/validator.py` - Configuration validation framework
-  - `app.py` - Flask-based application history viewer
-- **Documentation:** See `Obsolete/Auto_job_applier_linkedIn/ARCHITECTURE.md` for detailed analysis
-
-### 2. **Jobs_Applier_AI_Agent_AIHawk** (AIHawk)
-- **Status:** Production-ready, featured in major media (Business Insider, TechCrunch, The Verge, Wired)
-- **Architecture:** LangChain-based with FAISS vector search
-- **Key Features:**
-  - Semantic job parsing using vector embeddings
-  - LLM-powered resume tailoring (section-by-section generation)
-  - Professional PDF generation via Chrome DevTools Protocol
-  - Multi-LLM support (OpenAI, Claude, Gemini, HuggingFace, Ollama, Perplexity)
-  - Pydantic-based type-safe data models
-  - Customizable resume styling
-- **Useful Components:**
-  - `src/llm_manager.py` - Factory pattern for multi-LLM support
-  - `src/resume_facade.py` - Facade pattern for resume generation
-  - `src/llm_job_parser.py` - Semantic job description extraction
-  - `src/utils/chrome_utils.py` - CDP-based PDF generation
-  - `resume_schemas/` - Pydantic models for type safety
-- **Documentation:** See `Obsolete/Jobs_Applier_AI_Agent_AIHawk/ARCHITECTURE.md` for comprehensive analysis
+`Obsolete/` was a symlink to two third-party LinkedIn-automation projects (GodsScion's
+`Auto_job_applier_linkedIn`, AIHawk's `Jobs_Applier_AI_Agent_AIHawk`) kept purely as reference.
+**The symlink points at a Windows path and is dead on this machine** — don't send anyone to it. Older
+plan documents that cite `Obsolete/**/ARCHITECTURE.md` are citing unavailable files.
 
 ## Quick Start
 
-Run both API and UI with one command (kills previous instances automatically):
-
 ```bash
-# Windows PowerShell
-.\scripts\dev.ps1
+uv run uvicorn src.api.main:app --reload    # API
+cd ui && npm run dev                        # UI
 ```
+
+`.\scripts\dev.ps1` starts both and kills previous instances, but it is **Windows-only** — it uses
+`Get-NetTCPConnection` and `Win32_Process`, so it fails under `pwsh` on macOS/Linux.
 
 Then open:
 - **UI**: http://localhost:5173 (Vite dev server with HMR)
 - **API**: http://localhost:8000 (FastAPI with auto-reload on .py changes)
-
-## Useful Commands
-
-```bash
-# Development
-python -m uvicorn src.api.main:app --reload  # Start API server only
-cd ui && npm run dev                          # Start UI dev server only
-pytest                                        # Run tests
-black src/                                   # Format code
-mypy src/                                    # Type check
-
-# Docker
-docker-compose up -d                         # Start services
-docker-compose logs -f                       # View logs
-docker-compose down                          # Stop services
-```
-
-## Troubleshooting
-
-### Common Issues
-
-**Import errors**
-- Ensure virtual environment is activated
-- Check PYTHONPATH includes project root
-- Verify all dependencies installed
-
-**LLM API errors**
-- Check API keys in `.env`
-- Verify quota/billing on provider
-- Test with simple API call first
 
 ## Security Notes
 
@@ -632,10 +311,4 @@ docker-compose down                          # Stop services
 - **Secure storage** for LinkedIn credentials
 - **Rate limiting** for API calls
 - **User data** stays on self-hosted VPS
-
-## Resources
-
-- [LangGraph Documentation](https://python.langchain.com/docs/langgraph)
-- [FastAPI Documentation](https://fastapi.tiangolo.com/)
-- [Pydantic Documentation](https://docs.pydantic.dev/)
-- [WeasyPrint Documentation](https://doc.courtbouillon.org/weasyprint/)
+- `DEV_AUTH_BYPASS` must never be true in production — the startup guard is the backstop, not the plan

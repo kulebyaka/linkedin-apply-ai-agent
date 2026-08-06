@@ -164,8 +164,9 @@
 					<WIPBadge label={WIP.GENERATE_PAGE_SCOPE.label} tooltip={WIP.GENERATE_PAGE_SCOPE.tooltip} size="md" />
 				</h1>
 				<p class="font-body text-lg font-light text-[var(--color-muted-foreground)]">
-					Paste a job description and get a tailored CV PDF instantly. This page skips the HITL
-					review queue — for the full pipeline, trigger a LinkedIn search from Settings.
+					Paste a job description and get a tailored CV PDF — composition takes a couple of minutes.
+					This page skips the HITL review queue — for the full pipeline, trigger a LinkedIn search
+					from Settings.
 				</p>
 			</div>
 		</div>
