@@ -47,6 +47,25 @@ class BaseLLMClient(ABC):
         self.model = model
         self.config = kwargs
 
+    def reasoning_kwargs(self, effort: str = "low", *, structured: bool) -> dict[str, Any]:
+        """Completion kwargs that request ``effort``-level reasoning, or ``{}``.
+
+        Call sites that want reasoning ask the client for the kwargs rather than
+        setting ``reasoning_effort`` themselves: whether a model accepts the
+        param — and on which code path — is provider- and model-specific.
+        ``structured=True`` means the call goes through ``generate_json``,
+        whose forced tool call more models reject than the plain-text path.
+
+        The returned dict may also override ``temperature``, because some
+        providers accept reasoning only at a fixed sampling temperature. Merge
+        it over the call's own kwargs (last wins) rather than passing
+        ``temperature`` separately, or Python raises on the duplicate keyword.
+
+        The base implementation returns ``{}`` — no reasoning — so provider
+        clients opt in.
+        """
+        return {}
+
     def generate_json_from_pdf(
         self,
         pdf_bytes: bytes,

@@ -95,14 +95,20 @@ than one at a time:
 - A single `InstructorClient(BaseLLMClient)` (`src/llm/providers/instructor_client.py`) backs **all**
   providers; provider routing is delegated to LiteLLM via prefixed model strings
   (`anthropic/…`, `openai/…`, `xai/…`, `deepseek/…`). There is **no** `LLMClientFactory`.
+- **The structured-output mode is not uniform**, and assuming it is has already broken production:
+  OpenAI-compatible providers (OpenAI, DeepSeek, xAI) use `Mode.JSON`, Anthropic uses `Mode.TOOLS`.
+  gpt-5.4+ rejects *function tools combined with reasoning* on `/v1/chat/completions`, which
+  `Mode.TOOLS` always uses. Details and the reasoning-effort gating in `src/llm/CLAUDE.md`.
 - Settings and the model catalog store **bare** model ids; the route prefix is reattached in
   `create_llm_client` (note `grok → xai/`).
 - Model choice is **per operation**: `UserModelPreferences.{cv_generation, job_filtering,
   filter_prompt_generation}` is resolved by the caller and passed to `create_llm_client` as an
   override, falling back to `PRIMARY_LLM_PROVIDER` + that provider's `*_MODEL`.
 - The model *list* is fetched, not hardcoded — see the catalog notes in `src/llm/CLAUDE.md`.
-- Structured output, prompt caching, retry behaviour, and the steps for adding a provider are all
-  documented in **`src/llm/CLAUDE.md`**.
+- `litellm.drop_params = True` drops sampling params a model rejects (e.g. `temperature` on
+  Opus 4.x / Sonnet 5) instead of gating per-model.
+- Prompt caching, retry behaviour, and the steps for adding a provider are all documented in
+  **`src/llm/CLAUDE.md`**.
 
 ### 6. Repository Pattern
 - `JobRepository` abstract interface for data persistence (`src/services/db/`)

@@ -273,10 +273,17 @@ easy to miss: `filter_result`, `decline_reason`, `override_reason`, `refine_sign
 
 ### LLM layer
 
-Internals — Instructor `Mode.TOOLS` structured output, prompt caching, retry behaviour, the dynamic
+Internals — structured output, reasoning-effort gating, prompt caching, retry behaviour, the dynamic
 model catalog, and how to add a provider — are documented in **`src/llm/CLAUDE.md`**. The short
 version: a single `InstructorClient` backs all four providers, routing through LiteLLM via prefixed
 model strings (note `grok → xai/`), and there is no `LLMClientFactory`.
+
+One design point belongs here rather than in the internals doc, because it constrains provider
+choice: **the structured-output mode differs by provider family.** OpenAI-compatible providers
+(OpenAI, DeepSeek, xAI) use Instructor's `Mode.JSON`; Anthropic uses `Mode.TOOLS`. This is not
+stylistic — gpt-5.4+ reasoning models reject function tools combined with reasoning on
+`/v1/chat/completions`, and `Mode.TOOLS` always sends function tools. Any new provider has to be
+placed on one side of that split.
 
 Model selection resolves per operation: the caller looks up the user's `UserModelPreferences` entry
 (`cv_generation`, `job_filtering`, or `filter_prompt_generation`) and passes it to
