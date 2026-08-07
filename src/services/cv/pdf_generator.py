@@ -14,7 +14,9 @@ logger = logging.getLogger(__name__)
 class PDFGenerator:
     """Generates professional PDF resumes from CV JSON data using WeasyPrint"""
 
-    SUPPORTED_TEMPLATES = ["modern", "classic", "minimal", "compact", "profile-card"]
+    # Must match the sub-directories that actually exist under `template_dir`;
+    # __init__ raises ValueError for anything else.
+    SUPPORTED_TEMPLATES = ["modern", "compact", "profile-card"]
     DEFAULT_TEMPLATE = "modern"
 
     def __init__(
@@ -28,7 +30,7 @@ class PDFGenerator:
 
         Args:
             template_dir: Directory containing CV templates
-            template_name: Name of template theme to use (modern/classic/minimal)
+            template_name: Name of template theme to use (modern/compact/profile-card)
             font_config: Optional WeasyPrint font configuration
 
         Raises:

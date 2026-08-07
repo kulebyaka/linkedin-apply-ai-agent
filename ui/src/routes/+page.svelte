@@ -120,7 +120,7 @@
 				<div>
 					<h1 class="font-heading text-2xl font-bold sm:text-3xl">Review Applications</h1>
 					<p class="mt-1 font-body text-[var(--color-muted-foreground)]">
-						Review AI-generated CVs and approve job applications
+						Check each AI-tailored CV, then apply on LinkedIn yourself — nothing is submitted for you
 					</p>
 				</div>
 				<div class="flex flex-wrap items-center gap-2">

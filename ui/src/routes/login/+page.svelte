@@ -56,7 +56,8 @@
 				Sign In
 			</h1>
 			<p class="font-body text-base text-[var(--color-muted-foreground)]">
-				Enter your email to receive a magic link
+				Enter your email to receive a magic link. No password — and if you don't have an account
+				yet, this creates one.
 			</p>
 		</div>
 
@@ -87,7 +88,7 @@
 					</h2>
 					<p class="font-body mb-6 text-sm text-[var(--color-muted-foreground)]">
 						We sent a magic link to <span class="font-mono font-bold">{email}</span>.
-						Click the link in the email to sign in.
+						Click the link in the email to sign in — it expires in 15 minutes.
 					</p>
 					<button
 						onclick={() => { sent = false; error = null; }}

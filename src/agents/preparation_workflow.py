@@ -1,13 +1,14 @@
 """Preparation Workflow - Job source to CV generation pipeline.
 
-This workflow handles the first half of the two-workflow pipeline:
+This workflow handles everything up to the HITL boundary:
 1. Extract job data from source (URL/manual/LinkedIn)
-2. Filter job (LinkedIn only - optional)
+2. Filter job (LinkedIn only; skipped on a "Proceed Anyway" override)
 3. Compose tailored CV using LLM
 4. Generate PDF
 5. Save to repository (status="pending" for HITL or "completed" for MVP)
 
-The workflow ends at the HITL boundary. Application is handled by a separate workflow.
+The workflow ends at the HITL boundary. Applying is NOT implemented — an approved
+job stops at BusinessState.APPROVED and the user applies manually on LinkedIn.
 """
 
 import asyncio
