@@ -92,6 +92,7 @@ export interface ConsumerSnapshot {
 
 export interface SchedulerJobState {
 	user_id: string;
+	in_progress: boolean;
 	last_run_at: string | null;
 	next_run_at: string | null;
 	last_status: string | null;
@@ -238,6 +239,14 @@ export async function runScheduler(userId: string): Promise<{ status: string; us
 		{ method: 'POST', credentials: 'include' },
 	);
 	return handle<{ status: string; user_id: string }>(response, 'Run scheduler');
+}
+
+export async function stopScheduler(userId: string): Promise<{ status: 'cancelled' | 'not_running'; user_id: string }> {
+	const response = await fetch(
+		`${API_BASE}/api/admin/scheduler/stop/${encodeURIComponent(userId)}`,
+		{ method: 'POST', credentials: 'include' },
+	);
+	return handle<{ status: 'cancelled' | 'not_running'; user_id: string }>(response, 'Stop scheduler');
 }
 
 export async function listErrors(params: ListErrorsParams = {}): Promise<ListErrorsResponse> {

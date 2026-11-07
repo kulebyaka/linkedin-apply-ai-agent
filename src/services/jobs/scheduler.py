@@ -39,6 +39,7 @@ RunReason = Literal[
     "no_users",
     "scrape_failed",
     "auth_failed",
+    "cancelled",
 ]
 
 
@@ -108,6 +109,8 @@ class LinkedInSearchScheduler(IntervalScheduler):
         # per-user "search running" status so a user only sees the spinner for
         # their own in-flight search, not any global scheduler activity.
         self._in_progress_users: set[str] = set()
+        self._user_search_tasks: dict[str, asyncio.Task[int]] = {}
+        self._cancelling_users: set[str] = set()
         # Per-user locks dedupe concurrent searches for the SAME user (a manual
         # click landing while that user's scheduled search runs). Searches for
         # DIFFERENT users are never blocked by each other here.
@@ -132,6 +135,22 @@ class LinkedInSearchScheduler(IntervalScheduler):
         """True if a search is actively executing for this specific user."""
         return user_id in self._in_progress_users
 
+    async def cancel_search(self, user_id: str) -> bool:
+        """Stop one user's active search and wait for its cleanup to finish."""
+        task = self._user_search_tasks.get(user_id)
+        if task is None or task.done():
+            return False
+        if user_id not in self._cancelling_users:
+            self._cancelling_users.add(user_id)
+            task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        finally:
+            self._cancelling_users.discard(user_id)
+        return True
+
     def _user_lock(self, user_id: str | None) -> asyncio.Lock:
         """Return (creating if needed) the dedupe lock for one user."""
         lock = self._user_search_locks.get(user_id)
@@ -147,8 +166,8 @@ class LinkedInSearchScheduler(IntervalScheduler):
             user_id: If provided, only search for this user's preferences.
                      If None, search for all users (scheduled runs).
 
-        Returns the number of jobs enqueued. Never raises — all exceptions
-        are caught and logged so the scheduler keeps running.
+        Returns the number of jobs enqueued. Search errors are caught and
+        logged so the scheduler keeps running.
 
         Concurrency is now per-user, not global: a manual search for one user
         is not dropped just because another user's scheduled search is mid
@@ -234,7 +253,16 @@ class LinkedInSearchScheduler(IntervalScheduler):
             # concurrent duplicate for the same user.
             total_enqueued = 0
             for plan_user_id, params in search_plans:
-                total_enqueued += await self._search_for_user(plan_user_id, params)
+                # A scheduled cycle contains several users. Give each plan its
+                # own task so cancelling one does not cancel the whole cycle.
+                task = asyncio.create_task(self._search_for_user(plan_user_id, params))
+                try:
+                    total_enqueued += await task
+                except asyncio.CancelledError:
+                    if task.cancelled() and not asyncio.current_task().cancelling():
+                        logger.info("Search cancelled for user=%s", plan_user_id)
+                    else:
+                        raise
 
             self._last_run_time = datetime.now(tz=timezone.utc)
             self._last_run_jobs = total_enqueued
@@ -249,7 +277,7 @@ class LinkedInSearchScheduler(IntervalScheduler):
     async def _search_for_user(
         self, plan_user_id: str | None, params: LinkedInSearchParams
     ) -> int:
-        """Run one user's search end-to-end. Never raises; returns enqueued.
+        """Run one user's search end-to-end, returning the enqueue count.
 
         Dedupes duplicate concurrent searches for the same user, marks that
         user in-progress for the per-user status, and serializes the shared
@@ -267,11 +295,23 @@ class LinkedInSearchScheduler(IntervalScheduler):
         async with lock:
             if plan_user_id is not None:
                 self._in_progress_users.add(plan_user_id)
+                self._user_search_tasks[plan_user_id] = asyncio.current_task()
             try:
                 return await self._run_user_plan(plan_user_id, params)
+            except asyncio.CancelledError:
+                self._record_run(
+                    user_id=plan_user_id,
+                    time=datetime.now(tz=timezone.utc),
+                    jobs_found=0,
+                    reason="cancelled",
+                    search_url=LinkedInSearchURLBuilder.build_url(params),
+                    message="Stopped by admin.",
+                )
+                raise
             finally:
                 if plan_user_id is not None:
                     self._in_progress_users.discard(plan_user_id)
+                    self._user_search_tasks.pop(plan_user_id, None)
 
     async def _run_user_plan(
         self, plan_user_id: str | None, params: LinkedInSearchParams
@@ -283,43 +323,52 @@ class LinkedInSearchScheduler(IntervalScheduler):
         # the lock so a slow persist for one user doesn't hold the browser from
         # the next waiter.
         async with self._browser_lock:
-            # Reset scraper dedup state before each user's search so the same
-            # LinkedIn posting can be found independently by different users.
-            self.scraper.reset_seen()
-
-            # Scraping uses LinkedIn's public Jobs Search page which serves
-            # results without auth — skip /feed validation so we don't trip
-            # anti-bot detection. Cookies are still loaded in case they help
-            # widen results, but they're treated as best-effort.
             try:
-                await self.scraper.browser.ensure_authenticated(validate_session=False)
-            except Exception as exc:
-                logger.exception("LinkedIn authentication failed")
-                self._record_run(
-                    user_id=plan_user_id,
-                    time=datetime.now(tz=timezone.utc),
-                    jobs_found=0,
-                    reason="auth_failed",
-                    search_url=None,
-                    message=str(exc),
-                )
-                return 0
+                # A cancelled search closes the shared browser. Recreate it
+                # before the next user's turn, still under the browser lock.
+                if not self.scraper.browser.is_alive():
+                    await self.scraper.browser.initialize()
+                # Reset scraper dedup state before each user's search so the same
+                # LinkedIn posting can be found independently by different users.
+                self.scraper.reset_seen()
 
-            try:
-                jobs = await self.scraper.scrape_and_enrich(params)
-            except Exception as exc:
-                logger.exception(
-                    "Search failed for user=%s", plan_user_id or "global"
-                )
-                self._record_run(
-                    user_id=plan_user_id,
-                    time=datetime.now(tz=timezone.utc),
-                    jobs_found=0,
-                    reason="scrape_failed",
-                    search_url=search_url,
-                    message=str(exc),
-                )
-                return 0
+                # Scraping uses LinkedIn's public Jobs Search page which serves
+                # results without auth. Cookies are loaded best-effort.
+                try:
+                    await self.scraper.browser.ensure_authenticated(validate_session=False)
+                except Exception as exc:
+                    logger.exception("LinkedIn authentication failed")
+                    self._record_run(
+                        user_id=plan_user_id,
+                        time=datetime.now(tz=timezone.utc),
+                        jobs_found=0,
+                        reason="auth_failed",
+                        search_url=None,
+                        message=str(exc),
+                    )
+                    return 0
+
+                try:
+                    jobs = await self.scraper.scrape_and_enrich(params)
+                except Exception as exc:
+                    logger.exception(
+                        "Search failed for user=%s", plan_user_id or "global"
+                    )
+                    self._record_run(
+                        user_id=plan_user_id,
+                        time=datetime.now(tz=timezone.utc),
+                        jobs_found=0,
+                        reason="scrape_failed",
+                        search_url=search_url,
+                        message=str(exc),
+                    )
+                    return 0
+            except asyncio.CancelledError:
+                try:
+                    await self.scraper.browser.close()
+                except Exception:
+                    logger.exception("Failed to close browser after search cancellation")
+                raise
 
         # --- browser lock released; the rest is DB/queue-bound ---
         logger.info(
@@ -521,18 +570,20 @@ class LinkedInSearchScheduler(IntervalScheduler):
         """
         next_run = self.next_run_time
         out: list[dict] = []
-        for user_id, run in self._last_run_per_user.items():
+        for user_id in self._last_run_per_user.keys() | self._in_progress_users:
+            run = self._last_run_per_user.get(user_id)
             out.append(
                 {
                     "user_id": user_id,
-                    "last_run_at": run.time.isoformat() if run.time else None,
+                    "in_progress": user_id in self._in_progress_users,
+                    "last_run_at": run.time.isoformat() if run else None,
                     "next_run_at": next_run.isoformat() if next_run else None,
-                    "last_status": run.reason,
-                    "jobs_found": run.jobs_found,
-                    "enqueued": run.enqueued,
-                    "deduped": run.deduped,
-                    "message": run.message,
-                    "search_url": run.search_url,
+                    "last_status": run.reason if run else None,
+                    "jobs_found": run.jobs_found if run else 0,
+                    "enqueued": run.enqueued if run else 0,
+                    "deduped": run.deduped if run else 0,
+                    "message": run.message if run else None,
+                    "search_url": run.search_url if run else None,
                 }
             )
         return out

@@ -6,7 +6,6 @@ services:
   api:
     image: ghcr.io/kulebyaka/linkedin-apply-ai-agent-api:__VERSION__
     container_name: linkedin-apply-api
-    # Match the live host limit: Chromium can otherwise consume most of the VPS.
     mem_limit: 3g
     memswap_limit: 4g
     restart: unless-stopped
