@@ -3,35 +3,9 @@
 # See docs/plans/vps-deployment.md for the full design.
 
 services:
-  caddy:
-    image: caddy:2-alpine
-    container_name: linkedin-apply-caddy
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-      - ui_static:/srv/ui:ro
-    depends_on:
-      - api
-    networks:
-      - linkedin-apply
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-    labels:
-      - com.centurylinklabs.watchtower.enable=true
-
   api:
     image: ghcr.io/kulebyaka/linkedin-apply-ai-agent-api:__VERSION__
     container_name: linkedin-apply-api
-    # Cap memory so a leak/runaway Chromium OOMs only this container, not the
-    # whole 6 GB VPS (host OOM-killed uvicorn at 2.8 GB RSS on 2026-11-07).
     mem_limit: 3g
     memswap_limit: 4g
     restart: unless-stopped
@@ -42,7 +16,10 @@ services:
       - ./data:/app/data
       - ./logs:/app/logs
     networks:
-      - linkedin-apply
+      linkedin-apply: {}
+      ingress:
+        aliases:
+          - linkedin-api
     logging:
       driver: json-file
       options:
@@ -92,8 +69,8 @@ networks:
   linkedin-apply:
     name: linkedin-apply
     driver: bridge
+  ingress:
+    external: true
 
 volumes:
-  caddy_data:
-  caddy_config:
   ui_static:
