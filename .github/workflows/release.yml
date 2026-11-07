@@ -76,19 +76,16 @@ jobs:
       - name: Render compose with version tag
         run: sed "s|__VERSION__|${{ steps.tag.outputs.value }}|g" docker-compose.prod.yml > compose.rendered.yml
 
-      - name: Render Caddyfile with domain + email
-        run: |
-          sed -e "s|__DOMAIN__|${{ vars.APP_DOMAIN }}|g" \
-              -e "s|__ACME_EMAIL__|${{ vars.ACME_EMAIL }}|g" \
-              Caddyfile > Caddyfile.rendered
+      - name: Render this app's Caddy site
+        run: sed "s|__DOMAIN__|${{ vars.APP_DOMAIN }}|g" Caddyfile > linkedin-apply.caddy
 
-      - name: Copy compose + Caddyfile to VPS
+      - name: Copy compose and this app's Caddy site to VPS
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
-          source: "compose.rendered.yml,Caddyfile.rendered"
+          source: "compose.rendered.yml,linkedin-apply.caddy"
           target: /opt/linkedin-apply/
           overwrite: true
 
@@ -109,7 +106,7 @@ jobs:
             set -e
             cd /opt/linkedin-apply
             mv compose.rendered.yml docker-compose.yml
-            mv Caddyfile.rendered Caddyfile
+            mv linkedin-apply.caddy /opt/caddy/sites/linkedin-apply.caddy
             # Persistent GHCR auth lives in /root/.docker/config.json after the
             # first successful login. Refresh it best-effort; if the secret is
             # absent/invalid the deploy still continues against the cached creds.
@@ -126,7 +123,8 @@ jobs:
             rm -f data/model_catalog_cache.json
             docker compose up -d --remove-orphans
             docker compose run --rm ui-publisher
-            docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile || true
+            docker exec shared-caddy caddy validate --config /etc/caddy/Caddyfile
+            docker exec shared-caddy caddy reload --config /etc/caddy/Caddyfile
             # Reclaim disk from prior releases. `docker image prune -f` only drops
             # dangling (untagged) layers — it leaves the previous version-tagged
             # image (e.g. api:v0.1.18, ~1.9GB) behind, which is what fills the disk
