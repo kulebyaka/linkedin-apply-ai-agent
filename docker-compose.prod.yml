@@ -30,6 +30,10 @@ services:
   api:
     image: ghcr.io/kulebyaka/linkedin-apply-ai-agent-api:__VERSION__
     container_name: linkedin-apply-api
+    # Cap memory so a leak/runaway Chromium OOMs only this container, not the
+    # whole 6 GB VPS (host OOM-killed uvicorn at 2.8 GB RSS on 2026-11-07).
+    mem_limit: 3g
+    memswap_limit: 4g
     restart: unless-stopped
     expose:
       - "8000"
