@@ -90,7 +90,7 @@ The production domain is `kuule.cc`, registered separately from the VPS provider
 | A     | `@`   | `37.114.41.69`  | 300 | Apex — anchors `www` CNAME, redirect target |
 | CNAME | `www` | `kuule.cc`      | 300 | Conventional alias to apex           |
 | A     | `app` | `37.114.41.69`  | 300 | UI (SvelteKit static via nginx)      |
-| A     | `api` | `37.114.41.69`  | 300 | API (FastAPI)                        |
+| —     | `api` | —              | —   | No DNS record; API is reached at `app.kuule.cc/api/*` |
 
 ### Verification
 
@@ -100,20 +100,19 @@ After changes, propagation typically takes 5–60 minutes. Confirm with:
 dig +short kuule.cc
 dig +short www.kuule.cc
 dig +short app.kuule.cc
-dig +short api.kuule.cc
 ```
 
-All four should resolve to `37.114.41.69` (the `www` CNAME resolves transitively through the apex A record).
+The apex, `www`, and `app` resolve to `37.114.41.69` (the `www` CNAME resolves through the apex A record).
 
 ### TLS / reverse proxy
 
-Live as of 2026-05-16. Caddy 2 (alpine) terminates TLS on `:443` and reverse-proxies same-origin: UI at `/`, API at `/api/*`. Let's Encrypt cert is auto-issued and renewed via HTTP-01 on `:80` (which Caddy also serves as a 308 redirect to HTTPS). Certs persist in the `caddy_data` named docker volume — back it up alongside `/opt/linkedin-apply/data/` or expect a re-issue on volume loss.
+The shared host Caddy under `/opt/caddy` owns ports 80/443 and imports `/opt/caddy/sites/*.caddy`. This repo owns only `/opt/caddy/sites/linkedin-apply.caddy`. The API joins the external `ingress` network as `linkedin-api`; the UI is served from the existing `linkedin-apply_ui_static` volume. The shared proxy reuses `linkedin-apply_caddy_data` and `linkedin-apply_caddy_config` so existing certificates survive the move. Back up certificate data alongside `/opt/linkedin-apply/data/` or expect a re-issue on volume loss.
 
 Active config:
 
 - VPS `.env` → `APP_URL=https://app.kuule.cc`, `CORS_ORIGINS=["https://app.kuule.cc"]`
 - UI build → `VITE_API_BASE_URL=""` (baked into the image), so the client uses relative `/api/*` URLs
-- Caddy config rendered from `Caddyfile` at deploy time using GH repo variables `APP_DOMAIN` and `ACME_EMAIL`
+- This repo's site file is rendered from `Caddyfile` at release time using `APP_DOMAIN`; the shared Caddy base config and ACME email are host-managed.
 
 ### VPS `.env` essentials
 
@@ -135,28 +134,32 @@ production:
 
 `./data` and `./logs` are bind-mounted into the container, so the SQLite DB, generated PDFs, the
 model-catalog cache, and the admin-alert cooldown state all persist across deploys under
-`/opt/linkedin-apply/data/`. Back that directory up alongside the `caddy_data` volume.
+`/opt/linkedin-apply/data/`. Back that directory up alongside the shared Caddy certificate volume.
 
 ## Stack layout on the VPS
 
 ```
 /opt/linkedin-apply/
 ├── docker-compose.yml   # rendered from docker-compose.prod.yml at each deploy
-├── Caddyfile            # rendered from repo template at each deploy
+├── Caddyfile            # saved pre-migration config; not used by releases
 ├── .env                 # hand-managed, chmod 600 — never written by CI
 ├── data/                # SQLite + generated PDFs (bind mount → /app/data)
 └── logs/                # API logs (bind mount → /app/logs)
-                         # caddy_data, caddy_config, ui_static live as named docker volumes
+                         # ui_static lives as a named docker volume
+
+/opt/caddy/compose.yaml                # shared proxy, owned by the host
+/opt/caddy/Caddyfile                   # imports sites/*.caddy
+/opt/caddy/sites/linkedin-apply.caddy # this repo's site file
 ```
 
-Services (all on the `linkedin-apply` docker network):
+Services (the API also joins the external `ingress` network):
 
 | Container | Image | Role |
 |---|---|---|
-| `linkedin-apply-caddy` | `caddy:2-alpine` | TLS + reverse proxy; only container exposed on host (`:80`, `:443`) |
+| `shared-caddy` | `caddy:2-alpine` | Host-level TLS and reverse proxy, managed under `/opt/caddy` |
 | `linkedin-apply-api` | `ghcr.io/kulebyaka/linkedin-apply-ai-agent-api:<tag>` | FastAPI, internal port `8000` only |
 | `linkedin-apply-ui-publisher` | `ghcr.io/kulebyaka/linkedin-apply-ai-agent-ui:<tag>` | One-shot: copies `/build` into the `ui_static` volume on each deploy |
-| `linkedin-apply-watchtower` | `containrrr/watchtower` | Label-scoped polling for `:latest` updates on api+caddy |
+| `linkedin-apply-watchtower` | `containrrr/watchtower` | Label-scoped polling for the API; shared Caddy is excluded |
 
 A separate host-wide watchtower already runs from `/home/admin/services/watchtower/` — our stack ships its own label-scoped watchtower (`WATCHTOWER_LABEL_ENABLE=true`) so the two do not conflict.
 
@@ -172,12 +175,12 @@ gh release create v0.1.1 --generate-notes
 gh workflow run release.yml --ref master -f tag=v0.1.0
 ```
 
-The workflow builds linux/amd64 images for both api and ui, pushes them to GHCR with `:<tag>` and `:latest`, scps the rendered `docker-compose.yml` + `Caddyfile`, then SSHes to the VPS and, in order:
+The workflow builds linux/amd64 images for both api and ui, pushes them to GHCR with `:<tag>` and `:latest`, copies the rendered compose and this app's Caddy site file, then SSHes to the VPS and, in order:
 
 1. Refreshes GHCR auth **best-effort** — persistent creds live in `/root/.docker/config.json` after the first successful login, so a missing or invalid `GHCR_PULL_TOKEN` doesn't fail the deploy.
 2. `docker compose pull`.
 3. **Deletes `data/model_catalog_cache.json`.** `load_catalog` serves a <24h disk cache verbatim without re-parsing, so a cache written by the outgoing image would mask this release's catalog/filter changes for up to 24 hours. Removing it forces a clean refetch on startup.
-4. `docker compose up -d --remove-orphans`, then `run --rm ui-publisher`, then a best-effort `caddy reload`.
+4. `docker compose up -d --remove-orphans`, then `run --rm ui-publisher`, then validates and reloads shared Caddy. A failed validation or reload fails the release.
 5. **Prunes old release images.** `docker image prune -f` alone only drops dangling layers and leaves the previous version-tagged image (~1.9 GB each) behind — which is what fills the 45 GB disk over successive releases. The step explicitly `docker rmi`s every tag of *our two* images except the just-deployed tag and `:latest`, scoped so other projects sharing the box are untouched, and only then runs `image prune -f`.
 
 Watchtower is a safety net only — UI artifact refresh requires the publisher step, which only the workflow runs.
@@ -190,8 +193,8 @@ ssh vps   # or: ssh -i ~/.ssh/id_ed25519_vps root@37.114.41.69
 cd /opt/linkedin-apply
 docker compose ps                          # service status
 docker compose logs -f api                 # tail API logs
-docker compose logs -f caddy               # cert renewal + access logs
-docker exec linkedin-apply-caddy caddy list-certificates   # cert expiry
+docker compose -f /opt/caddy/compose.yaml logs -f caddy  # certs + access logs
+docker exec shared-caddy caddy list-certificates         # cert expiry
 
 # Rollback to a previous image tag (edit the two `__VERSION__`-pinned image lines)
 sed -i 's|api:v0.1.1|api:v0.1.0|; s|ui:v0.1.1|ui:v0.1.0|' docker-compose.yml
@@ -207,4 +210,4 @@ docker compose pull && docker compose up -d && docker compose run --rm ui-publis
 | secret | `VPS_SSH_KEY` | Contents of `~/.ssh/id_ed25519_vps` |
 | secret | `GHCR_PULL_TOKEN` | Classic PAT with `read:packages` for `kulebyaka` — VPS `docker login` to GHCR |
 | variable | `APP_DOMAIN` | `app.kuule.cc` |
-| variable | `ACME_EMAIL` | Maintainer email for Let's Encrypt registration |
+The shared Caddy ACME email is set in `/opt/caddy/Caddyfile`, not by this repo's releases.
