@@ -149,6 +149,61 @@ class TestRunSearch:
         assert call_args.keywords == "python"
         assert call_args.location == "San Francisco"
 
+    async def test_cancel_running_search_closes_browser_and_records_status(self):
+        scheduler, _, scraper, queue = _make_scheduler()
+        started = asyncio.Event()
+
+        async def slow_scrape(_params):
+            started.set()
+            await asyncio.Event().wait()
+
+        scraper.scrape_and_enrich = AsyncMock(side_effect=slow_scrape)
+        scraper.browser.close = AsyncMock()
+        task = asyncio.create_task(scheduler.run_search("default-user"))
+        await started.wait()
+
+        assert scheduler.search_in_progress_for("default-user")
+        assert scheduler.get_jobs_state()[0]["in_progress"] is True
+        assert await scheduler.cancel_search("default-user") is True
+        assert await task == 0
+        assert await scheduler.cancel_search("default-user") is False
+        assert not scheduler.search_in_progress_for("default-user")
+        assert queue.is_empty()
+        scraper.browser.close.assert_awaited_once()
+        assert scheduler.get_last_run_for_user("default-user").reason == "cancelled"
+        assert scheduler.get_run_history()[0]["status"] == "cancelled"
+
+    async def test_cancel_one_user_keeps_scheduled_cycle_running(self):
+        users = [
+            _user("user-a", prefs=UserSearchPreferences(keywords="a")),
+            _user("user-b", prefs=UserSearchPreferences(keywords="b")),
+        ]
+        repo = MagicMock()
+        repo.get_all_with_search_prefs = AsyncMock(return_value=users)
+        scheduler, _, scraper, queue = _make_scheduler(user_repository=repo)
+        first_started = asyncio.Event()
+
+        async def scrape(params):
+            if params.keywords == "a":
+                first_started.set()
+                await asyncio.Event().wait()
+            return [_job("b-job")]
+
+        scraper.scrape_and_enrich = AsyncMock(side_effect=scrape)
+        scraper.browser.close = AsyncMock()
+        scraper.browser.initialize = AsyncMock()
+        scraper.browser.is_alive.side_effect = [True, False]
+        cycle = asyncio.create_task(scheduler.run_search())
+        await first_started.wait()
+
+        assert await scheduler.cancel_search("user-a") is True
+        assert await cycle == 1
+        assert queue.size() == 1
+        assert scheduler.get_last_run_for_user("user-a").reason == "cancelled"
+        assert scheduler.get_last_run_for_user("user-b").reason == "ok"
+        scraper.browser.close.assert_awaited_once()
+        scraper.browser.initialize.assert_awaited_once()
+
 
 # ---------------------------------------------------------------------------
 # Run metrics: enqueued / deduped split + run history
@@ -704,3 +759,19 @@ class TestLinkedInSearchAPI:
             assert data["message"] == "LinkedIn search triggered"
         finally:
             ctx.scheduler = original
+
+    def test_trigger_keeps_scheduler_after_browser_closed_by_cancel(self, client):
+        test_client, ctx = client
+        scheduler = MagicMock()
+        scheduler.run_search = AsyncMock(return_value=0)
+        browser = MagicMock()
+        browser.is_alive.return_value = False
+        browser.close = AsyncMock()
+        ctx.scheduler = scheduler
+        ctx.browser = browser
+
+        response = test_client.post("/api/jobs/linkedin-search")
+
+        assert response.status_code == 200
+        assert ctx.scheduler is scheduler
+        browser.close.assert_not_awaited()

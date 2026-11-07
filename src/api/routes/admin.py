@@ -315,6 +315,23 @@ async def admin_run_scheduler(
     return {"status": "started", "user_id": user_id}
 
 
+@router.post("/api/admin/scheduler/stop/{user_id}")
+async def admin_stop_scheduler(
+    user_id: str, request: Request, admin: AdminUser
+) -> dict:
+    """Cancel one user's running LinkedIn search, if there is one."""
+    ctx = get_ctx(request)
+    if ctx.scheduler is None:
+        raise HTTPException(503, "Scheduler not initialized")
+    if ctx.user_repository is None:
+        raise HTTPException(500, "User repository not initialized")
+    if await ctx.user_repository.get_by_id(user_id) is None:
+        raise HTTPException(404, f"User {user_id} not found")
+
+    stopped = await ctx.scheduler.cancel_search(user_id)
+    return {"status": "cancelled" if stopped else "not_running", "user_id": user_id}
+
+
 @router.post("/api/admin/scheduler/refine/{user_id}")
 async def admin_run_refinement(
     user_id: str, request: Request, admin: AdminUser

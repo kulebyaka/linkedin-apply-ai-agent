@@ -185,6 +185,7 @@ def mock_ctx():
         ("post", "/api/admin/jobs/bulk-delete", {"job_ids": ["a"]}),
         ("get", "/api/admin/queue", None),
         ("post", "/api/admin/scheduler/run/user-1", None),
+        ("post", "/api/admin/scheduler/stop/user-1", None),
         ("get", "/api/admin/errors", None),
         ("get", "/api/admin/users", None),
         ("put", "/api/admin/users/user-1/role", {"role": "admin"}),
@@ -429,6 +430,29 @@ class TestAdminRunScheduler:
         with _patched_client(admin_user, mock_ctx) as client:
             resp = client.post("/api/admin/scheduler/run/user-2")
         assert resp.status_code == 409
+
+
+class TestAdminStopScheduler:
+    def test_cancel_and_idempotent_noop(self, admin_user, mock_ctx):
+        scheduler = MagicMock()
+        scheduler.cancel_search = AsyncMock(side_effect=[True, False])
+        mock_ctx.scheduler = scheduler
+        mock_ctx.user_repository.get_by_id.return_value = _make_user(
+            UserRole.TRIAL, user_id="user-1"
+        )
+        with _patched_client(admin_user, mock_ctx) as client:
+            first = client.post("/api/admin/scheduler/stop/user-1")
+            second = client.post("/api/admin/scheduler/stop/user-1")
+        assert first.status_code == second.status_code == 200
+        assert first.json() == {"status": "cancelled", "user_id": "user-1"}
+        assert second.json() == {"status": "not_running", "user_id": "user-1"}
+        assert scheduler.cancel_search.await_count == 2
+
+    def test_404_for_unknown_user(self, admin_user, mock_ctx):
+        mock_ctx.scheduler = MagicMock()
+        with _patched_client(admin_user, mock_ctx) as client:
+            resp = client.post("/api/admin/scheduler/stop/missing")
+        assert resp.status_code == 404
 
 
 # ---------------------------------------------------------------------------

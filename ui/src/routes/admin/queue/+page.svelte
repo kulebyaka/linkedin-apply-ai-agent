@@ -3,6 +3,7 @@
 	import {
 		getQueueState,
 		runScheduler,
+		stopScheduler,
 		listUsers,
 		type QueueStateResponse,
 		type SchedulerJobState,
@@ -18,6 +19,8 @@
 	let initialLoadDone = $state(false);
 	let lastUpdatedAt = $state<number | null>(null);
 	let runningUserIds = $state<Set<string>>(new Set());
+	let stoppingUserId = $state<string | null>(null);
+	let confirmStopUserId = $state<string | null>(null);
 	let toast = $state<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -73,6 +76,25 @@
 		}
 	}
 
+	async function handleStop() {
+		if (!confirmStopUserId) return;
+		const userId = confirmStopUserId;
+		confirmStopUserId = null;
+		stoppingUserId = userId;
+		try {
+			const result = await stopScheduler(userId);
+			showToast(result.status === 'cancelled'
+				? `Search stopped for ${userEmail(userId)}`
+				: `No search is running for ${userEmail(userId)}`, 'success');
+			await fetchState({ silent: true });
+		} catch (err) {
+			showToast(err instanceof Error ? err.message : 'Stop failed', 'error');
+			await fetchState({ silent: true });
+		} finally {
+			stoppingUserId = null;
+		}
+	}
+
 	function userEmail(userId: string): string {
 		return userEmailById[userId] ?? userId.slice(0, 8);
 	}
@@ -110,6 +132,7 @@
 		if (lower === 'ok' || lower === 'success') return `${base} bg-emerald-200 text-emerald-900`;
 		if (lower === 'error' || lower === 'failed') return `${base} bg-red-200 text-red-900`;
 		if (lower === 'running' || lower === 'pending') return `${base} bg-blue-100 text-blue-900`;
+		if (lower === 'cancelled') return `${base} bg-amber-100 text-amber-900`;
 		return `${base} bg-white`;
 	}
 
@@ -344,21 +367,31 @@
 										{formatRelative(row.next_run_at)}
 									</td>
 									<td class="px-3 py-2">
-										<span class={lastStatusBadgeClass(row.last_status)}>{row.last_status ?? '—'}</span>
+										<span class={lastStatusBadgeClass(row.in_progress ? 'running' : row.last_status)}>{row.in_progress ? 'running' : (row.last_status ?? '—')}</span>
 									</td>
 									<td class="px-3 py-2 text-center font-mono text-xs whitespace-nowrap">
 										<span class="font-bold text-emerald-700">{row.enqueued ?? 0}</span>
 										<span class="text-[var(--color-muted-foreground)]"> · {row.deduped ?? 0} · {row.jobs_found ?? 0}</span>
 									</td>
-									<td class="px-3 py-2 text-right">
+									<td class="px-3 py-2 text-right whitespace-nowrap">
 										<button
 											type="button"
 											onclick={() => handleRunNow(row.user_id)}
-											disabled={runningUserIds.has(row.user_id)}
+											disabled={runningUserIds.has(row.user_id) || row.in_progress}
 											class="font-mono border-2 border-[var(--color-foreground)] bg-[var(--color-primary)] px-2 py-1 text-[10px] uppercase tracking-wider text-[var(--color-primary-foreground)] hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
 										>
-											{runningUserIds.has(row.user_id) ? 'Running…' : 'Run now'}
+											{runningUserIds.has(row.user_id) || row.in_progress ? 'Running…' : 'Run now'}
 										</button>
+										{#if row.in_progress}
+											<button
+												type="button"
+												onclick={() => confirmStopUserId = row.user_id}
+												disabled={stoppingUserId === row.user_id}
+												class="ml-2 font-mono border-2 border-[var(--color-foreground)] bg-red-200 px-2 py-1 text-[10px] uppercase tracking-wider hover:bg-red-300 disabled:cursor-not-allowed disabled:opacity-50"
+											>
+												{stoppingUserId === row.user_id ? 'Stopping…' : 'Stop'}
+											</button>
+										{/if}
 									</td>
 								</tr>
 							{/each}
@@ -435,6 +468,19 @@
 		</section>
 	{/if}
 </div>
+
+{#if confirmStopUserId}
+	<div class="fixed inset-0 z-40 flex items-center justify-center bg-black/40" role="dialog" aria-modal="true" aria-label="Confirm stop search">
+		<div class="w-full max-w-md border-4 border-[var(--color-foreground)] bg-white p-6 shadow-brutal">
+			<h2 class="font-heading mb-2 text-lg tracking-tight">Stop running search?</h2>
+			<p class="font-mono mb-4 text-xs">Stop the LinkedIn search for <strong>{userEmail(confirmStopUserId)}</strong>? Jobs already queued will continue processing.</p>
+			<div class="flex justify-end gap-2">
+				<button type="button" onclick={() => confirmStopUserId = null} class="font-mono border-2 border-[var(--color-foreground)] bg-white px-3 py-1.5 text-xs uppercase">Cancel</button>
+				<button type="button" onclick={handleStop} class="font-mono border-2 border-[var(--color-foreground)] bg-red-200 px-3 py-1.5 text-xs uppercase hover:bg-red-300">Stop search</button>
+			</div>
+		</div>
+	</div>
+{/if}
 
 {#if toast}
 	<ToastNotification message={toast.message} type={toast.type} onClose={clearToast} />
